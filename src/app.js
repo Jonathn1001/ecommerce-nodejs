@@ -2,7 +2,14 @@ const compression = require("compression");
 const express = require("express");
 const { default: helmet } = require("helmet");
 const morgan = require("morgan");
-require("dotenv").config();
+const path = require("path");
+const dotenv = require("dotenv");
+
+dotenv.config({
+  // path: path.join(__dirname, `./.env.${process.env.NODE_ENV}`),
+  path: `./.env.${process.env.NODE_ENV}`,
+});
+console.log(path.join(__dirname, `./.env.${process.env.NODE_ENV}`));
 
 const app = express();
 
@@ -12,6 +19,9 @@ app.use(helmet());
 app.use(compression());
 
 // Init DB
+require("./dbs/init.mongodb");
+const { overloadChecker } = require("./helpers/check.connect");
+overloadChecker();
 
 // Define Routes
 app.get("/", (req, res) => {
