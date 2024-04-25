@@ -1,7 +1,7 @@
 "use strict";
 const shopModel = require("../models/shop.model");
 const bcrypt = require("bcrypt");
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 const { ShopRoles } = require("../constants/index");
 const KeyTokenService = require("./keyToken.service");
 const { createTokenPair } = require("../auth/authUtils");
@@ -13,7 +13,11 @@ class AccessService {
       // ? Step 1. Check if the email is already registered
       const shopHolder = await shopModel.findOne({ email }).lean(); // return an JS object, reduce the size of the object
       if (shopHolder) {
-        return new AppError("Shop with given email already exist!", 400);
+        return {
+          code: "400",
+          message: "Error",
+          error: "Email already registered",
+        };
       }
       // ? Step 2. Hash the password and Create a new shop
       const passwordHash = await bcrypt.hash(password, 10);
@@ -23,40 +27,43 @@ class AccessService {
         password: passwordHash,
         roles: [ShopRoles.SHOP_OWNER],
       });
+      console.log("newShop: ", newShop);
       if (newShop) {
         // ? Create privateKey and publicKey
-        const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
-          modulusLength: 4096,
-          publicKeyEncoding: {
-            type: "pkcs1",
-            format: "pem",
-          },
-          privateKeyEncoding: {
-            type: "pkcs1",
-            format: "pem",
-          },
-        });
-
+        // const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
+        //   modulusLength: 4096,
+        //   publicKeyEncoding: {
+        //     type: "pkcs1",
+        //     format: "pem",
+        //   },
+        //   privateKeyEncoding: {
+        //     type: "pkcs1",
+        //     format: "pem",
+        //   },
+        // });
+        const privateKey = crypto.randomBytes(64).toString("hex");
+        const publicKey = crypto.randomBytes(64).toString("hex");
         console.log(privateKey, publicKey);
 
-        const publicKeyString = await KeyTokenService.createKeyToken({
+        const keyStore = await KeyTokenService.createKeyToken({
           userId: newShop._id,
           publicKey,
+          privateKey,
         });
 
-        if (!publicKeyString) {
+        if (!keyStore) {
           return {
             code: "500",
             message: "Error",
-            error: "Error while creating publicKey",
+            error: "Error while creating keys",
           };
         }
 
-        const publicKeyObject = crypto.createPublicKey(publicKeyString);
+        // const publicKeyObject = crypto.createPublicKey(publicKeyString);
 
         const tokens = await createTokenPair(
           { userId: newShop._id, email },
-          publicKeyObject,
+          publicKey,
           privateKey
         );
 
