@@ -3,6 +3,7 @@
 const dev = {
   app: {
     port: process.env.DEV_APP_PORT,
+    api_version: process.env.DEV_API_VERSION,
   },
   db: {
     host: process.env.DEV_DB_HOST,
@@ -14,6 +15,7 @@ const dev = {
 const prod = {
   app: {
     port: process.env.PROD_APP_PORT,
+    api_version: process.env.PROD_API_VERSION,
   },
   db: {
     host: process.env.PROD_DB_HOST,
@@ -24,7 +26,5 @@ const prod = {
 
 const config = { dev, prod };
 const env = process.env.NODE_ENV || "dev";
-
-console.log(config[env], env);
 
 module.exports = config[env];

@@ -8,6 +8,7 @@ const {
 } = require("../configs/config.mongodb");
 const connectString = `mongodb://${host}:${port}/${name}`;
 
+console.log("connectString", connectString);
 class Database {
   constructor() {
     this.connect();
@@ -21,7 +22,10 @@ class Database {
     }
     mongoose
       .connect(connectString)
-      .then((_) => console.log("DB connected successfully", connectCounter()))
+      .then((_) => {
+        console.log("DB connected successfully");
+        connectCounter();
+      })
       .catch((err) => console.log(`DB connection failed with error: ${err}`));
   }
 

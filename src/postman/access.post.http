@@ -1,0 +1,14 @@
+@url=http://localhost:5000
+
+### default view
+GET {{url}}
+
+### Sign up
+POST {{url}}/api/v1/auth/sign-up
+Content-Type: application/json
+
+{
+    "name": "Shop Skills",
+    "email": "shopskills@gmail.com",
+    "password": "123@abcD"
+}
