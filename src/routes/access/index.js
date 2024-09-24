@@ -3,7 +3,18 @@
 const express = require("express");
 const router = express.Router();
 const accessController = require("../../controller/access.controller");
+const {
+  apiKey,
+  permissions,
+  authentication,
+} = require("../../auth//checkAuth");
 
-router.post("/sign-up", accessController.signUp);
+router.use(apiKey);
+router.post("/sign-up", permissions, accessController.signUp);
+router.post("/login", accessController.login);
+
+router.use(authentication);
+router.post("/logout", accessController.logout);
+router.post("/refresh-token", accessController.handleRefreshToken);
 
 module.exports = router;

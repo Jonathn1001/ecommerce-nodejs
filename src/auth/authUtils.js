@@ -14,7 +14,6 @@ const createTokenPair = (payload, publicKey, privateKey) => {
 
     jwt.verify(accessToken, publicKey, (err, decoded) => {
       if (err) console.log("token verify error: ", err);
-      console.log("token decoded: ", decoded);
     });
 
     return {
@@ -26,6 +25,11 @@ const createTokenPair = (payload, publicKey, privateKey) => {
   }
 };
 
+const verifyJWT = (token, keySecret) => {
+  return jwt.verify(token, keySecret);
+};
+
 module.exports = {
   createTokenPair,
+  verifyJWT,
 };

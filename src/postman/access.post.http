@@ -5,10 +5,22 @@ GET {{url}}
 
 ### Sign up
 POST {{url}}/api/v1/auth/sign-up
+x-api-key: 5a044b33fa8fc1a0c48092d2ca8ab3014edeb3e4a29cff2fc2f85a7f75f3ed30f337982d49d23dbbc9b457467605143b4c63ff990a5de766b801a0aec8a70e06
 Content-Type: application/json
 
 {
     "name": "Shop Skills",
-    "email": "shop01skills@gmail.com",
+    "email": "shopskills@gmail.com",
     "password": "123@abcD"
 }
+
+### Login
+POST {{url}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+    "email": "shopskills@gmail.com",
+    "password": "123@abcD"
+}
+### Logout
+POST {{url}}/api/v1/auth/logout

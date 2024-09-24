@@ -4,6 +4,7 @@ const { default: helmet } = require("helmet");
 const morgan = require("morgan");
 
 const routes = require("./routes");
+const globalErrorHandler = require("./controller/error.controller");
 
 const app = express();
 
@@ -21,5 +22,7 @@ require("./dbs/init.mongodb");
 
 // Define Routes
 routes(app);
+
+app.use(globalErrorHandler);
 
 module.exports = app;
