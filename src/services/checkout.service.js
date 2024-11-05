@@ -1,13 +1,16 @@
 "use strict";
 
 const { findCartById } = require("../models/repositories/cart.repo");
+const { createOrder } = require("../models/repositories/order.repo");
 const {
   getValidCheckoutProducts,
 } = require("../models/repositories/product.repo");
-const { NotFoundError } = require("../utils/AppError");
+const { NotFoundError, BadRequestError } = require("../utils/AppError");
 const { getDiscountAmount } = require("./discount.service");
+const { acquireLock, releaseLock } = require("./redis.service");
 
 class CheckoutService {
+  // ? This function is used to preview the checkout order
   static async checkoutPreview({ cart_id, user_id, shop_order_ids }) {
     const foundCart = await findCartById(cart_id);
     if (!foundCart) throw new NotFoundError("Cart does not exist");
@@ -59,6 +62,56 @@ class CheckoutService {
     );
     return { shop_order_ids, shop_order_ids_new, checkout_order };
   }
+  // ? This function is used to place the order
+  static async placeOrder({
+    cart_id,
+    user_id,
+    shop_order_ids,
+    user_address = {},
+    user_payment = {},
+  }) {
+    const { checkout_order, shop_order_ids_new } = await this.checkoutPreview({
+      cart_id,
+      user_id,
+      shop_order_ids,
+    });
+    // ? Check if the quantity of the product is still available
+    const products = shop_order_ids_new.flatMap(
+      (shop_order) => shop_order.item_products
+    );
+    console.log("products::", products);
+    const acquireProducts = [];
+    for (const product of products) {
+      const { product_id, quantity } = product;
+      const keyLock = await acquireLock(product_id, quantity, cart_id);
+      acquireProducts.push(Boolean(keyLock));
+      if (keyLock) await releaseLock(keyLock);
+    }
+    // ? If one of the products is not available, then return false
+    if (acquireProducts.includes(false)) {
+      throw new BadRequestError(
+        "Some products are not available, Please back to cart and try again"
+      );
+    }
+    // ? If all products are available, then proceed to place the order
+    const newOrder = createOrder({
+      order_user_id: user_id,
+      order_checkout: checkout_order,
+      order_shipping: user_address,
+      order_payment: user_payment,
+      order_products: products,
+    });
+    // ? If create the order is successful, remove products from the cart
+    if (newOrder) {
+    }
+    return newOrder;
+  }
+  // ? This function is used to get all orders by user
+  static async getAllOrdersByUser({ user_id }) {}
+  // ? This function is used to get the order details by user
+  static async getOrderDetailsByUser({ user_id }) {}
+  // ? This function is used to update order status by Shop||Admin
+  static async updateOrderStatus({ order_id, status }) {}
 }
 
 module.exports = CheckoutService;

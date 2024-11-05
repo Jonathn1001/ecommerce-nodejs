@@ -12,6 +12,8 @@ const {
   getProductDetails,
 } = require("./../models/repositories/product.repo");
 const { insertInventory } = require("./../models/repositories/inventory.repo");
+const { pushNotification } = require("./notification.service");
+const { NOTIFICATION_TYPES } = require("../constants");
 
 // ? define factory class to create product
 class ProductFactory {
@@ -36,6 +38,20 @@ class ProductFactory {
         shop_id: newProduct.product_shop,
         stock: newProduct.product_quantity,
       });
+      pushNotification({
+        type: NOTIFICATION_TYPES.PROMOTION_CREATED,
+        sender: newProduct.product_shop,
+        receiver: newProduct.product_shop,
+        options: {
+          product_name: newProduct.product_name,
+        },
+      })
+        .then((notification) => {
+          console.log("Notification", notification);
+        })
+        .catch((err) => {
+          console.log("Error in creating notification", err);
+        });
     }
     return newProduct;
   }
