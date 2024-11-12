@@ -6,4 +6,4 @@ sudo service mongod restart
 
 # Khoa phan tan duoc su dung de dam bao tai nguyen duoc truy cap boi duy nhat mot nguoi trong mot thoi diem.
 
-docker run -it --name mdb -v /var/lib/mongodb/:/data/db -d mongo
+docker run --name mdb -v /var/lib/mongodb/:/data/db -p 27017:27017 -d mongo
