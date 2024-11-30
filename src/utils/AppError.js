@@ -32,19 +32,16 @@ class AuthenticationError extends AppError {
 }
 
 class ForbiddenError extends AppError {
-  constructor(
-    message = Reasons.FORBIDDEN,
-    statusCodes = StatusCodes.FORBIDDEN
-  ) {
-    super(message, statusCodes);
+  constructor(message = Reasons.FORBIDDEN, statusCode = StatusCodes.FORBIDDEN) {
+    super(message, statusCode);
   }
 }
 class BadRequestError extends AppError {
   constructor(
     message = Reasons.BAD_REQUEST,
-    statusCodes = StatusCodes.BAD_REQUEST
+    statusCode = StatusCodes.BAD_REQUEST
   ) {
-    super(message, statusCodes);
+    super(message, statusCode);
   }
 }
 module.exports = {
