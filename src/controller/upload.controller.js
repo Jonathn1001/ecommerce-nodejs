@@ -41,7 +41,7 @@ class UploadController {
       }).send(res);
 
     return new SuccessResponse({
-      message: "Upload multiple images successfully",
+      message: "Upload multiple successfully",
       metadata: await UploadService.uploadMultipleImagesFromLocal({
         files,
       }),
