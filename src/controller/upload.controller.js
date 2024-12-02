@@ -24,7 +24,7 @@ class UploadController {
       }).send(res);
 
     return new SuccessResponse({
-      message: "Upload image successfully",
+      message: "Upload thumbnail successfully",
       metadata: await UploadService.uploadImageFromLocal({
         path: file.path,
         name: file.originalname,
