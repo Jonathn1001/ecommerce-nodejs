@@ -1,6 +1,10 @@
 "use strict";
 
-const { S3Client } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} = require("@aws-sdk/client-s3");
 
 const { AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY } = process.env;
 
@@ -12,4 +16,8 @@ const s3Client = new S3Client({
   },
 });
 
-module.exports = s3Client;
+module.exports = {
+  s3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+};

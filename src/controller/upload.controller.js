@@ -1,16 +1,34 @@
 "use strict";
 
-const UploadService = require("../services/upload.service");
+const S3UploadService = require("../services/s3.upload.service");
+const CloudinaryUploadService = require("../services/cloudinary.upload.service");
 const { catchAsync } = require("../helpers");
 const { SuccessResponse } = require("../utils/SuccessResponse");
 const { BadRequestError } = require("../utils/AppError");
 
 class UploadController {
+  // ~ ---------------- [ S3 Upload ] ------------------------
+  // TODO: Upload Single File From Local
+  uploadToS3FromLocal = catchAsync(async (req, res) => {
+    const { file } = req;
+    if (!file)
+      throw new BadRequestError({
+        message: "Please select a file to upload",
+        statusCode: 400,
+      }).send(res);
+
+    return new SuccessResponse({
+      message: "Upload image to S3 successfully",
+      metadata: await S3UploadService.uploadImageFromLocal({ file }),
+    }).send(res);
+  });
+
+  // ~ ---------------- [ Cloudinary Upload ] ------------------------
   //TODO:Upload Image
   uploadImage = catchAsync(async (req, res) => {
     return new SuccessResponse({
       message: "Upload image successfully",
-      metadata: await UploadService.uploadImageFromURL(req.body),
+      metadata: await CloudinaryUploadService.uploadImageFromURL(req.body),
     }).send(res);
   });
 
@@ -25,7 +43,7 @@ class UploadController {
 
     return new SuccessResponse({
       message: "Upload thumbnail successfully",
-      metadata: await UploadService.uploadImageFromLocal({
+      metadata: await CloudinaryUploadService.uploadImageFromLocal({
         path: file.path,
         name: file.originalname,
       }),
@@ -42,7 +60,7 @@ class UploadController {
 
     return new SuccessResponse({
       message: "Upload multiple successfully",
-      metadata: await UploadService.uploadMultipleImagesFromLocal({
+      metadata: await CloudinaryUploadService.uploadMultipleImagesFromLocal({
         files,
       }),
     }).send(res);
