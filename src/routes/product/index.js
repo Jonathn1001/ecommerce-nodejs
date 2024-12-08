@@ -8,7 +8,7 @@ const router = express.Router();
 router.use(apiKey);
 router.use(authentication);
 router.post("/create", productController.createProduct);
-router.patch("/update/:product_id", productController.updateProduct);
+router.patch("/update/: ", productController.updateProduct);
 router.put("/publish/:product_id", productController.publishProduct);
 router.put("/unpublish/:product_id", productController.unpublishProduct);
 
