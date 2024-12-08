@@ -16,6 +16,9 @@ const notificationRouter = require("./notification");
 const uploadRouter = require("./upload");
 
 const routes = (app) => {
+  app.get("/document", (req, res) => {
+    res.send("Check API Documentation for more information");
+  });
   app.use(`/${api_version}/auth`, accessRouter);
   app.use(`/${api_version}/product`, productRouter);
   app.use(`/${api_version}/discount`, discountRouter);
