@@ -28,7 +28,7 @@ jobs:
         cache: 'npm'
     - name: Create .env file
       run: |
-        touch .env
+        touch .env.ci
         echo CI_APP_PORT = ${{ secrets.CI_APP_PORT }} >> .env
         echo CI_DB_HOST = ${{ secrets.CI_DB_HOST }} >> .env
         echo CI_DB_PORT = ${{ secrets.CI_DB_PORT }} >> .env
