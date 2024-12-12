@@ -29,15 +29,15 @@ jobs:
     - name: Create .env file
       run: |
         touch .env.ci
-        echo CI_APP_PORT = ${{ secrets.CI_APP_PORT }} >> .env
-        echo CI_DB_HOST = ${{ secrets.CI_DB_HOST }} >> .env
-        echo CI_DB_PORT = ${{ secrets.CI_DB_PORT }} >> .env
-        echo CI_DB_NAME = ${{ secrets.CI_DB_NAME }} >> .env
-        echo CI_API_VERSION = ${{ secrets.CI_API_VERSION }} >> .env
-        echo MYSQL_DB_HOST = ${{ secrets.MYSQL_DB_HOST }} >> .env
-        echo MYSQL_USER = ${{ secrets.MYSQL_USER }} >> .env
-        echo MYSQL_PASSWORD = ${{ secrets.MYSQL_PASSWORD }} >> .env
-        echo MYSQL_DATABASE = ${{ secrets.MYSQL_DATABASE }} >> .env
+        echo CI_APP_PORT = ${{ secrets.CI_APP_PORT }} >> .env.ci
+        echo CI_DB_HOST = ${{ secrets.CI_DB_HOST }} >> .env.ci
+        echo CI_DB_PORT = ${{ secrets.CI_DB_PORT }} >> .env.ci
+        echo CI_DB_NAME = ${{ secrets.CI_DB_NAME }} >> .env.ci
+        echo CI_API_VERSION = ${{ secrets.CI_API_VERSION }} >> .env.ci
+        echo MYSQL_DB_HOST = ${{ secrets.MYSQL_DB_HOST }} >> .env.ci
+        echo MYSQL_USER = ${{ secrets.MYSQL_USER }} >> .env.ci
+        echo MYSQL_PASSWORD = ${{ secrets.MYSQL_PASSWORD }} >> .env.ci
+        echo MYSQL_DATABASE = ${{ secrets.MYSQL_DATABASE }} >> .env.ci
         cat .env
     - run: npm ci 
     - run: npm run ci
