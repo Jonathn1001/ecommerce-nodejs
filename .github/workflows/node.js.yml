@@ -39,10 +39,5 @@ jobs:
         echo MYSQL_PASSWORD = ${{ secrets.MYSQL_PASSWORD }} >> .env
         echo MYSQL_DATABASE = ${{ secrets.MYSQL_DATABASE }} >> .env
     - run: npm ci 
-    - run: |
-        npm run ci
-        touch .env
-        cat ${{ secrets.DOTENV_KEY }} > .env
-      env:
-        DOTENV_KEY: ${{ secrets.DOTENV_KEY }}
+    - run: npm run ci
      
