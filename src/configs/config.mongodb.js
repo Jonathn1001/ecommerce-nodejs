@@ -12,19 +12,19 @@ const dev = {
   },
 };
 
-const prod = {
+const ci = {
   app: {
-    port: process.env.PROD_APP_PORT,
-    api_version: process.env.PROD_API_VERSION,
+    port: process.env.CI_APP_PORT,
+    api_version: process.env.CI_API_VERSION,
   },
   db: {
-    host: process.env.PROD_DB_HOST,
-    port: process.env.PROD_DB_PORT,
-    name: process.env.PROD_DB_NAME,
+    host: process.env.CI_DB_HOST,
+    port: process.env.CI_DB_PORT,
+    name: process.env.CI_DB_NAME,
   },
 };
 
-const config = { dev, prod };
+const config = { dev, ci };
 const env = process.env.NODE_ENV || "dev";
 
 module.exports = config[env];
