@@ -29,5 +29,5 @@ jobs:
     - run: npm ci
       env:
         DOTENV_KEY: ${{ secrets.DOTENV_KEY }}
-    - run: NODE_ENV=dev pm2 restart backend-ecommerce --update-env
+    - run: npm run ci
      
