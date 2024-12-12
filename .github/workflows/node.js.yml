@@ -38,6 +38,7 @@ jobs:
         echo MYSQL_USER = ${{ secrets.MYSQL_USER }} >> .env
         echo MYSQL_PASSWORD = ${{ secrets.MYSQL_PASSWORD }} >> .env
         echo MYSQL_DATABASE = ${{ secrets.MYSQL_DATABASE }} >> .env
+        cat .env
     - run: npm ci 
     - run: npm run ci
      
