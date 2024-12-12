@@ -27,6 +27,6 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
-    - run: NODE_ENV=ci pm2 start server.js --name backend-ecommerce
+    - run: NODE_ENV=ci node --watch server.js 
       env:
           DOTENV_KEY: ${{ secrets.DOTENV_KEY }}
