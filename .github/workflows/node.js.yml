@@ -27,17 +27,17 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - name: Create .env file
-        run: |
-          touch .env
-          echo CI_APP_PORT = ${{ secrets.CI_APP_PORT }} >> .env
-          echo CI_DB_HOST = ${{ secrets.CI_DB_HOST }} >> .env
-          echo CI_DB_PORT = ${{ secrets.CI_DB_PORT }} >> .env
-          echo CI_DB_NAME = ${{ secrets.CI_DB_NAME }} >> .env
-          echo CI_API_VERSION = ${{ secrets.CI_API_VERSION }} >> .env
-          echo MYSQL_DB_HOST = ${{ secrets.MYSQL_DB_HOST }} >> .env
-          echo MYSQL_USER = ${{ secrets.MYSQL_USER }} >> .env
-          echo MYSQL_PASSWORD = ${{ secrets.MYSQL_PASSWORD }} >> .env
-          echo MYSQL_DATABASE = ${{ secrets.MYSQL_DATABASE }} >> .env
+      run: |
+        touch .env
+        echo CI_APP_PORT = ${{ secrets.CI_APP_PORT }} >> .env
+        echo CI_DB_HOST = ${{ secrets.CI_DB_HOST }} >> .env
+        echo CI_DB_PORT = ${{ secrets.CI_DB_PORT }} >> .env
+        echo CI_DB_NAME = ${{ secrets.CI_DB_NAME }} >> .env
+        echo CI_API_VERSION = ${{ secrets.CI_API_VERSION }} >> .env
+        echo MYSQL_DB_HOST = ${{ secrets.MYSQL_DB_HOST }} >> .env
+        echo MYSQL_USER = ${{ secrets.MYSQL_USER }} >> .env
+        echo MYSQL_PASSWORD = ${{ secrets.MYSQL_PASSWORD }} >> .env
+        echo MYSQL_DATABASE = ${{ secrets.MYSQL_DATABASE }} >> .env
     - run: npm ci 
     - run: |
         npm run ci
