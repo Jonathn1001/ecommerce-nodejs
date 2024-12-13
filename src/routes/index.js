@@ -22,6 +22,14 @@ const routes = (app) => {
       version: api_version,
     });
   });
+  app.get(`/${api_version}/status`, (req, res) => {  
+    res.send({
+      message: "API is up and running",
+      status: "OK",
+      code:200
+    });
+  });
+  app.get(`/${api_version}/`, (req, res) => { res.send({ message: "Welcome to the API" }); });
   app.use(`/${api_version}/auth`, accessRouter);
   app.use(`/${api_version}/product`, productRouter);
   app.use(`/${api_version}/discount`, discountRouter);
