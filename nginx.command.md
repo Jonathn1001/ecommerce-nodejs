@@ -48,3 +48,9 @@ sudo certbot --nginx -d shopdev.anonystick.com
 sudo certbot renew --dry-run
 sudo systemctl status certbot.timer
 ```
+
+<!-- start new server -->
+"ci": "NODE_ENV=ci pm2 start server.js --name backend-ecommerce",
+<!-- restart running server -->
+"ci": "NODE_ENV=production pm2 restart backend-ecommerce"
+
