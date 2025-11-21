@@ -1,11 +1,17 @@
 const { AppError } = require("../utils/AppError");
 const statusCodes = require("../constants/statusCodes");
+const WinstonLogger = require("../loggers/winston.log");
 
 const sendErrorDev = (err, req, res) => {
-  console.log("Error 💣", err);
+  const logger = new WinstonLogger({ level: "error" });
+  logger.error(err.message, {
+    context: req.originalUrl,
+    req,
+    metadata: err.message,
+  });
+
   // 1. API Error
   if (req.originalUrl.startsWith("/api")) {
-    console.log("Error 💣", err);
     return res.status(err.statusCode).json({
       status: err.status,
       message: err.message,
@@ -13,6 +19,7 @@ const sendErrorDev = (err, req, res) => {
       stack: err.stack,
     });
   }
+
   // 2. Rendered Error Page
   return res.status(err.statusCode).render("pages/error", {
     title: "Something went wrong!",

@@ -10,7 +10,7 @@ const {
 } = require("../../auth//checkAuth");
 
 router.use(apiKey);
-router.post("/sign-up", permissions, accessController.signUp);
+router.post("/sign-up", permissions("0000"), accessController.signUp);
 router.post("/login", accessController.login);
 
 router.use(authentication);

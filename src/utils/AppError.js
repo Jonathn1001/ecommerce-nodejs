@@ -1,3 +1,4 @@
+
 const Reasons = require("./../constants/reasonPhrases");
 const StatusCodes = require("./../constants/statusCodes");
 
@@ -10,6 +11,7 @@ class AppError extends Error {
     this.isOperational = true;
 
     Error.captureStackTrace(this, this.constructor);
+
   }
 }
 

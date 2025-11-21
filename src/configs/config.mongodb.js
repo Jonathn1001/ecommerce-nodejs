@@ -1,5 +1,5 @@
 "use strict";
-
+// ! docker run -d -p 27017:27017 -v ~/Documents/Personal/Backend/docker/mongo-docker-ecommerce:/data/db --name mdb mongo:latest
 const dev = {
   app: {
     port: process.env.DEV_APP_PORT,

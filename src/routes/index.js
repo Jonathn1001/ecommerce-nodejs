@@ -14,6 +14,7 @@ const inventoryRouter = require("./inventory");
 const commentRouter = require("./comment");
 const notificationRouter = require("./notification");
 const uploadRouter = require("./upload");
+const rbacRouter = require("./rbac");
 
 const routes = (app) => {
   app.get(`/${api_version}/document`, (req, res) => {
@@ -22,14 +23,16 @@ const routes = (app) => {
       version: api_version,
     });
   });
-  app.get(`/${api_version}/status`, (req, res) => {  
+  app.get(`/${api_version}/status`, (req, res) => {
     res.send({
       message: "API is up and running",
       status: "OK",
-      code:200
+      code: 200,
     });
   });
-  app.get(`/${api_version}/`, (req, res) => { res.send({ message: "Welcome to the API" }); });
+  app.get(`/${api_version}/`, (req, res) => {
+    res.send({ message: "Welcome to the API" });
+  });
   app.use(`/${api_version}/auth`, accessRouter);
   app.use(`/${api_version}/product`, productRouter);
   app.use(`/${api_version}/discount`, discountRouter);
@@ -39,6 +42,7 @@ const routes = (app) => {
   app.use(`/${api_version}/comment`, commentRouter);
   app.use(`/${api_version}/notification`, notificationRouter);
   app.use(`/${api_version}/upload`, uploadRouter);
+  app.use(`/${api_version}`, rbacRouter);
 
   // ? 404 Route
   app.all("*", (req, res, next) => {

@@ -30,6 +30,7 @@ class AccessService {
     if (shopHolder) {
       return new AppError("Email already registered", statusCodes.BAD_REQUEST);
     }
+    console.log("shopHolder: ", password);
     // ? Step 2. Hash the password and Create a new shop
     const passwordHash = await bcrypt.hash(password, 10);
     const newShop = await shopModel.create({
