@@ -1,10 +1,29 @@
 "use strict";
 
 const redis = require("redis");
-const redisClient = redis.createClient();
-const { promisify } = require("util");
+const crypto = require("crypto");
 
 const { reserveInventory } = require("../models/repositories/inventory.repo");
+
+const redisClient = redis.createClient();
+redisClient.on("error", (error) => {
+  console.error("Redis client error::", error);
+});
+
+// ? node-redis v4 is promise-based but requires an explicit connect()
+const getRedisClient = async () => {
+  if (!redisClient.isOpen) await redisClient.connect();
+  return redisClient;
+};
+
+// ? Compare-and-delete must be atomic: if our TTL expired and another
+// ? checkout already took the lock, a blind DEL would release THEIR lock
+const RELEASE_LOCK_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`;
 
 const acquireLock = async (
   product_id,
@@ -13,33 +32,46 @@ const acquireLock = async (
   retryTime = 10,
   expireTime = 3000 // 3 seconds to lock
 ) => {
-  const pexpire = promisify(redisClient.pexpire).bind(redisClient);
-  const setnxAsyncs = promisify(redisClient.setnx).bind(redisClient);
-
+  const client = await getRedisClient();
   const key = `lock_v2024_${product_id}`;
+  // ? Unique token per acquisition so we can only ever release our own lock
+  const token = crypto.randomUUID();
+
   for (let i = 0; i < retryTime; i++) {
-    const result = await setnxAsyncs(key, expireTime);
-    console.log("result::", result);
-    if (lock) {
-      const isReserved = await reserveInventory({
-        product_id,
-        cart_id,
-        quantity,
-      });
-      // ? If mongoDB successfully updates the inventory, then we can proceed
-      if (isReserved.modifiedCount) {
-        await pexpire(key, expireTime);
-        return key; // ? Return the key to be used for releasing the lock
+    // ? NX + PX in a single atomic command: the lock is born with its TTL,
+    // ? so a crash right here can never leave a lock that lives forever
+    const result = await client.set(key, token, { NX: true, PX: expireTime });
+    if (result === "OK") {
+      try {
+        const isReserved = await reserveInventory({
+          product_id,
+          cart_id,
+          quantity,
+        });
+        // ? If mongoDB successfully updates the inventory, then we can proceed
+        if (isReserved.modifiedCount) {
+          return { key, token }; // ? Lock handle, used for releasing the lock
+        }
+        // ? Reservation failed (e.g. out of stock): free the lock right away
+        // ? instead of blocking other buyers until the TTL expires
+        await releaseLock({ key, token });
+        return null;
+      } catch (error) {
+        await releaseLock({ key, token });
+        throw error;
       }
-      return null;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  return null;
 };
 
-const releaseLock = async (key) => {
-  const delAsyncKey = promisify(redisClient.del).bind(redisClient);
-  return await delAsyncKey(key);
+const releaseLock = async ({ key, token }) => {
+  const client = await getRedisClient();
+  return await client.eval(RELEASE_LOCK_SCRIPT, {
+    keys: [key],
+    arguments: [token],
+  });
 };
 
 module.exports = { acquireLock, releaseLock };
