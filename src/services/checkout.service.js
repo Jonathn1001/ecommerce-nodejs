@@ -2,7 +2,7 @@
 
 const {
   findCartById,
-  deleteProductFromCart,
+  removeProductsFromCart,
 } = require("../models/repositories/cart.repo");
 const { createOrder } = require("../models/repositories/order.repo");
 const { releaseInventory } = require("../models/repositories/inventory.repo");
@@ -12,6 +12,14 @@ const {
 const { NotFoundError, BadRequestError } = require("../utils/AppError");
 const { getDiscountAmount } = require("./discount.service");
 const { acquireLock, releaseLock } = require("./redis.service");
+
+// ? Best-effort compensation: allSettled so one failed release does not abort
+// ? the rest or mask the original error the caller is about to rethrow.
+const rollbackReservations = async (reserved, cart_id) => {
+  await Promise.allSettled(
+    reserved.map((p) => releaseInventory({ ...p, cart_id }))
+  );
+};
 
 class CheckoutService {
   // ? This function is used to preview the checkout order
@@ -90,9 +98,7 @@ class CheckoutService {
       const keyLock = await acquireLock(product_id, quantity, cart_id);
       if (!keyLock) {
         // ? Unavailable product: compensate everything reserved so far
-        await Promise.all(
-          reserved.map((p) => releaseInventory({ ...p, cart_id }))
-        );
+        await rollbackReservations(reserved, cart_id);
         throw new BadRequestError(
           "Some products are not available, Please back to cart and try again"
         );
@@ -112,18 +118,16 @@ class CheckoutService {
         order_products: products,
       });
     } catch (error) {
-      await Promise.all(
-        reserved.map((p) => releaseInventory({ ...p, cart_id }))
-      );
+      await rollbackReservations(reserved, cart_id);
       throw error;
     }
-    // ? Order placed: remove the ordered products from the cart
+    // ? Order placed: remove the ordered products from the cart (by cart_id,
+    // ? the checkout identity, in a single write)
     if (newOrder) {
-      await Promise.all(
-        products.map((product) =>
-          deleteProductFromCart({ user_id, product_id: product.product_id })
-        )
-      );
+      await removeProductsFromCart({
+        cart_id,
+        product_ids: products.map((product) => product.product_id),
+      });
     }
     return newOrder;
   }

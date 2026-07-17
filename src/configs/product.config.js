@@ -68,7 +68,7 @@ class Electronics extends Product {
       ...this.product_attributes,
       product_shop: this.product_shop,
     });
-    if (!newElectronics) throw new BadRequestError("Create new clothing error");
+    if (!newElectronics) throw new BadRequestError("Create new electronics error");
     const newProduct = await super.createProduct(newElectronics._id);
     if (!newProduct) throw new BadRequestError("Create new product error");
     return newProduct;

@@ -200,7 +200,7 @@ class DiscountService {
     discount_used_users.splice(index, 1);
     return await updateDiscountCode(foundDiscount._id, {
       discount_used_users,
-      discount_used_count: discount_used_count - 1,
+      discount_used_count: Math.max(0, (discount_used_count || 0) - 1),
     });
   }
 }

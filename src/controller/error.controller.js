@@ -28,6 +28,7 @@ const sendErrorDev = (err, req, res) => {
 };
 
 const sendErrorProduction = (err, req, res) => {
+  const logger = new WinstonLogger({ level: "error" });
   // 1. API Error
   if (req.originalUrl.startsWith("/api")) {
     // !! A) Operational, trusted error: send message to client
@@ -38,7 +39,10 @@ const sendErrorProduction = (err, req, res) => {
       });
     // !! B) Programming or other unknown error: don't leak error details
     // ? 1. Log error
-    console.log("Error 💣", err);
+    logger.error(err.message, {
+      context: req.originalUrl,
+      metadata: { stack: err.stack },
+    });
     // ? 2. Send Generic message
     return res.status(500).json({
       status: "error",
@@ -56,7 +60,10 @@ const sendErrorProduction = (err, req, res) => {
 
   // !! B) Programming or other unknown error: don't leak error details
   // ? 1. Log error
-  console.log("Error 💣", err);
+  logger.error(err.message, {
+    context: req.originalUrl,
+    metadata: { stack: err.stack },
+  });
   // ? 2. Send Generic message
   return res.status(err.statusCode).render("pages/error", {
     title: "Something went wrong!",
