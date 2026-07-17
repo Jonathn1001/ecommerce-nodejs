@@ -192,7 +192,7 @@ class DiscountService {
     if (!foundDiscount) {
       throw new NotFoundError("Discount code not found");
     }
-    const { discount_used_users } = foundDiscount;
+    const { discount_used_users, discount_used_count } = foundDiscount;
     const index = discount_used_users.indexOf(user_id);
     if (index === -1) {
       throw new Error("Discount code has not been used by this user");

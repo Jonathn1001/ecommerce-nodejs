@@ -12,10 +12,6 @@ const createTokenPair = (payload, publicKey, privateKey) => {
       expiresIn: "7d",
     });
 
-    jwt.verify(accessToken, publicKey, (err, decoded) => {
-      if (err) console.log("token verify error: ", err);
-    });
-
     return {
       accessToken,
       refreshToken,

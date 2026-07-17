@@ -1,4 +1,5 @@
 const { updateProductById } = require("../models/repositories/product.repo");
+const { BadRequestError } = require("../utils/AppError");
 const {
   product,
   clothing,
@@ -45,9 +46,9 @@ class Clothing extends Product {
       ...this.product_attributes,
       product_shop: this.product_shop,
     });
-    if (!newClothing) throw BadRequestError("Create new clothing error");
+    if (!newClothing) throw new BadRequestError("Create new clothing error");
     const newProduct = await super.createProduct(newClothing._id);
-    if (!newProduct) throw BadRequestError("Create new product error");
+    if (!newProduct) throw new BadRequestError("Create new product error");
     return newProduct;
   }
 
@@ -67,9 +68,9 @@ class Electronics extends Product {
       ...this.product_attributes,
       product_shop: this.product_shop,
     });
-    if (!newElectronics) throw BadRequestError("Create new clothing error");
+    if (!newElectronics) throw new BadRequestError("Create new clothing error");
     const newProduct = await super.createProduct(newElectronics._id);
-    if (!newProduct) throw BadRequestError("Create new product error");
+    if (!newProduct) throw new BadRequestError("Create new product error");
     return newProduct;
   }
 
@@ -93,9 +94,9 @@ class Furniture extends Product {
       ...this.product_attributes,
       product_shop: this.product_shop,
     });
-    if (!newFurniture) throw BadRequestError("Create new furniture error");
+    if (!newFurniture) throw new BadRequestError("Create new furniture error");
     const newProduct = await super.createProduct(newFurniture._id);
-    if (!newProduct) throw BadRequestError("Create new product error");
+    if (!newProduct) throw new BadRequestError("Create new product error");
     return newProduct;
   }
 
@@ -115,9 +116,9 @@ class Motorbike extends Product {
       ...this.product_attributes,
       product_shop: this.product_shop,
     });
-    if (!newMotorBike) throw BadRequestError("Create new motorbike error");
+    if (!newMotorBike) throw new BadRequestError("Create new motorbike error");
     const newProduct = await super.createProduct(newMotorBike._id);
-    if (!newProduct) throw BadRequestError("Create new product error");
+    if (!newProduct) throw new BadRequestError("Create new product error");
     return newProduct;
   }
 
