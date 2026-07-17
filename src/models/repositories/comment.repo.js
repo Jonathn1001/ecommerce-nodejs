@@ -46,7 +46,6 @@ const updateLeftComment = async (product_id, rightValue) => {
 };
 
 const findCommentsByProductId = async ({ product_id }) => {
-  console.log("product_id", product_id);
   const comment = await CommentModel.find({
     comment_product_id: convertToObjectId(product_id),
   }).select({
@@ -84,13 +83,13 @@ const deleteCommentByProductId = async ({
   rightValue,
 }) => {
   await CommentModel.deleteMany({
-    comment_product_id: product_id,
+    comment_product_id: convertToObjectId(product_id),
     comment_left: { $gte: leftValue, $lte: rightValue },
   });
   const width = rightValue - leftValue + 1;
   await CommentModel.updateMany(
     {
-      comment_product_id: product_id,
+      comment_product_id: convertToObjectId(product_id),
       comment_left: { $gt: rightValue },
     },
     {
@@ -99,7 +98,7 @@ const deleteCommentByProductId = async ({
   );
   await CommentModel.updateMany(
     {
-      comment_product_id: product_id,
+      comment_product_id: convertToObjectId(product_id),
       comment_right: { $gt: rightValue },
     },
     {

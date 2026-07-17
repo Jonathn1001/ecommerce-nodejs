@@ -70,6 +70,17 @@ const getListUserCart = async ({ user_id }) => {
   return await CartModel.findOne({ cart_user_id: user_id }).select().lean();
 };
 
+// ? Remove several products from a specific active cart in one write.
+// ? Keyed by cart_id (the checkout identity), not user_id. product_ids are
+// ? matched as stored (cart persists the request value, not an ObjectId).
+const removeProductsFromCart = async ({ cart_id, product_ids }) => {
+  const query = { _id: convertToObjectId(cart_id), cart_state: "active" };
+  const update = {
+    $pull: { cart_products: { product_id: { $in: product_ids } } },
+  };
+  return await CartModel.updateOne(query, update);
+};
+
 module.exports = {
   findCartByUserId,
   createCart,
@@ -78,4 +89,5 @@ module.exports = {
   getListUserCart,
   findProductInCart,
   findCartById,
+  removeProductsFromCart,
 };

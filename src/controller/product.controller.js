@@ -62,7 +62,7 @@ class ProductController {
     });
     new SuccessResponse({
       message: "Publish product successfully",
-      metadata: { data: publishedProduct, total: publishedProduct.length },
+      metadata: { data: publishedProduct },
     }).send(res);
   });
 
@@ -73,7 +73,7 @@ class ProductController {
     });
     new SuccessResponse({
       message: "Unpublish product successfully",
-      metadata: { data: unpublishedProduct, total: unpublishedProduct.length },
+      metadata: { data: unpublishedProduct },
     }).send(res);
   });
 

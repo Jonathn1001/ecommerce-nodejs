@@ -24,13 +24,12 @@ const { CREATED, OK } = require("../utils/SuccessResponse");
 
 class AccessService {
   // ** Sign Up
-  static signUp = async ({ name, email, password }, res) => {
+  static signUp = async ({ name, email, password }) => {
     // ? Step 1. Check if the email is already registered
     const shopHolder = await shopModel.findOne({ email }).lean(); // return an JS object, reduce the size of the object
     if (shopHolder) {
-      return new AppError("Email already registered", statusCodes.BAD_REQUEST);
+      throw new AppError("Email already registered", statusCodes.BAD_REQUEST);
     }
-    console.log("shopHolder: ", password);
     // ? Step 2. Hash the password and Create a new shop
     const passwordHash = await bcrypt.hash(password, 10);
     const newShop = await shopModel.create({
@@ -52,7 +51,7 @@ class AccessService {
       });
 
       if (!keyStore) {
-        return new AppError(
+        throw new AppError(
           "Error while creating keys",
           statusCodes.INTERNAL_SERVER_ERROR
         );
@@ -64,25 +63,23 @@ class AccessService {
         privateKey
       );
 
-      console.log("create token successfully: ", tokens);
-
       return new CREATED({
         message: "Shop created successfully",
         metadata: {
           ...tokens,
           shop: getInfoData({ fields: ["name", "email"], obj: newShop }),
         },
-      }).send(res);
+      });
     }
 
-    return new AppError(
+    throw new AppError(
       "Error while creating shop",
       statusCodes.INTERNAL_SERVER_ERROR
     );
   };
 
   // ** Login
-  static login = async ({ email, password, refreshToken = null }, res) => {
+  static login = async ({ email, password, refreshToken = null }) => {
     //? 1. Find Email
     const foundShop = await findByEmail({ email });
     if (!foundShop) throw new AuthenticationError("Invalid email or password");
@@ -114,18 +111,17 @@ class AccessService {
         shop: getInfoData({ fields: ["_id", "name", "email"], obj: foundShop }),
         ...tokens,
       },
-    }).send(res);
+    });
   };
 
   // ** Logout
   static logout = async (keyStore) => {
     const delKey = await KeyTokenService.removeKeyByID(keyStore._id);
-    console.log("delKey: ", delKey);
     return delKey;
   };
 
   // ** Refresh Token
-  static handleRefreshToken = async ({ keyStore, user, refreshToken, res }) => {
+  static handleRefreshToken = async ({ keyStore, user, refreshToken }) => {
     // ? Check if the token is used
     const { userId, email } = user;
     if (keyStore.refreshTokensUsed.includes(refreshToken)) {
@@ -145,7 +141,6 @@ class AccessService {
       keyStore.publicKey,
       keyStore.privateKey
     );
-    console.log("keyStore: ", keyStore);
     await keyStore.updateOne({
       $set: {
         refreshToken: tokens.refreshToken,
@@ -161,7 +156,7 @@ class AccessService {
         shop: getInfoData({ fields: ["name", "email"], obj: foundShop }),
         ...tokens,
       },
-    }).send(res);
+    });
   };
 }
 
