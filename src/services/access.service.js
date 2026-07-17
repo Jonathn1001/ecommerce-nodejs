@@ -24,7 +24,7 @@ const { CREATED, OK } = require("../utils/SuccessResponse");
 
 class AccessService {
   // ** Sign Up
-  static signUp = async ({ name, email, password }, res) => {
+  static signUp = async ({ name, email, password }) => {
     // ? Step 1. Check if the email is already registered
     const shopHolder = await shopModel.findOne({ email }).lean(); // return an JS object, reduce the size of the object
     if (shopHolder) {
@@ -69,7 +69,7 @@ class AccessService {
           ...tokens,
           shop: getInfoData({ fields: ["name", "email"], obj: newShop }),
         },
-      }).send(res);
+      });
     }
 
     throw new AppError(
@@ -79,7 +79,7 @@ class AccessService {
   };
 
   // ** Login
-  static login = async ({ email, password, refreshToken = null }, res) => {
+  static login = async ({ email, password, refreshToken = null }) => {
     //? 1. Find Email
     const foundShop = await findByEmail({ email });
     if (!foundShop) throw new AuthenticationError("Invalid email or password");
@@ -111,7 +111,7 @@ class AccessService {
         shop: getInfoData({ fields: ["_id", "name", "email"], obj: foundShop }),
         ...tokens,
       },
-    }).send(res);
+    });
   };
 
   // ** Logout
@@ -121,7 +121,7 @@ class AccessService {
   };
 
   // ** Refresh Token
-  static handleRefreshToken = async ({ keyStore, user, refreshToken, res }) => {
+  static handleRefreshToken = async ({ keyStore, user, refreshToken }) => {
     // ? Check if the token is used
     const { userId, email } = user;
     if (keyStore.refreshTokensUsed.includes(refreshToken)) {
@@ -156,7 +156,7 @@ class AccessService {
         shop: getInfoData({ fields: ["name", "email"], obj: foundShop }),
         ...tokens,
       },
-    }).send(res);
+    });
   };
 }
 

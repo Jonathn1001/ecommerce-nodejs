@@ -63,8 +63,20 @@ const addStockToInventory = async ({
   return await inventoryModel.updateOne(query, updateSet, options);
 };
 
+// ? Compensating action for reserveInventory: give the stock back and drop
+// ? this cart's reservation. Used to roll back a partial/failed checkout.
+const releaseInventory = async ({ product_id, cart_id, quantity }) => {
+  const query = { invent_product_id: convertToObjectId(product_id) };
+  const updateSet = {
+    $inc: { invent_stock: quantity },
+    $pull: { invent_reservations: { cart_id } },
+  };
+  return await inventoryModel.updateOne(query, updateSet);
+};
+
 module.exports = {
   insertInventory,
   reserveInventory,
   addStockToInventory,
+  releaseInventory,
 };

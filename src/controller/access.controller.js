@@ -6,11 +6,11 @@ const { SuccessResponse } = require("../utils/SuccessResponse");
 
 class AccessController {
   signUp = catchAsync(async (req, res) => {
-    return await AccessService.signUp(req.body, res);
+    return (await AccessService.signUp(req.body)).send(res);
   });
 
   login = catchAsync(async (req, res) => {
-    return await AccessService.login(req.body, res);
+    return (await AccessService.login(req.body)).send(res);
   });
 
   logout = catchAsync(async (req, res) => {
@@ -21,12 +21,13 @@ class AccessController {
   });
 
   handleRefreshToken = catchAsync(async (req, res) => {
-    return await AccessService.handleRefreshToken({
-      keyStore: req.keyStore,
-      refreshToken: req.refreshToken,
-      user: req.user,
-      res,
-    });
+    return (
+      await AccessService.handleRefreshToken({
+        keyStore: req.keyStore,
+        refreshToken: req.refreshToken,
+        user: req.user,
+      })
+    ).send(res);
   });
 }
 

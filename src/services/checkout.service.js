@@ -1,7 +1,11 @@
 "use strict";
 
-const { findCartById } = require("../models/repositories/cart.repo");
+const {
+  findCartById,
+  deleteProductFromCart,
+} = require("../models/repositories/cart.repo");
 const { createOrder } = require("../models/repositories/order.repo");
+const { releaseInventory } = require("../models/repositories/inventory.repo");
 const {
   getValidCheckoutProducts,
 } = require("../models/repositories/product.repo");
@@ -75,34 +79,51 @@ class CheckoutService {
       user_id,
       shop_order_ids,
     });
-    // ? Check if the quantity of the product is still available
+    // ? Reserve every product atomically. Track what we reserve so a later
+    // ? failure can roll it back instead of leaving stock silently held.
     const products = shop_order_ids_new.flatMap(
       (shop_order) => shop_order.item_products
     );
-    console.log("products::", products);
-    const acquireProducts = [];
+    const reserved = [];
     for (const product of products) {
       const { product_id, quantity } = product;
       const keyLock = await acquireLock(product_id, quantity, cart_id);
-      acquireProducts.push(Boolean(keyLock));
-      if (keyLock) await releaseLock(keyLock);
+      if (!keyLock) {
+        // ? Unavailable product: compensate everything reserved so far
+        await Promise.all(
+          reserved.map((p) => releaseInventory({ ...p, cart_id }))
+        );
+        throw new BadRequestError(
+          "Some products are not available, Please back to cart and try again"
+        );
+      }
+      reserved.push({ product_id, quantity });
+      // ? Reservation is durable in MongoDB; free the Redis mutex now
+      await releaseLock(keyLock);
     }
-    // ? If one of the products is not available, then return false
-    if (acquireProducts.includes(false)) {
-      throw new BadRequestError(
-        "Some products are not available, Please back to cart and try again"
+    // ? All products reserved: create the order, rolling back on failure
+    let newOrder;
+    try {
+      newOrder = await createOrder({
+        order_user_id: user_id,
+        order_checkout: checkout_order,
+        order_shipping: user_address,
+        order_payment: user_payment,
+        order_products: products,
+      });
+    } catch (error) {
+      await Promise.all(
+        reserved.map((p) => releaseInventory({ ...p, cart_id }))
       );
+      throw error;
     }
-    // ? If all products are available, then proceed to place the order
-    const newOrder = createOrder({
-      order_user_id: user_id,
-      order_checkout: checkout_order,
-      order_shipping: user_address,
-      order_payment: user_payment,
-      order_products: products,
-    });
-    // ? If create the order is successful, remove products from the cart
+    // ? Order placed: remove the ordered products from the cart
     if (newOrder) {
+      await Promise.all(
+        products.map((product) =>
+          deleteProductFromCart({ user_id, product_id: product.product_id })
+        )
+      );
     }
     return newOrder;
   }
