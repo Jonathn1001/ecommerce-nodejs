@@ -208,6 +208,8 @@ Phase 7.
 - **Load tests** (k6) against the checkout path and **chaos tests** (kill a broker
   / a service mid-saga) asserting the system recovers without lost or double
   effects.
+- **Frontend e2e** (Playwright) on the storefront happy path — browse → cart →
+  checkout → order confirmed (Phase 8).
 
 ## Production-readiness (non-functional requirements)
 
@@ -279,12 +281,83 @@ inherited by every later service.
 |---|---|---|
 | **0 · Platform** | workspaces, TS, `contracts` + `shared` packages, `docker-compose.example` (Postgres, Kafka, RabbitMQ, Redis, Kafka-UI), broker wrappers (with retry/backoff + consumer error boundary), outbox relay, idempotency helper, trace middleware, structured logger — **plus the production primitives every service inherits**: zod config validation, `/healthz`+`/readyz`, graceful shutdown, lint/format, a multi-stage Dockerfile template, and CI. Proven by a **"hello event"**: producer → Kafka → consumer with dedup. No business logic. | Tracer bullet through the *infrastructure*; de-risks everything and sets the production template before domain work. |
 | **1 · Inventory** | own DB, reserve/release, Redis lock, events | Leaf the saga depends on; ports `inventory` + `redis.service`. |
-| **2 · Order** | cart + checkout + place order; choreographed saga vs Inventory; compensation; reservation expiry | The core loop with the fewest participants. |
+| **2 · Order** | cart + checkout + place order; choreographed saga vs Inventory; compensation; reservation expiry; **sync read API (`GET /orders/:id`) + SSE order-status stream** off the state machine (the surface Phase 8 consumes) | The core loop with the fewest participants. |
 | **3 · Payment** | simulated gateway, charge/refund, webhook | Completes the full saga with compensation. |
 | **4 · Catalog** | products/comments/discounts + Order's `catalog_read_model` projection (consume `ProductCreated`/`PriceChanged`) | Decouples checkout from Catalog via events. |
 | **5 · Notification** | consume order/catalog events (Kafka) → dispatch email/push via RabbitMQ + DLQ + retry | RabbitMQ showcase. |
-| **6 · Identity + Gateway** | auth/rbac extracted; gateway verifies JWT and routes to all services | Front door built last, once services exist. |
+| **6 · Identity + Gateway** | auth/rbac extracted; Gateway verifies the **httpOnly-cookie JWT**, sets/refreshes it, enforces CSRF on mutations, and **routes REST + proxies the SSE order stream** to all services | Front door built last, once services exist. |
 | **7 · System hardening & verification** | System-wide **Prometheus + Grafana** dashboards + SLO alerting, OpenTelemetry + Jaeger tracing, **k6 load tests** + **chaos suite** (kill a broker/service mid-saga), orchestrated-saga variant (comparison), schema-evolution `v2` event | Prove the whole system meets its SLOs and recovers from failure. (Per-service observability/resilience already ships in each phase via the DoD.) |
+| **8 · Storefront** | Customer-facing SPA (`apps/web`, Vite + React + TS + Tailwind) — catalogue, cart, authed checkout, and a live **order-pipeline tracker** that visualizes the saga. Talks only to the Gateway; imports DTOs + zod from `contracts`. | Puts a human face on the system and drives the whole saga from the shopper's side. Built last, once the services + Gateway exist. |
+
+## Phase 8 · Storefront (design)
+
+The one **frontend** in the build (see scope change below). A thin client — the
+backend stays the star. Depends on Phases 1–6 (needs Catalog, Order, Payment,
+Identity, and the Gateway edge live).
+
+**Stack:** `apps/web/` — Vite + React 18 + TypeScript + Tailwind. React Router,
+React Query for server state. Talks **only to the Gateway** over REST (decision
+#7 — never to services directly).
+
+**No contract drift:** the storefront imports DTO types + zod schemas from
+`packages/contracts` and validates every Gateway response at the boundary — the
+same single source of truth the services use.
+
+**Sync read surface (the storefront's backend contract).** The saga is async
+choreography, but the storefront needs synchronous reads and live status. All of
+it is served at the **Gateway edge** (decision #7), never service-direct:
+- **Catalogue** — `GET /products`, `GET /products/:id` → routed to **Catalog**.
+- **Cart / checkout** — `GET`/`POST /cart`, `POST /orders` → routed to **Order**.
+- **Order status (live)** — **Server-Sent Events**: `GET /orders/:id/stream`,
+  exposed by **Order** (which owns order state) and proxied by the Gateway. Order
+  emits one SSE frame per saga transition (PENDING → InventoryReserved →
+  PaymentSucceeded → CONFIRMED, plus the compensation path) straight off its state
+  machine. Degrades to `GET /orders/:id` polling if SSE is unavailable.
+
+Why SSE over WebSocket/poll: order status is **one-way server→client**,
+short-lived, and `EventSource` carries the auth **cookie** automatically (no custom
+header) — it pairs exactly with the httpOnly-cookie auth below. WebSocket's full
+duplex is unused weight against a stateless Gateway; polling is the degraded
+fallback, not the primary. (This SSE endpoint + read API are a **forward
+dependency on Phase 2 (Order) and Phase 6 (Gateway)** — see their rows.)
+
+**Flows**
+- **Auth** — login + register via Identity. The Gateway sets the JWT as an
+  **httpOnly, Secure, SameSite cookie**; the SPA never touches the token in JS
+  (XSS-safe). Mutations carry a **CSRF token** (double-submit) since cookies
+  auto-send. Refresh is handled Gateway-side.
+- **Catalogue** — home/grid + product detail (Catalog).
+- **Cart** — add/remove/quantity (Order's cart).
+- **Checkout** — place order → opens the saga; the **order-status page renders the
+  choreographed pipeline live** (PENDING → InventoryReserved → PaymentSucceeded →
+  CONFIRMED), including the compensation path (payment fails → OrderCancelled →
+  inventory released).
+- **Order history** (authed).
+
+**Design language:** modern-minimal, soft (Apple/Google-modern) — rounded elevated
+cards, soft shadows, light-gray ground / white surfaces, system sans for reading,
+**mono for every datum** (prices, SKUs, order IDs, saga states). Color is reserved
+to encode order/saga state (amber = in-progress, green = confirmed, red =
+cancelled). The **order-pipeline tracker is the signature element**. Approved
+clickable prototype (design reference only — throwaway HTML, not the React code):
+`https://claude.ai/code/artifact/d172bc7c-53ef-4d86-9872-a7e89f2bf48e`.
+
+**Still owed:** Phase 8 gets its **own child spec → plan** (per the umbrella's
+per-phase cycle) before implementation. React version tracks the latest (18/19) at
+build time. Playwright (frontend e2e) joins the Testing inventory above.
+
+**Storefront Definition of Done**
+- [ ] Talks only to the Gateway; DTOs imported from `contracts`; responses zod-validated.
+- [ ] `apps/*` added to `pnpm-workspace.yaml`; `packages/contracts` builds **dual
+      ESM+CJS** so the ESM/Vite app can import the (CJS) contracts cleanly.
+- [ ] Env-based config (Gateway URL); zero secrets in the bundle.
+- [ ] Loading / error / empty state for every async view.
+- [ ] Auth: login/register via Identity; JWT in an **httpOnly Secure SameSite
+      cookie** (never in JS); **CSRF token** on mutations; protected routes.
+- [ ] Live order status over **SSE** (`GET /orders/:id/stream`), polling fallback.
+- [ ] Responsive; basic a11y (keyboard focus, labels, contrast); `prefers-reduced-motion` honored.
+- [ ] Component tests (Vitest + RTL) + one Playwright e2e (browse → cart → checkout → confirmed).
+- [ ] Multi-stage Dockerfile; served static; runs in the compose prod profile.
 
 ## Out of scope (for now)
 
@@ -297,7 +370,8 @@ What stays out:
   the prod compose profile builds and runs the service images, but there is no
   cloud target, no HA/autoscaling, no managed Postgres/Kafka).
 - Real secrets manager (env / gitignored `.env` only).
-- Frontend.
+- Admin / internal ops UI. A **customer storefront is now Phase 8**; an internal
+  ops/observability dashboard stays out — Grafana + Jaeger (Phase 7) cover that.
 - Polyglot persistence (all Postgres for this pass; per-workload DB choice is a
   possible future lesson).
 
