@@ -230,11 +230,13 @@ spec → plan → implementation cycle**. This document is the umbrella spec.
 - Polyglot persistence (all Postgres for this pass; per-workload DB choice is a
   possible future lesson).
 
-## Open questions for Phase 0 planning
+## Phase 0 decisions (resolved 2026-07-18)
 
-1. One Postgres container with a database per service, or one container per
-   service? (footprint vs isolation realism)
-2. Kafka in KRaft mode (no Zookeeper) vs Zookeeper-backed for the local stack.
-3. npm workspaces vs pnpm workspaces for the monorepo (workspace elsewhere uses
-   both; pick per this repo).
-4. Outbox relay: simple polling loop first, or Debezium/logical decoding later.
+1. **Postgres:** one container, **one database per service** (separate DBs +
+   Prisma schemas, no cross-DB queries). Split to per-container later if the
+   isolation-realism lesson is wanted.
+2. **Kafka:** **KRaft** mode (no ZooKeeper) — modern, one fewer container.
+3. **Workspaces:** **pnpm** — strict, content-addressed store, best ergonomics
+   for a many-package TS monorepo.
+4. **Outbox relay:** **polling loop** first (teaches the pattern); Debezium /
+   logical decoding is a Phase 7 upgrade.
