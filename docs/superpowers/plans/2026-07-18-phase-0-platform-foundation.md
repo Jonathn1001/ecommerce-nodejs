@@ -6,7 +6,9 @@
 
 **Architecture:** pnpm/TypeScript monorepo. `packages/contracts` holds zod-validated event envelopes (single source of truth). `packages/shared` holds the logger, errors, trace middleware, and Kafka/RabbitMQ/Redis/outbox wrappers. `services/hello` is a throwaway tracer-bullet service that proves the rails: an HTTP write persists a row + an outbox row in one Postgres transaction, a polling relay publishes the outbox to Kafka, and a consumer processes it exactly once via a Redis idempotency key. The old monolith moves to `legacy/` as read-only reference.
 
-**Tech Stack:** TypeScript (CommonJS), Express, Prisma (PostgreSQL), KafkaJS, amqplib, node-redis v4, zod, vitest, pnpm workspaces, Docker Compose. Node 22, pnpm 10.
+**Tech Stack:** TypeScript (CommonJS), Express, Prisma (PostgreSQL), KafkaJS, amqplib, node-redis v4, zod, vitest, ESLint + Prettier, pnpm workspaces, Docker + Compose, GitHub Actions. Node 22, pnpm 10.
+
+**Production baseline (established here, inherited by every later service):** fail-fast zod config validation, `/healthz`+`/readyz` probes, graceful shutdown, retry/backoff + Kafka consumer DLQ-parking, multi-stage Dockerfile + prod compose profile, and CI (lint/typecheck/test/build/audit). See the umbrella spec's "Per-service Definition of Done".
 
 ## Global Constraints
 
@@ -1749,18 +1751,863 @@ git commit -m "feat(hello): tracer bullet — outbox -> kafka -> idempotent cons
 
 ---
 
+### Task 12: Repo-wide ESLint + Prettier
+
+**Files:**
+- Create: `eslint.config.js`, `.prettierrc.json`
+- Modify: root `package.json` (scripts + devDeps)
+
+**Interfaces:**
+- Produces: `pnpm lint` (fails on lint errors) and `pnpm format` (writes) / `pnpm format:check` (verifies) — run by CI.
+
+- [ ] **Step 1: Add dev deps + scripts to root `package.json`** (merge)
+
+```json
+{
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.0"
+  }
+}
+```
+
+Run: `pnpm install`
+
+- [ ] **Step 2: Create `eslint.config.js`** (ESLint 9 flat config)
+
+```js
+const js = require("@eslint/js");
+const tseslint = require("typescript-eslint");
+const prettier = require("eslint-config-prettier");
+
+module.exports = tseslint.config(
+  { ignores: ["**/dist/**", "**/generated/**", "legacy/**", "**/*.config.js"] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  prettier,
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    },
+  }
+);
+```
+
+- [ ] **Step 3: Create `.prettierrc.json`**
+
+```json
+{ "semi": true, "singleQuote": false, "trailingComma": "es5", "printWidth": 90 }
+```
+
+- [ ] **Step 4: Run lint + format check across the workspace**
+
+Run: `pnpm format && pnpm lint`
+Expected: prettier rewrites files to a consistent style; eslint exits 0 (fix any reported errors before committing).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add eslint.config.js .prettierrc.json package.json pnpm-lock.yaml packages services
+git commit -m "chore(phase0): eslint + prettier, repo-wide"
+```
+
+---
+
+### Task 13: `packages/shared` — zod config loader (fail-fast)
+
+**Files:**
+- Create: `packages/shared/src/config.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `packages/shared/src/__tests__/config.test.ts`
+
+**Interfaces:**
+- Produces: `loadConfig<S extends ZodTypeAny>(schema: S, env?): z.infer<S>` — parses `process.env` against `schema`; on failure throws `Error` naming the invalid/missing keys (so a service crashes at boot, not mid-request). Never logs values.
+
+- [ ] **Step 1: Write the failing test** — `packages/shared/src/__tests__/config.test.ts`
+
+```ts
+import { describe, it, expect } from "vitest";
+import { z } from "zod";
+import { loadConfig } from "../config";
+
+const schema = z.object({
+  PORT: z.coerce.number().int().positive(),
+  DATABASE_URL: z.string().url(),
+});
+
+describe("loadConfig", () => {
+  it("parses and coerces a valid env", () => {
+    const cfg = loadConfig(schema, { PORT: "3000", DATABASE_URL: "postgres://h/db" });
+    expect(cfg.PORT).toBe(3000);
+  });
+
+  it("throws naming the missing key, without leaking values", () => {
+    expect(() => loadConfig(schema, { PORT: "3000" })).toThrow(/DATABASE_URL/);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/config.test.ts`
+Expected: FAIL — cannot resolve `../config`.
+
+- [ ] **Step 3: Write `packages/shared/src/config.ts`**
+
+```ts
+import { ZodError, type ZodTypeAny, type z } from "zod";
+
+export function loadConfig<S extends ZodTypeAny>(
+  schema: S,
+  env: NodeJS.ProcessEnv = process.env
+): z.infer<S> {
+  try {
+    return schema.parse(env);
+  } catch (e) {
+    if (e instanceof ZodError) {
+      const keys = e.issues.map((i) => i.path.join(".")).join(", ");
+      // Names only — never echo the values (may be secrets).
+      throw new Error(`Invalid configuration — check these env vars: ${keys}`);
+    }
+    throw e;
+  }
+}
+```
+
+- [ ] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./config";`
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/config.test.ts`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/shared/src
+git commit -m "feat(shared): fail-fast zod config loader"
+```
+
+---
+
+### Task 14: `packages/shared` — health/readiness router
+
+**Files:**
+- Create: `packages/shared/src/health.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `packages/shared/src/__tests__/health.test.ts`
+
+**Interfaces:**
+- Produces: `createHealthRouter(checks?: Record<string, () => Promise<void>>): Router` — `GET /healthz` → `200 {status:"ok"}` (liveness, no deps); `GET /readyz` → runs every check, `200 {status:"ready"}` if all resolve else `503 {status:"unready", failed:[names]}`.
+
+- [ ] **Step 1: Write the failing test** — `packages/shared/src/__tests__/health.test.ts`
+
+```ts
+import { describe, it, expect } from "vitest";
+import express from "express";
+import request from "supertest";
+import { createHealthRouter } from "../health";
+
+describe("createHealthRouter", () => {
+  it("healthz is always ok", async () => {
+    const app = express().use(createHealthRouter());
+    const res = await request(app).get("/healthz");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+  });
+
+  it("readyz is 503 and lists the failing check", async () => {
+    const app = express().use(
+      createHealthRouter({
+        db: async () => {},
+        broker: async () => {
+          throw new Error("down");
+        },
+      })
+    );
+    const res = await request(app).get("/readyz");
+    expect(res.status).toBe(503);
+    expect(res.body.failed).toContain("broker");
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/health.test.ts`
+Expected: FAIL — cannot resolve `../health`.
+
+- [ ] **Step 3: Write `packages/shared/src/health.ts`**
+
+```ts
+import { Router } from "express";
+
+export type ReadinessCheck = () => Promise<void>;
+
+export function createHealthRouter(checks: Record<string, ReadinessCheck> = {}): Router {
+  const router = Router();
+  router.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+  router.get("/readyz", async (_req, res) => {
+    const failed: string[] = [];
+    await Promise.all(
+      Object.entries(checks).map(async ([name, check]) => {
+        try {
+          await check();
+        } catch {
+          failed.push(name);
+        }
+      })
+    );
+    if (failed.length > 0) return res.status(503).json({ status: "unready", failed });
+    res.json({ status: "ready" });
+  });
+  return router;
+}
+```
+
+- [ ] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./health";`
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/health.test.ts`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/shared/src
+git commit -m "feat(shared): health/readiness router"
+```
+
+---
+
+### Task 15: `packages/shared` — retry/backoff + graceful shutdown
+
+**Files:**
+- Create: `packages/shared/src/retry.ts`, `packages/shared/src/lifecycle.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `packages/shared/src/__tests__/retry.test.ts`, `packages/shared/src/__tests__/lifecycle.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `withRetry<T>(fn: () => Promise<T>, opts?: { retries?: number; baseMs?: number; label?: string }): Promise<T>` — retries on rejection with exponential backoff + jitter; rethrows the last error after `retries`.
+  - `runClosers(closers: Closer[], timeoutMs: number): Promise<void>` — runs closers in REVERSE registration order; rejects if not done within `timeoutMs`.
+  - `gracefulShutdown(closers: Closer[], opts?: { timeoutMs?: number }): void` — installs SIGTERM/SIGINT handlers that call `runClosers` then `process.exit`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`packages/shared/src/__tests__/retry.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { withRetry } from "../retry";
+
+describe("withRetry", () => {
+  it("resolves after transient failures", async () => {
+    let n = 0;
+    const out = await withRetry(
+      async () => {
+        n++;
+        if (n < 3) throw new Error("transient");
+        return "ok";
+      },
+      { retries: 5, baseMs: 1 }
+    );
+    expect(out).toBe("ok");
+    expect(n).toBe(3);
+  });
+
+  it("rethrows after exhausting retries", async () => {
+    let n = 0;
+    await expect(
+      withRetry(
+        async () => {
+          n++;
+          throw new Error("always");
+        },
+        { retries: 2, baseMs: 1 }
+      )
+    ).rejects.toThrow("always");
+    expect(n).toBe(3); // initial + 2 retries
+  });
+});
+```
+
+`packages/shared/src/__tests__/lifecycle.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { runClosers } from "../lifecycle";
+
+describe("runClosers", () => {
+  it("runs closers in reverse order", async () => {
+    const order: number[] = [];
+    await runClosers(
+      [async () => void order.push(1), async () => void order.push(2), async () => void order.push(3)],
+      1000
+    );
+    expect(order).toEqual([3, 2, 1]);
+  });
+
+  it("rejects when a closer hangs past the timeout", async () => {
+    await expect(runClosers([() => new Promise(() => {})], 50)).rejects.toThrow(/timeout/);
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/retry.test.ts packages/shared/src/__tests__/lifecycle.test.ts`
+Expected: FAIL — cannot resolve `../retry` / `../lifecycle`.
+
+- [ ] **Step 3: Write `packages/shared/src/retry.ts`**
+
+```ts
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: { retries?: number; baseMs?: number; label?: string } = {}
+): Promise<T> {
+  const { retries = 5, baseMs = 200 } = opts;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt === retries) break;
+      const backoff = baseMs * 2 ** attempt;
+      const jitter = Math.random() * backoff * 0.2;
+      await new Promise((r) => setTimeout(r, backoff + jitter));
+    }
+  }
+  throw lastErr;
+}
+```
+
+- [ ] **Step 4: Write `packages/shared/src/lifecycle.ts`**
+
+```ts
+import { createLogger } from "./logger";
+
+const log = createLogger("lifecycle");
+export type Closer = () => Promise<void> | void;
+
+export async function runClosers(closers: Closer[], timeoutMs: number): Promise<void> {
+  let timer: NodeJS.Timeout;
+  const drain = (async () => {
+    for (const close of [...closers].reverse()) await close();
+  })();
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("shutdown_timeout")), timeoutMs);
+  });
+  try {
+    await Promise.race([drain, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+export function gracefulShutdown(closers: Closer[], opts: { timeoutMs?: number } = {}): void {
+  const { timeoutMs = 10_000 } = opts;
+  let shuttingDown = false;
+  const handle = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info("shutdown_start", { signal });
+    try {
+      await runClosers(closers, timeoutMs);
+      log.info("shutdown_complete", {});
+      process.exit(0);
+    } catch (e) {
+      log.error("shutdown_error", { message: (e as Error).message });
+      process.exit(1);
+    }
+  };
+  process.on("SIGTERM", () => void handle("SIGTERM"));
+  process.on("SIGINT", () => void handle("SIGINT"));
+}
+```
+
+- [ ] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./retry";` and `export * from "./lifecycle";`
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/retry.test.ts packages/shared/src/__tests__/lifecycle.test.ts`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/shared/src
+git commit -m "feat(shared): withRetry backoff + graceful shutdown"
+```
+
+---
+
+### Task 16: Broker resilience — retry connect, idempotent producer, Kafka consumer error boundary
+
+**Files:**
+- Modify: `packages/shared/src/kafka.ts`
+- Test: `packages/shared/src/__tests__/kafka-dlq.int.test.ts` (integration — needs the stack up)
+
+**Interfaces:**
+- Produces (updated `kafka.ts`):
+  - `createKafka` sets a bounded client-level retry policy.
+  - `createProducer(kafka)` uses an **idempotent** producer; `connect` wrapped in `withRetry`.
+  - `createConsumer(kafka, groupId)` — `run(topics, handler, opts?)`: on handler failure, retries `opts.maxRetries` times (backoff) then **parks the message on `<topic>.dlq`** and commits, so one poison message can't wedge the partition. Requires an internal producer for parking.
+
+- [ ] **Step 1: Write the failing integration test** — `packages/shared/src/__tests__/kafka-dlq.int.test.ts`
+
+```ts
+import { describe, it, expect } from "vitest";
+import { v4 as uuidv4 } from "uuid";
+import { makeEnvelope, HELLO_CREATED, type EventEnvelope } from "@ecom/contracts";
+import { createKafka, createProducer, createConsumer } from "../kafka";
+
+describe("kafka consumer error boundary (integration — needs stack up)", () => {
+  it("parks a poison message on <topic>.dlq after exhausting retries", async () => {
+    const topic = `test.poison.${uuidv4()}`;
+    const kafka = createKafka("test-dlq");
+    const producer = createProducer(kafka);
+    const failing = createConsumer(kafka, `g-${uuidv4()}`);
+    const dlqReader = createConsumer(kafka, `gdlq-${uuidv4()}`);
+
+    const parked: EventEnvelope[] = [];
+    await dlqReader.connect();
+    await dlqReader.run([`${topic}.dlq`], async (env) => void parked.push(env));
+
+    await failing.connect();
+    await failing.run([topic], async () => {
+      throw new Error("poison");
+    }, { maxRetries: 1 });
+
+    await producer.connect();
+    await producer.publish(
+      topic,
+      makeEnvelope({ type: HELLO_CREATED, version: 1, traceId: "t", producer: "test", payload: { helloId: "h", name: "x" } })
+    );
+
+    const deadline = Date.now() + 20_000;
+    while (parked.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 300));
+    await producer.disconnect();
+    await failing.disconnect();
+    await dlqReader.disconnect();
+
+    expect(parked).toHaveLength(1);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/kafka-dlq.int.test.ts`
+Expected: FAIL — `run` does not accept a retry option / no parking behavior yet.
+
+- [ ] **Step 3: Replace `packages/shared/src/kafka.ts`** with the resilient version
+
+```ts
+import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
+import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
+import { withRetry } from "./retry";
+import { createLogger } from "./logger";
+
+const log = createLogger("kafka");
+
+export function createKafka(clientId: string): Kafka {
+  return new Kafka({
+    clientId,
+    brokers: (process.env.KAFKA_BROKERS ?? "localhost:9092").split(","),
+    logLevel: logLevel.NOTHING,
+    retry: { retries: 8, initialRetryTime: 300 },
+  });
+}
+
+export function createProducer(kafka: Kafka) {
+  const producer: Producer = kafka.producer({ idempotent: true, maxInFlightRequests: 1 });
+  return {
+    connect: () => withRetry(() => producer.connect(), { label: "producer.connect" }),
+    disconnect: () => producer.disconnect(),
+    publish: (topic: string, envelope: EventEnvelope) =>
+      producer.send({
+        topic,
+        messages: [{ key: envelope.eventId, value: JSON.stringify(envelope) }],
+      }),
+  };
+}
+
+export function createConsumer(kafka: Kafka, groupId: string) {
+  const consumer: Consumer = kafka.consumer({ groupId });
+  const parker: Producer = kafka.producer();
+  return {
+    connect: async () => {
+      await withRetry(() => consumer.connect(), { label: "consumer.connect" });
+      await withRetry(() => parker.connect(), { label: "parker.connect" });
+    },
+    disconnect: async () => {
+      await consumer.disconnect();
+      await parker.disconnect();
+    },
+    run: async (
+      topics: string[],
+      handler: (env: EventEnvelope) => Promise<void>,
+      opts: { maxRetries?: number } = {}
+    ) => {
+      const { maxRetries = 3 } = opts;
+      await Promise.all(topics.map((t) => consumer.subscribe({ topic: t, fromBeginning: true })));
+      await consumer.run({
+        eachMessage: async ({ topic, message }) => {
+          if (!message.value) return;
+          const raw = message.value.toString();
+          const env = EventEnvelopeSchema.parse(JSON.parse(raw));
+          try {
+            await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+          } catch (e) {
+            // Poison message: park it and commit so the partition keeps moving.
+            log.error("event_parked_to_dlq", { eventId: env.eventId, topic, message: (e as Error).message });
+            await parker.send({ topic: `${topic}.dlq`, messages: [{ key: env.eventId, value: raw }] });
+          }
+        },
+      });
+    },
+  };
+}
+```
+
+- [ ] **Step 4: Run the new DLQ test AND the original round-trip test** (stack up)
+
+Run: `pnpm vitest run packages/shared/src/__tests__/kafka-dlq.int.test.ts packages/shared/src/__tests__/kafka.int.test.ts`
+Expected: both PASS. (The Task 8 round-trip test still passes — `run`'s new third arg is optional.)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/shared/src
+git commit -m "feat(shared): kafka resilience — retry connect, idempotent producer, DLQ parking"
+```
+
+---
+
+### Task 17: `services/hello` — Dockerfile, prod compose profile, wire config/health/shutdown
+
+**Files:**
+- Create: `services/hello/Dockerfile`, `.dockerignore`
+- Create: `services/hello/src/config.ts`
+- Modify: `services/hello/src/app.ts`, `services/hello/src/main.ts`, `docker-compose.example.yml`
+
+**Interfaces:**
+- Consumes: `loadConfig`, `createHealthRouter`, `gracefulShutdown`, `getRedis` from `@ecom/shared`.
+- Produces: `services/hello/src/config.ts` exporting a validated `config`; a `hello` image built by a multi-stage Dockerfile; a `--profile app` compose service.
+
+- [ ] **Step 1: Write `services/hello/src/config.ts`**
+
+```ts
+import { z } from "zod";
+import { loadConfig } from "@ecom/shared";
+
+export const config = loadConfig(
+  z.object({
+    DATABASE_URL: z.string().url(),
+    KAFKA_BROKERS: z.string().default("localhost:9092"),
+    REDIS_URL: z.string().default("redis://localhost:6379"),
+    PORT: z.coerce.number().int().positive().default(3000),
+  })
+);
+```
+
+- [ ] **Step 2: Update `services/hello/src/app.ts`** — mount the health router and use validated config
+
+```ts
+import express from "express";
+import { traceMiddleware, createLogger, createHealthRouter, getRedis } from "@ecom/shared";
+import { HELLO_CREATED, HelloCreatedPayloadSchema } from "@ecom/contracts";
+import { prisma } from "./db";
+
+const log = createLogger("hello");
+
+export function createApp() {
+  const app = express();
+  app.use(express.json());
+  app.use(traceMiddleware());
+
+  app.use(
+    createHealthRouter({
+      db: async () => void (await prisma.$queryRaw`SELECT 1`),
+      redis: async () => void (await (await getRedis()).ping()),
+    })
+  );
+
+  app.post("/hello", async (req, res) => {
+    const name = String(req.body?.name ?? "");
+    if (!name) return res.status(400).json({ error: "name required" });
+
+    const created = await prisma.$transaction(async (tx) => {
+      const rec = await tx.helloRecord.create({ data: { name } });
+      const payload = HelloCreatedPayloadSchema.parse({ helloId: rec.id, name: rec.name });
+      await tx.outbox.create({
+        data: {
+          aggregateType: "hello",
+          aggregateId: rec.id,
+          type: HELLO_CREATED,
+          version: 1,
+          traceId: req.traceId,
+          producer: "hello",
+          payload,
+        },
+      });
+      return rec;
+    });
+
+    log.info("hello_created", { helloId: created.id, traceId: req.traceId });
+    res.status(201).json({ helloId: created.id });
+  });
+
+  return app;
+}
+```
+
+- [ ] **Step 3: Update `services/hello/src/main.ts`** — validated config + graceful shutdown
+
+```ts
+import { createApp } from "./app";
+import { config } from "./config";
+import { outboxPort } from "./outbox-adapter";
+import { handleEvent } from "./consumer";
+import { prisma } from "./db";
+import {
+  createKafka,
+  createProducer,
+  createConsumer,
+  startOutboxRelay,
+  createLogger,
+  gracefulShutdown,
+  getRedis,
+} from "@ecom/shared";
+
+const log = createLogger("hello-main");
+const TOPIC = "hello.events";
+
+async function main() {
+  const kafka = createKafka("hello");
+  const producer = createProducer(kafka);
+  await producer.connect();
+  const relay = startOutboxRelay(outboxPort, producer, () => TOPIC, { intervalMs: 500 });
+
+  const consumer = createConsumer(kafka, "hello-consumers");
+  await consumer.connect();
+  await consumer.run([TOPIC], handleEvent);
+
+  const app = createApp();
+  const server = app.listen(config.PORT, () => log.info("hello_listening", { port: config.PORT }));
+
+  gracefulShutdown([
+    async () => void server.close(),
+    async () => relay.stop(),
+    async () => consumer.disconnect(),
+    async () => producer.disconnect(),
+    async () => (await getRedis()).quit(),
+    async () => prisma.$disconnect(),
+  ]);
+}
+
+main().catch((e) => {
+  log.error("hello_fatal", { message: (e as Error).message });
+  process.exit(1);
+});
+```
+
+- [ ] **Step 4: Create `services/hello/.dockerignore`**
+
+```
+node_modules
+dist
+.env
+```
+
+- [ ] **Step 5: Create `services/hello/Dockerfile`** (multi-stage; build context is the repo root)
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM node:22-alpine AS base
+RUN corepack enable
+WORKDIR /repo
+
+# --- deps + build ---
+FROM base AS build
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY packages ./packages
+COPY services/hello ./services/hello
+RUN pnpm install --frozen-lockfile --filter @ecom/hello...
+RUN pnpm --filter @ecom/hello exec prisma generate
+RUN pnpm --filter @ecom/contracts --filter @ecom/shared --filter @ecom/hello build
+
+# --- runtime ---
+FROM base AS runtime
+ENV NODE_ENV=production
+COPY --from=build /repo /repo
+WORKDIR /repo/services/hello
+EXPOSE 3000
+CMD ["pnpm", "exec", "tsx", "src/main.ts"]
+```
+
+- [ ] **Step 6: Add a prod `app` profile service to `docker-compose.example.yml`** (append under `services:`, before `volumes:`)
+
+```yaml
+  hello:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: services/hello/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/hello
+      KAFKA_BROKERS: kafka:19092
+      REDIS_URL: redis://redis:6379
+      PORT: 3000
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+```
+
+- [ ] **Step 7: Build the image and verify readiness** (infra must be up + `hello` DB migrated)
+
+Run:
+```bash
+docker compose build hello
+docker compose --profile app up -d hello
+sleep 15 && curl -fsS localhost:3000/readyz
+```
+Expected: `docker compose build` succeeds; `/readyz` returns `{"status":"ready"}`.
+
+- [ ] **Step 8: Typecheck + commit**
+
+Run: `pnpm --filter @ecom/hello typecheck`
+Expected: no errors.
+
+```bash
+git add services/hello docker-compose.example.yml
+git commit -m "feat(hello): dockerfile, prod compose profile, config+health+shutdown"
+```
+
+---
+
+### Task 18: CI workflow (replaces the legacy deploy workflow)
+
+**Files:**
+- Create: `.github/workflows/ci.yml`
+- Delete: `.github/workflows/node.js.yml` (legacy monolith deploy — `npm run ci` = pm2 restart; broken once `package.json` moved to `legacy/`)
+
+**Interfaces:**
+- Produces: CI that runs on every push/PR — install → lint → format check → typecheck → unit tests → (with infra up) integration + e2e → build → `pnpm audit`.
+
+- [ ] **Step 1: Remove the obsolete legacy workflow**
+
+```bash
+git rm .github/workflows/node.js.yml
+```
+
+- [ ] **Step 2: Create `.github/workflows/ci.yml`**
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/**"]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm vitest run packages/**/*.test.ts --exclude "**/*.int.test.ts"
+      - run: pnpm -r build
+      - run: pnpm audit --audit-level high || true
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      - name: Start infra
+        run: |
+          cp docker-compose.example.yml docker-compose.yml
+          printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
+          docker compose up -d
+          timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 4 ]; do sleep 3; done'
+      - name: Migrate hello DB
+        run: |
+          printf 'DATABASE_URL=postgresql://ecom:ecom@localhost:5432/hello\nKAFKA_BROKERS=localhost:9092\nREDIS_URL=redis://localhost:6379\n' > services/hello/.env
+          pnpm --filter @ecom/hello exec prisma migrate deploy
+      - name: Integration + e2e tests
+        run: pnpm vitest run "**/*.int.test.ts" "**/*.e2e.test.ts"
+```
+
+- [ ] **Step 3: Validate the workflow YAML locally**
+
+Run: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml')); print('ci.yml OK')"`
+Expected: `ci.yml OK`. (Full CI runs on push; this just catches YAML errors before committing.)
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/ci.yml
+git rm --cached .github/workflows/node.js.yml 2>/dev/null || true
+git commit -m "ci(phase0): monorepo CI (lint/typecheck/test/build/audit), drop legacy deploy"
+```
+
+---
+
 ## Phase 0 acceptance
 
-- `pnpm install` resolves the workspace; `pnpm -r typecheck` is clean.
+- `pnpm install` resolves the workspace; `pnpm -r typecheck`, `pnpm lint`, and `pnpm format:check` are clean.
 - `docker compose up -d` brings Postgres (DB-per-service), Kafka (KRaft), RabbitMQ (+DLQ-capable), Redis, and Kafka-UI to healthy.
-- Unit tests pass with no infra: contracts envelope, logger, errors, trace, outbox drain.
-- Integration tests pass with the stack up: redis idempotency + lock, kafka round-trip, rabbitmq DLQ.
+- Unit tests pass with no infra: contracts envelope, logger, errors, trace, outbox drain, config loader, health router, retry, lifecycle.
+- Integration tests pass with the stack up: redis idempotency + lock, kafka round-trip, kafka DLQ-parking, rabbitmq DLQ.
+- **Production primitives:** a service crashes at boot on bad env (config); `/healthz`+`/readyz` reflect dependency reachability; SIGTERM drains and exits cleanly; a poison Kafka message parks on `<topic>.dlq` instead of wedging the partition.
 - **Tracer bullet:** `POST /hello` persists a record + outbox row in one transaction, the polling relay publishes it to Kafka, and the consumer records it in `ProcessedEvent` exactly once — re-delivery is deduped by the Redis idempotency guard. Verifiable in Kafka-UI (`hello.events` topic) and in the `hello` database.
+- **Build + CI:** the `hello` multi-stage image builds and `/readyz` returns ready under the `--profile app` compose profile; `.github/workflows/ci.yml` runs lint → typecheck → unit → integration/e2e → build → audit, and the legacy deploy workflow is removed.
 - The old monolith lives under `legacy/`, untouched and unreferenced by the new packages.
 
 ## Self-review notes
 
 - **Spec coverage:** monorepo (T1), contracts (T2), logger/errors/trace/redis/kafka/rabbit/outbox in `shared` (T3–T10), docker-compose.example + infra.md + gitignore (T6), DB-per-service via single-container multi-DB init (T6), Prisma per service (T11), hello-event acceptance (T11). Broker roles exercised: Kafka backbone (T8/T11), RabbitMQ commands+DLQ (T9), Redis lock+idempotency (T7/T11).
+- **Production baseline coverage (decision #11 / DoD):** lint+format (T12), fail-fast config (T13), health/readiness (T14), retry/backoff + graceful shutdown (T15), Kafka resilience + DLQ-parking (T16), Dockerfile + prod compose profile + wired config/health/shutdown (T17), CI (T18). Deferred to per-service phases / Phase 7 per the DoD: RED+domain metrics endpoints, k6 load + chaos suite, SLO alerting, runbooks, circuit breakers on sync edges (no sync service calls exist yet in Phase 0).
 - **No PII:** logger and trace middleware log ids/codes only; the legacy body-logging behavior is deliberately dropped (T5).
 - **Type consistency:** `OutboxPort`/`OutboxRow`/`ProducerPort` defined in T10 and consumed in T11; `EventEnvelope`/`makeEnvelope` defined in T2 and used in T8/T9/T10/T11; `markProcessed` defined in T7 and used in T11.
 - **Per-service env:** the root `.env` carries compose credentials only; each
