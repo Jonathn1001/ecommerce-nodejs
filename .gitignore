@@ -11,3 +11,11 @@ node_modules
 
 *.log
 *audit.json
+
+# --- monorepo additions ---
+dist/
+docker-compose.yml
+**/generated/
+# committed env templates (the existing .env* rules would otherwise ignore these)
+!.env.example
+!**/.env.example
