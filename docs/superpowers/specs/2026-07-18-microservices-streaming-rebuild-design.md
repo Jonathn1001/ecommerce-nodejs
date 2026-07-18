@@ -164,6 +164,20 @@ Representative tables:
    both sync headers and event envelopes, so one checkout can be followed across
    all six services. `trace-log.middleware` is the seed.
 
+## Observability — three pillars (no overlap)
+
+| Pillar | Tooling | Answers |
+|---|---|---|
+| **Logs** | winston structured JSON (Phase 0, `shared`) | what happened, per event |
+| **Metrics** | **Prometheus** (scrapes each service `/metrics`, stores time-series, alerts) + **Grafana** (dashboards on top; stores nothing itself) | how much / how fast, over time |
+| **Traces** | OpenTelemetry → **Jaeger** | one request's span timeline across services |
+
+Prometheus and Grafana are **complementary, not duplicative**: Prometheus is the
+time-series store + scraper, Grafana is the visualization layer that queries it.
+Domain metrics to expose: Kafka **consumer lag**, RabbitMQ **queue + DLQ depth**,
+**saga step latency**, reservation conflicts, HTTP p95 per service. Wired in
+Phase 7.
+
 ## Broker role assignment
 
 | Broker | Role | Patterns learned |
@@ -179,7 +193,8 @@ Representative tables:
 - Gitignored: `docker-compose.yml` (your local copy) and `.env`.
 - Stack: one Postgres per service (or one Postgres server + one database per
   service for lighter local footprint — decided in Phase 0), Kafka + Zookeeper/
-  KRaft, RabbitMQ (with management UI), Redis, Kafka-UI.
+  KRaft, RabbitMQ (with management UI), Redis, Kafka-UI. **Phase 7 adds**
+  Prometheus, Grafana, and Jaeger.
 
 ## Testing (TDD)
 
@@ -204,7 +219,7 @@ spec → plan → implementation cycle**. This document is the umbrella spec.
 | **4 · Catalog** | products/comments/discounts + Order's `catalog_read_model` projection (consume `ProductCreated`/`PriceChanged`) | Decouples checkout from Catalog via events. |
 | **5 · Notification** | consume order/catalog events (Kafka) → dispatch email/push via RabbitMQ + DLQ + retry | RabbitMQ showcase. |
 | **6 · Identity + Gateway** | auth/rbac extracted; gateway verifies JWT and routes to all services | Front door built last, once services exist. |
-| **7 · (optional) Hardening** | OpenTelemetry + Jaeger tracing, orchestrated-saga variant (comparison), chaos test (kill a broker/service), schema-evolution `v2` event | Depth lessons once the spine is solid. |
+| **7 · (optional) Hardening** | **Prometheus + Grafana** (metrics dashboards: consumer lag, DLQ depth, saga latency), OpenTelemetry + Jaeger tracing, orchestrated-saga variant (comparison), chaos test (kill a broker/service), schema-evolution `v2` event | Depth lessons once the spine is solid. |
 
 ## Out of scope (for now)
 
