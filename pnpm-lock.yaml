@@ -42,6 +42,9 @@ importers:
       express:
         specifier: ^4.21.0
         version: 4.22.2
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4
       redis:
         specifier: ^4.7.0
         version: 4.7.1
@@ -898,6 +901,10 @@ packages:
   is-stream@2.0.1:
     resolution: {integrity: sha512-hFoiJiTl63nn+kstHGBtewWSKnQLpyb155KHheA1l39uvtO9nWIop1p3udqPcUd/xbF1VLMO4n7OI6p7RbngDg==}
     engines: {node: '>=8'}
+
+  kafkajs@2.2.4:
+    resolution: {integrity: sha512-j/YeapB1vfPT2iOIUn/vxdyKEuhuY2PxMBvf5JWux6iSaukAccrMtXEY/Lb7OvavDhOWME589bpLrEdnVHjfjA==}
+    engines: {node: '>=14.0.0'}
 
   kuler@2.0.0:
     resolution: {integrity: sha512-Xq9nH7KlWZmXAtodXDDRE7vs6DU1gTU8zYDHDiWLSip45Egwq3plLHzPn27NgvzL2r1LMPC1vdqh98sQxtqj4A==}
@@ -1956,6 +1963,8 @@ snapshots:
   ipaddr.js@1.9.1: {}
 
   is-stream@2.0.1: {}
+
+  kafkajs@2.2.4: {}
 
   kuler@2.0.0: {}
 
