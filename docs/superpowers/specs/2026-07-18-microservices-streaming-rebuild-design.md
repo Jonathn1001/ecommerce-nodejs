@@ -36,6 +36,7 @@ so the "when to use which" lesson is explicit.
 | 8 | Repo layout | **Monorepo**; old monolith kept as `legacy/` read-only reference |
 | 9 | Infra in git | Commit `docker-compose.example.yml` + `docs/infra.md`; real `docker-compose.yml` and `.env` **gitignored** |
 | 10 | Payment | **Own service** with a **simulated gateway** (deterministic success/fail/timeout); real Stripe test-mode is an optional later swap |
+| 11 | Quality bar | **Production-grade engineering, runs locally** — CI, per-service Dockerfiles, security hardening, resilience (retries/backoff/circuit breakers/timeouts), full observability, load + chaos tests, runbooks. No cloud/k8s deploy; payment stays simulated |
 
 ## System topology
 
@@ -204,28 +205,98 @@ Phase 7.
 - Contract tests on the `contracts` package.
 - One **e2e saga test** driving the happy path plus an injected payment failure,
   asserting refund + inventory release.
+- **Load tests** (k6) against the checkout path and **chaos tests** (kill a broker
+  / a service mid-saga) asserting the system recovers without lost or double
+  effects.
+
+## Production-readiness (non-functional requirements)
+
+The quality bar is production-grade engineering that runs locally (decision #11).
+Every requirement below is *local-first* — no cloud, no k8s, payment simulated —
+but built to real-world standards.
+
+**Security**
+- Input validation with zod at every edge (HTTP body/params, event payloads).
+- AuthN via JWT (Identity-issued), authZ via RBAC at the gateway and per service.
+- Rate limiting + `helmet` security headers at the gateway.
+- Secrets only via env / `.env` (gitignored); never committed, never logged.
+- Dependency scanning in CI (`pnpm audit` + a scanner step).
+
+**Resilience**
+- Every outbound call (HTTP, broker, DB) has a **timeout**.
+- **Retries with exponential backoff + jitter** on transient failures; bounded.
+- **Circuit breaker** on sync service-to-service calls (gateway edge).
+- Idempotent consumers (dedup on `eventId`); **DLQ + documented replay** for both
+  Kafka (parking topic) and RabbitMQ (dead-letter queue).
+- **Graceful shutdown**: stop intake, drain in-flight work, close broker/DB
+  connections, then exit, on SIGTERM/SIGINT.
+
+**Observability & SLOs**
+- Three pillars (logs/metrics/traces) wired per service.
+- Per-service **RED metrics** (Rate, Errors, Duration) + domain metrics
+  (consumer lag, DLQ depth, saga latency).
+- Target **SLOs**: checkout p95 < 500 ms (excluding simulated-gateway latency),
+  saga completion p99 < 5 s, error rate < 1%. Alerting rules on SLO burn.
+
+**Delivery & operability**
+- **CI** on every push/PR: install → lint → typecheck → unit + integration tests
+  (brokers/DB via services) → build → dependency scan.
+- **Per-service multi-stage Dockerfile**; a `docker-compose` prod profile builds
+  and runs the images (not just the infra).
+- **Config validation at boot** (zod) — a service fails fast on missing/invalid env.
+- **Health probes**: `/healthz` (liveness) + `/readyz` (readiness — checks DB/
+  broker reachability).
+- **Zero-downtime migrations**: expand/contract pattern (add nullable → backfill →
+  switch → drop), never a destructive change in one deploy.
+- **Runbook** per service (how to run, common failures, replay a DLQ, roll back).
+
+## Per-service Definition of Done
+
+A phase is not complete until its service meets ALL of:
+
+- [ ] Own Postgres database + Prisma schema + migration (expand/contract-safe).
+- [ ] zod-validated config at boot; fails fast on bad env.
+- [ ] `/healthz` + `/readyz` endpoints; compose healthcheck wired to `/readyz`.
+- [ ] Graceful shutdown draining in-flight work and closing connections.
+- [ ] All outbound calls have timeouts; transient failures retried with backoff.
+- [ ] Idempotent event consumers; DLQ path + replay documented.
+- [ ] Transactional outbox for every emitted event.
+- [ ] Structured logs (no PII), RED + domain metrics exposed, traces propagated.
+- [ ] Unit + integration (testcontainers) + contract tests; green in CI.
+- [ ] Multi-stage Dockerfile; image builds and runs in the prod compose profile.
+- [ ] Runbook entry.
 
 ## Build order
 
 Each phase is an independently runnable, demoable slice, and gets its **own child
-spec → plan → implementation cycle**. This document is the umbrella spec.
+spec → plan → implementation cycle**. This document is the umbrella spec. **Every
+phase's service must satisfy the Per-service Definition of Done before it is
+complete**; the production primitives (config validation, health probes, graceful
+shutdown, broker resilience, Dockerfile, CI) are established in Phase 0 and
+inherited by every later service.
 
 | Phase | Delivers | Rationale |
 |---|---|---|
-| **0 · Platform** | workspaces, TS, `contracts` + `shared` packages, `docker-compose.example` (Postgres, Kafka, RabbitMQ, Redis, Kafka-UI), broker wrappers, outbox relay, idempotency helper, trace middleware, structured logger. Proven by a **"hello event"**: producer → Kafka → consumer with dedup. No business logic. | Tracer bullet through the *infrastructure*; de-risks everything before domain work. |
+| **0 · Platform** | workspaces, TS, `contracts` + `shared` packages, `docker-compose.example` (Postgres, Kafka, RabbitMQ, Redis, Kafka-UI), broker wrappers (with retry/backoff + consumer error boundary), outbox relay, idempotency helper, trace middleware, structured logger — **plus the production primitives every service inherits**: zod config validation, `/healthz`+`/readyz`, graceful shutdown, lint/format, a multi-stage Dockerfile template, and CI. Proven by a **"hello event"**: producer → Kafka → consumer with dedup. No business logic. | Tracer bullet through the *infrastructure*; de-risks everything and sets the production template before domain work. |
 | **1 · Inventory** | own DB, reserve/release, Redis lock, events | Leaf the saga depends on; ports `inventory` + `redis.service`. |
 | **2 · Order** | cart + checkout + place order; choreographed saga vs Inventory; compensation; reservation expiry | The core loop with the fewest participants. |
 | **3 · Payment** | simulated gateway, charge/refund, webhook | Completes the full saga with compensation. |
 | **4 · Catalog** | products/comments/discounts + Order's `catalog_read_model` projection (consume `ProductCreated`/`PriceChanged`) | Decouples checkout from Catalog via events. |
 | **5 · Notification** | consume order/catalog events (Kafka) → dispatch email/push via RabbitMQ + DLQ + retry | RabbitMQ showcase. |
 | **6 · Identity + Gateway** | auth/rbac extracted; gateway verifies JWT and routes to all services | Front door built last, once services exist. |
-| **7 · (optional) Hardening** | **Prometheus + Grafana** (metrics dashboards: consumer lag, DLQ depth, saga latency), OpenTelemetry + Jaeger tracing, orchestrated-saga variant (comparison), chaos test (kill a broker/service), schema-evolution `v2` event | Depth lessons once the spine is solid. |
+| **7 · System hardening & verification** | System-wide **Prometheus + Grafana** dashboards + SLO alerting, OpenTelemetry + Jaeger tracing, **k6 load tests** + **chaos suite** (kill a broker/service mid-saga), orchestrated-saga variant (comparison), schema-evolution `v2` event | Prove the whole system meets its SLOs and recovers from failure. (Per-service observability/resilience already ships in each phase via the DoD.) |
 
 ## Out of scope (for now)
 
+Production-grade *engineering quality* is in scope (decision #11) and runs locally.
+What stays out:
+
 - Real payment provider / real money (simulated gateway only; Stripe test-mode is
   an optional later swap).
-- Kubernetes / cloud deployment (local docker-compose only).
+- Kubernetes / cloud deployment / managed services (local docker-compose only —
+  the prod compose profile builds and runs the service images, but there is no
+  cloud target, no HA/autoscaling, no managed Postgres/Kafka).
+- Real secrets manager (env / gitignored `.env` only).
 - Frontend.
 - Polyglot persistence (all Postgres for this pass; per-workload DB choice is a
   possible future lesson).
