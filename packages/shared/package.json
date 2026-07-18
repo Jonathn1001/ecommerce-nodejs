@@ -1,0 +1,15 @@
+{
+  "name": "@ecom/shared",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ecom/contracts": "workspace:*",
+    "winston": "^3.17.0"
+  }
+}
