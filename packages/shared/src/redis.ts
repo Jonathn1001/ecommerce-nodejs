@@ -2,14 +2,43 @@ import { createClient, type RedisClientType } from "redis";
 import { randomUUID } from "crypto";
 
 let client: RedisClientType | null = null;
+// In-flight connect() promise, shared by concurrent getRedis() callers so only
+// one of them ever calls client.connect() (node-redis v4 rejects a second
+// concurrent connect() on the same client). Cleared once connect() settles.
+let connectPromise: Promise<void> | null = null;
 
 export async function getRedis(): Promise<RedisClientType> {
   if (!client) {
     client = createClient({ url: process.env.REDIS_URL ?? "redis://localhost:6379" });
     client.on("error", () => {}); // errors surface on the awaited command
   }
-  if (!client.isOpen) await client.connect();
+  if (!client.isOpen) {
+    if (!connectPromise) {
+      const c = client;
+      connectPromise = c.connect().then(
+        () => {
+          connectPromise = null;
+        },
+        (err) => {
+          connectPromise = null;
+          throw err;
+        },
+      );
+    }
+    await connectPromise;
+  }
   return client;
+}
+
+// Closes the shared client (if open) and resets the module singleton so a
+// later getRedis() creates a fresh, connectable client. Shaped as a plain
+// () => Promise<void> so it can be registered as a graceful-shutdown Closer.
+export async function closeRedis(): Promise<void> {
+  if (client && client.isOpen) {
+    await client.quit();
+  }
+  client = null;
+  connectPromise = null;
 }
 
 // Idempotency guard: true the first time this eventId is seen, false after.

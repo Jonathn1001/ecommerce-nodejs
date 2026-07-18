@@ -1,6 +1,39 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { v4 as uuidv4 } from "uuid";
-import { getRedis, markProcessed, acquireLock, releaseLock } from "../redis";
+import { getRedis, closeRedis, markProcessed, acquireLock, releaseLock } from "../redis";
+
+// This block MUST execute before any other describe/test in this file calls
+// getRedis() — the singleton in `../redis` is module-scoped and only starts
+// out disconnected once, on first import into this test file's (isolated)
+// module registry. Vitest runs describe blocks within one file top-to-bottom
+// in declaration order (no `sequence.shuffle`/concurrent config in
+// vitest.config.ts), so placing this describe first — above the existing
+// `beforeAll(() => getRedis())` block below — guarantees a virgin,
+// disconnected client the first time `getRedis()` is called here.
+describe("redis client lifecycle — concurrent connect (cold start)", () => {
+  it("N concurrent getRedis() calls against a cold client all resolve to the same connected client, no error", async () => {
+    const N = 10;
+    const clients = await Promise.all(Array.from({ length: N }, () => getRedis()));
+    for (const c of clients) {
+      expect(c).toBe(clients[0]);
+      expect(c.isOpen).toBe(true);
+    }
+  });
+});
+
+describe("redis client lifecycle — closeRedis + reconnect", () => {
+  it("closeRedis then getRedis returns a fresh open client, and markProcessed still works", async () => {
+    const before = await getRedis();
+    await closeRedis();
+    const after = await getRedis();
+    expect(after).not.toBe(before);
+    expect(after.isOpen).toBe(true);
+
+    const id = uuidv4();
+    expect(await markProcessed(id)).toBe(true);
+    expect(await markProcessed(id)).toBe(false);
+  });
+});
 
 describe("redis helpers (integration — needs docker compose up)", () => {
   beforeAll(async () => {
