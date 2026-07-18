@@ -115,9 +115,14 @@ export default defineConfig({
 dist/
 docker-compose.yml
 **/generated/
+# committed env templates (the existing .env* rules would otherwise ignore these)
+!.env.example
+!**/.env.example
 ```
 
-(`node_modules`, `.env`, `.env.*`, `*.log` are already ignored.)
+(`node_modules`, `.env`, `.env.*`, `*.log` are already ignored. The two negations
+above re-include the committed `.env.example` templates — root and per-service —
+which the existing `.env*` rule would otherwise swallow.)
 
 - [ ] **Step 7: Install and verify the workspace resolves**
 
@@ -753,20 +758,14 @@ CREATE DATABASE payment;
 CREATE DATABASE notification;
 ```
 
-- [ ] **Step 3: Create `.env.example`**
+- [ ] **Step 3: Create the root `.env.example`** (compose credentials only; per-service connection strings live in each service's own `.env.example`)
 
 ```bash
-# Copy to .env (gitignored) and adjust as needed.
+# Copy to .env (gitignored). Consumed by docker-compose for container credentials.
 POSTGRES_USER=ecom
 POSTGRES_PASSWORD=ecom
 RABBITMQ_USER=ecom
 RABBITMQ_PASSWORD=ecom
-
-# hello service
-DATABASE_URL=postgresql://ecom:ecom@localhost:5432/hello
-KAFKA_BROKERS=localhost:9092
-REDIS_URL=redis://localhost:6379
-RABBITMQ_URL=amqp://ecom:ecom@localhost:5672
 ```
 
 - [ ] **Step 4: Create `docs/infra.md`**
@@ -785,6 +784,12 @@ cp .env.example .env
 docker compose up -d
 docker compose ps        # wait until all services are healthy
 ```
+
+Each service also has its own `.env.example` (e.g. `services/hello/.env.example`)
+holding its connection strings. Copy it to `.env` in that service's directory
+before migrating or running the service:
+`cp services/hello/.env.example services/hello/.env`. Each service loads its own
+`.env` regardless of the current working directory.
 
 ## Endpoints
 
@@ -1426,6 +1431,7 @@ git commit -m "feat(shared): transactional outbox drain + polling relay"
     "@ecom/contracts": "workspace:*",
     "@ecom/shared": "workspace:*",
     "@prisma/client": "^6.1.0",
+    "dotenv": "^16.4.5",
     "express": "^4.21.0"
   },
   "devDependencies": {
@@ -1489,18 +1495,35 @@ model ProcessedEvent {
 }
 ```
 
-- [ ] **Step 4: Run the migration** (creates tables in the `hello` database)
+- [ ] **Step 4: Create the per-service env, then run the migration**
 
-Run:
+Create `services/hello/.env.example` (committed — re-included by the `.gitignore`
+negation from Task 1):
+
 ```bash
-cd services/hello && pnpm exec prisma migrate dev --name init && cd ../..
+DATABASE_URL=postgresql://ecom:ecom@localhost:5432/hello
+KAFKA_BROKERS=localhost:9092
+REDIS_URL=redis://localhost:6379
+RABBITMQ_URL=amqp://ecom:ecom@localhost:5672
+```
+
+Run (copies to the gitignored `.env`, then migrates against the `hello` database):
+```bash
+cd services/hello && cp .env.example .env && pnpm exec prisma migrate dev --name init && cd ../..
 ```
 Expected: creates `prisma/migrations/*/migration.sql`, applies it, generates the client. (Do not hand-edit the generated migration.)
 
-- [ ] **Step 5: Write `services/hello/src/db.ts`**
+- [ ] **Step 5: Write `services/hello/src/db.ts`** (per-service env: loads `services/hello/.env` regardless of cwd, before Prisma reads `DATABASE_URL`)
 
 ```ts
+import { config } from "dotenv";
+import path from "path";
 import { PrismaClient } from "@prisma/client";
+
+// Load THIS service's .env whether started from repo root (vitest) or the
+// service dir (tsx). Runs before `new PrismaClient()` reads DATABASE_URL.
+config({ path: path.resolve(__dirname, "../.env") });
+
 export const prisma = new PrismaClient();
 ```
 
@@ -1569,22 +1592,36 @@ export function createApp() {
 }
 ```
 
-- [ ] **Step 8: Write `services/hello/src/consumer.ts`** — idempotent processing via `markProcessed`
+- [ ] **Step 8: Write `services/hello/src/consumer.ts`** — Redis primary guard + durable DB backstop
 
 ```ts
 import { markProcessed, createLogger, type Logger } from "@ecom/shared";
 import { EventEnvelope } from "@ecom/contracts";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 
 const log: Logger = createLogger("hello-consumer");
 
+// Redis markProcessed is the primary fast-path guard. The ProcessedEvent unique
+// constraint (eventId @id) is the durable backstop: if the Redis key was evicted
+// and the same event redelivers, the insert throws P2002 — we treat that as
+// "already processed" and return, instead of letting the exception wedge the
+// Kafka consumer in an infinite offset-retry loop.
 export async function handleEvent(env: EventEnvelope): Promise<void> {
   const first = await markProcessed(env.eventId);
   if (!first) {
     log.info("event_duplicate_skipped", { eventId: env.eventId });
     return;
   }
-  await prisma.processedEvent.create({ data: { eventId: env.eventId, type: env.type } });
+  try {
+    await prisma.processedEvent.create({ data: { eventId: env.eventId, type: env.type } });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      log.info("event_duplicate_db_skipped", { eventId: env.eventId });
+      return;
+    }
+    throw e;
+  }
   log.info("event_processed", { eventId: env.eventId, type: env.type, traceId: env.traceId });
 }
 ```
@@ -1726,4 +1763,15 @@ git commit -m "feat(hello): tracer bullet — outbox -> kafka -> idempotent cons
 - **Spec coverage:** monorepo (T1), contracts (T2), logger/errors/trace/redis/kafka/rabbit/outbox in `shared` (T3–T10), docker-compose.example + infra.md + gitignore (T6), DB-per-service via single-container multi-DB init (T6), Prisma per service (T11), hello-event acceptance (T11). Broker roles exercised: Kafka backbone (T8/T11), RabbitMQ commands+DLQ (T9), Redis lock+idempotency (T7/T11).
 - **No PII:** logger and trace middleware log ids/codes only; the legacy body-logging behavior is deliberately dropped (T5).
 - **Type consistency:** `OutboxPort`/`OutboxRow`/`ProducerPort` defined in T10 and consumed in T11; `EventEnvelope`/`makeEnvelope` defined in T2 and used in T8/T9/T10/T11; `markProcessed` defined in T7 and used in T11.
+- **Per-service env:** the root `.env` carries compose credentials only; each
+  service owns a `.env.example`/`.env` with its own connection strings and loads
+  it from its own directory (T5 `db.ts`), so migrate/run/test work from any cwd.
+  The `.gitignore` negations (T1) re-include the committed `.env.example` templates.
+- **Idempotency (Redis kept primary):** Redis `markProcessed` is the fast-path
+  guard; the `ProcessedEvent` unique constraint is the durable backstop, and a
+  P2002 on redelivery is swallowed (T8) so an evicted Redis key can't wedge the
+  consumer.
+- **`BaseController` intentionally deferred:** Phase 0's `hello` service uses one
+  inline handler; a shared `BaseController` earns its place at the first service
+  with multiple controllers sharing response/error plumbing (Phase 1+).
 - **Deferred to later phases (not Phase 0):** OpenTelemetry/Jaeger + Prometheus/Grafana (Phase 7); testcontainers-based isolation for CI (integration tests here run against the dev compose stack); Debezium (polling relay is intentional for Phase 0).
