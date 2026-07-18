@@ -11,6 +11,7 @@
   "dependencies": {
     "@ecom/contracts": "workspace:*",
     "express": "^4.21.0",
+    "redis": "^4.7.0",
     "uuid": "^11.0.0",
     "winston": "^3.17.0"
   },
