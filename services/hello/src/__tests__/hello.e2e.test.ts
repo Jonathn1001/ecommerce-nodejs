@@ -5,6 +5,7 @@ import { outboxPort } from "../outbox-adapter";
 import { handleEvent } from "../consumer";
 import { prisma } from "../db";
 import { createKafka, createProducer, createConsumer, startOutboxRelay, getRedis } from "@ecom/shared";
+import { makeEnvelope, HELLO_CREATED } from "@ecom/contracts";
 
 const TOPIC = "hello.events";
 
@@ -62,5 +63,28 @@ describe("hello tracer bullet (e2e — needs docker compose up + migrated)", () 
     // idempotency: re-processing the same event does not create a second row
     const count = await prisma.processedEvent.count({ where: { eventId: helloId } });
     expect(count).toBe(1);
+
+    // Real redelivery, exercising both dedup guard layers (the count check
+    // above is tautological on its own — ProcessedEvent.eventId is the PK, so
+    // it's always 0-or-1 without ever proving a redelivered event is deduped).
+    const env = makeEnvelope({
+      eventId: helloId,
+      type: HELLO_CREATED,
+      version: 1,
+      traceId: "e2e-redeliver",
+      producer: "hello",
+      payload: { helloId, name: "ada" },
+    });
+
+    // redelivery 1 — Redis fast-path dedup (idem key still present): must not
+    // throw, count stays 1
+    await handleEvent(env);
+    expect(await prisma.processedEvent.count({ where: { eventId: helloId } })).toBe(1);
+
+    // redelivery 2 — evict the Redis idem key, exercising the ProcessedEvent
+    // unique-constraint (P2002) backstop: must not throw, count stays 1
+    await (await getRedis()).del(`idem:${helloId}`);
+    await handleEvent(env);
+    expect(await prisma.processedEvent.count({ where: { eventId: helloId } })).toBe(1);
   });
 });
