@@ -6,3 +6,4 @@ export * from "./redis";
 export * from "./kafka";
 export * from "./rabbitmq";
 export * from "./outbox";
+export * from "./config";

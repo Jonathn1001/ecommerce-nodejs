@@ -15,7 +15,8 @@
     "kafkajs": "^2.2.4",
     "redis": "^4.7.0",
     "uuid": "^11.0.0",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.5",
