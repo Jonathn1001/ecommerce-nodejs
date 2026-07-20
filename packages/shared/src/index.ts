@@ -4,3 +4,4 @@ export * from "./errors";
 export * from "./trace";
 export * from "./redis";
 export * from "./kafka";
+export * from "./rabbitmq";
