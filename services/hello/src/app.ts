@@ -1,5 +1,5 @@
 import express from "express";
-import { traceMiddleware, createLogger } from "@ecom/shared";
+import { traceMiddleware, createLogger, createHealthRouter, getRedis } from "@ecom/shared";
 import { HELLO_CREATED, HelloCreatedPayloadSchema } from "@ecom/contracts";
 import { prisma } from "./db";
 
@@ -9,6 +9,13 @@ export function createApp(): express.Application {
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
+
+  app.use(
+    createHealthRouter({
+      db: async () => void (await prisma.$queryRaw`SELECT 1`),
+      redis: async () => void (await (await getRedis()).ping()),
+    })
+  );
 
   app.post("/hello", async (req, res) => {
     const name = String(req.body?.name ?? "");

@@ -69,5 +69,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # Application services live behind the `app` profile so `docker compose up`
+  # brings up only infra by default:  docker compose --profile app up -d hello
+  hello:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: services/hello/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/hello
+      KAFKA_BROKERS: kafka:19092
+      REDIS_URL: redis://redis:6379
+      PORT: 3000
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:

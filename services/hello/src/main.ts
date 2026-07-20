@@ -1,12 +1,16 @@
 import { createApp } from "./app";
+import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { handleEvent } from "./consumer";
+import { prisma } from "./db";
 import {
   createKafka,
   createProducer,
   createConsumer,
   startOutboxRelay,
   createLogger,
+  gracefulShutdown,
+  getRedis,
 } from "@ecom/shared";
 
 const log = createLogger("hello-main");
@@ -23,16 +27,20 @@ async function main() {
   await consumer.run([TOPIC], handleEvent);
 
   const app = createApp();
-  const server = app.listen(3000, () => log.info("hello_listening", { port: 3000 }));
+  const server = app.listen(config.PORT, () =>
+    log.info("hello_listening", { port: config.PORT })
+  );
 
-  const shutdown = async () => {
-    relay.stop();
-    await consumer.disconnect();
-    await producer.disconnect();
-    server.close();
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  // Closers run in REVERSE registration order: stop accepting traffic first,
+  // then the relay/consumer/producer, then the backing stores.
+  gracefulShutdown([
+    async () => void server.close(),
+    async () => relay.stop(),
+    async () => consumer.disconnect(),
+    async () => producer.disconnect(),
+    async () => void (await getRedis()).quit(),
+    async () => void prisma.$disconnect(),
+  ]);
 }
 
 main().catch((e) => {
