@@ -34,7 +34,7 @@ describe("createLogger", () => {
     // no hidden defaults (env, headers, request body, etc.) ever leak in, so the
     // logger can only ever emit what a caller explicitly hands it (ids/codes).
     expect(Object.keys(parsed).sort()).toEqual(
-      ["level", "message", "orderId", "service", "timestamp", "traceId"].sort(),
+      ["level", "message", "orderId", "service", "timestamp", "traceId"].sort()
     );
   });
 });

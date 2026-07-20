@@ -22,7 +22,7 @@ export async function getRedis(): Promise<RedisClientType> {
         (err) => {
           connectPromise = null;
           throw err;
-        },
+        }
       );
     }
     await connectPromise;
@@ -56,7 +56,7 @@ return 0`;
 
 export async function acquireLock(
   resource: string,
-  opts: { retries?: number; ttlMs?: number } = {},
+  opts: { retries?: number; ttlMs?: number } = {}
 ): Promise<{ key: string; token: string } | null> {
   const { retries = 10, ttlMs = 3000 } = opts;
   const c = await getRedis();
@@ -70,7 +70,10 @@ export async function acquireLock(
   return null;
 }
 
-export async function releaseLock(handle: { key: string; token: string }): Promise<number> {
+export async function releaseLock(handle: {
+  key: string;
+  token: string;
+}): Promise<number> {
   const c = await getRedis();
   return (await c.eval(RELEASE_LOCK_SCRIPT, {
     keys: [handle.key],

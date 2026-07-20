@@ -1,7 +1,13 @@
 import { createApp } from "./app";
 import { outboxPort } from "./outbox-adapter";
 import { handleEvent } from "./consumer";
-import { createKafka, createProducer, createConsumer, startOutboxRelay, createLogger } from "@ecom/shared";
+import {
+  createKafka,
+  createProducer,
+  createConsumer,
+  startOutboxRelay,
+  createLogger,
+} from "@ecom/shared";
 
 const log = createLogger("hello-main");
 const TOPIC = "hello.events";

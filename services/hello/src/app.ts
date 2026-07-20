@@ -17,7 +17,10 @@ export function createApp(): express.Application {
     try {
       const created = await prisma.$transaction(async (tx) => {
         const rec = await tx.helloRecord.create({ data: { name } });
-        const payload = HelloCreatedPayloadSchema.parse({ helloId: rec.id, name: rec.name });
+        const payload = HelloCreatedPayloadSchema.parse({
+          helloId: rec.id,
+          name: rec.name,
+        });
         await tx.outbox.create({
           data: {
             id: rec.id,

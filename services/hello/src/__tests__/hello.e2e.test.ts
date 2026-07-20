@@ -4,7 +4,13 @@ import { createApp } from "../app";
 import { outboxPort } from "../outbox-adapter";
 import { handleEvent } from "../consumer";
 import { prisma } from "../db";
-import { createKafka, createProducer, createConsumer, startOutboxRelay, getRedis } from "@ecom/shared";
+import {
+  createKafka,
+  createProducer,
+  createConsumer,
+  startOutboxRelay,
+  getRedis,
+} from "@ecom/shared";
 import { makeEnvelope, HELLO_CREATED } from "@ecom/contracts";
 
 const TOPIC = "hello.events";
@@ -31,7 +37,9 @@ describe("hello tracer bullet (e2e — needs docker compose up + migrated)", () 
     // provisioned ahead of time.
     const admin = kafka.admin();
     await admin.connect();
-    await admin.createTopics({ topics: [{ topic: TOPIC, numPartitions: 1, replicationFactor: 1 }] });
+    await admin.createTopics({
+      topics: [{ topic: TOPIC, numPartitions: 1, replicationFactor: 1 }],
+    });
     await admin.disconnect();
 
     await consumer.connect();

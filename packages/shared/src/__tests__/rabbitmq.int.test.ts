@@ -14,11 +14,18 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     await rabbit.consumeCommands(q, async (env) => {
       got.push(env);
     });
-    const ok = makeEnvelope({ type: "cmd.ok", version: 1, traceId: "t", producer: "test", payload: {} });
+    const ok = makeEnvelope({
+      type: "cmd.ok",
+      version: 1,
+      traceId: "t",
+      producer: "test",
+      payload: {},
+    });
     await rabbit.sendCommand(q, ok);
 
-    let deadline = Date.now() + 10_000;
-    while (got.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+    const deadline = Date.now() + 10_000;
+    while (got.length === 0 && Date.now() < deadline)
+      await new Promise((r) => setTimeout(r, 200));
     expect(got).toHaveLength(1);
 
     // failure path: a throwing handler routes the message to <q>.dlq
@@ -27,7 +34,16 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     await rabbit.consumeCommands(badQ, async () => {
       throw new Error("boom");
     });
-    await rabbit.sendCommand(badQ, makeEnvelope({ type: "cmd.bad", version: 1, traceId: "t", producer: "test", payload: {} }));
+    await rabbit.sendCommand(
+      badQ,
+      makeEnvelope({
+        type: "cmd.bad",
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: {},
+      })
+    );
 
     const dlq = await rabbit.consumeDlqOnce(`${badQ}.dlq`, 10_000);
     await rabbit.close();

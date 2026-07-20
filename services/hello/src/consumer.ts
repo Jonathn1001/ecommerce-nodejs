@@ -17,7 +17,9 @@ export async function handleEvent(env: EventEnvelope): Promise<void> {
     return;
   }
   try {
-    await prisma.processedEvent.create({ data: { eventId: env.eventId, type: env.type } });
+    await prisma.processedEvent.create({
+      data: { eventId: env.eventId, type: env.type },
+    });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       log.info("event_duplicate_db_skipped", { eventId: env.eventId });
@@ -25,5 +27,9 @@ export async function handleEvent(env: EventEnvelope): Promise<void> {
     }
     throw e;
   }
-  log.info("event_processed", { eventId: env.eventId, type: env.type, traceId: env.traceId });
+  log.info("event_processed", {
+    eventId: env.eventId,
+    type: env.type,
+    traceId: env.traceId,
+  });
 }

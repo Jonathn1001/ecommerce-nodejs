@@ -27,7 +27,9 @@ describe("kafka wrapper (integration — needs docker compose up)", () => {
     // auto-create on first consume.
     const admin = kafka.admin();
     await admin.connect();
-    await admin.createTopics({ topics: [{ topic, numPartitions: 1, replicationFactor: 1 }] });
+    await admin.createTopics({
+      topics: [{ topic, numPartitions: 1, replicationFactor: 1 }],
+    });
     await admin.disconnect();
 
     const received: EventEnvelope[] = [];

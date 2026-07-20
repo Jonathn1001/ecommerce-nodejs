@@ -47,7 +47,7 @@ describe("traceMiddleware", () => {
     // Output surface is exactly {level, message, service, timestamp, method,
     // path, traceId} — no body fields, no query string, nothing else leaks in.
     expect(Object.keys(parsed).sort()).toEqual(
-      ["level", "message", "method", "path", "service", "timestamp", "traceId"].sort(),
+      ["level", "message", "method", "path", "service", "timestamp", "traceId"].sort()
     );
     expect(parsed.path).toBe("/checkout");
     const serialized = JSON.stringify(parsed);

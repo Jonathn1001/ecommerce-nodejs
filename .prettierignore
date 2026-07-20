@@ -1,0 +1,12 @@
+node_modules
+**/dist/**
+**/generated/**
+legacy
+docs
+.superpowers
+.scratch
+pnpm-lock.yaml
+**/prisma/migrations/**
+CLAUDE.md
+.github
+docker-compose*.yml
