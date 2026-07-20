@@ -1,5 +1,10 @@
 import express from "express";
-import { traceMiddleware, createLogger, createHealthRouter, getRedis } from "@ecom/shared";
+import {
+  traceMiddleware,
+  createLogger,
+  createHealthRouter,
+  getRedis,
+} from "@ecom/shared";
 import { HELLO_CREATED, HelloCreatedPayloadSchema } from "@ecom/contracts";
 import { prisma } from "./db";
 
