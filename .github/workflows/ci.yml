@@ -44,6 +44,24 @@ jobs:
           printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
           docker compose up -d
           timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 4 ]; do sleep 3; done'
+      # A "healthy" KRaft broker answers kafka-topics --list before it has
+      # elected a leader for freshly-created topics, so the first test to create
+      # a topic can hit LEADER_NOT_AVAILABLE. Warm up leader election with a
+      # canary topic until it reports a real leader.
+      - name: Warm up Kafka (KRaft leader election)
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+                 --bootstrap-server localhost:9092 --create --topic ci-warmup \
+                 --if-not-exists --partitions 1 --replication-factor 1 >/dev/null 2>&1 \
+               && docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+                 --bootstrap-server localhost:9092 --describe --topic ci-warmup 2>/dev/null \
+                 | grep -q 'Leader: [0-9]'; then
+              echo "kafka leader ready"; exit 0
+            fi
+            echo "waiting for kafka leader election ($i/30)"; sleep 2
+          done
+          echo "kafka warm-up timed out" >&2; exit 1
       # Vitest positional args are SUBSTRING path filters, not globs — select
       # test files by directory substring (a glob like "**/*.int.test.ts" here
       # matches nothing). Shared runs unit+int (Redis/Kafka/RabbitMQ; no DB).
