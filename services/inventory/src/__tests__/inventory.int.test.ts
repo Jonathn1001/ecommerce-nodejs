@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { randomUUID } from "crypto";
 import { handleOrderEvent } from "../consumer";
 import { prisma } from "../db";
