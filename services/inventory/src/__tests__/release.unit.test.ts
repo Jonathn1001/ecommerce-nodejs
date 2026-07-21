@@ -43,7 +43,11 @@ describe("release core", () => {
     expect(f.stock).toEqual({ p1: 5 });
     expect(f.released.has("r1")).toBe(true);
     expect(f.emitted).toEqual([
-      { type: INVENTORY_RELEASED, orderId: "o1", payload: { orderId: "o1", items: [{ productId: "p1", quantity: 2 }] } },
+      {
+        type: INVENTORY_RELEASED,
+        orderId: "o1",
+        payload: { orderId: "o1", items: [{ productId: "p1", quantity: 2 }] },
+      },
     ]);
   });
 

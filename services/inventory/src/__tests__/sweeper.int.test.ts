@@ -29,9 +29,17 @@ describe("expiry sweeper (integration — needs docker compose up + migrated)", 
     const released = await sweepOnce();
     expect(released).toBeGreaterThanOrEqual(1);
 
-    expect((await prisma.inventory.findUnique({ where: { productId } }))?.available).toBe(5);
-    expect(await prisma.reservation.count({ where: { orderId, status: "RELEASED" } })).toBe(1);
-    expect(await prisma.outbox.count({ where: { aggregateId: orderId, type: INVENTORY_RELEASED } })).toBe(1);
+    expect((await prisma.inventory.findUnique({ where: { productId } }))?.available).toBe(
+      5
+    );
+    expect(
+      await prisma.reservation.count({ where: { orderId, status: "RELEASED" } })
+    ).toBe(1);
+    expect(
+      await prisma.outbox.count({
+        where: { aggregateId: orderId, type: INVENTORY_RELEASED },
+      })
+    ).toBe(1);
   });
 
   it("leaves a not-yet-expired reservation alone", async () => {
@@ -39,11 +47,21 @@ describe("expiry sweeper (integration — needs docker compose up + migrated)", 
     const orderId = `o_${randomUUID()}`;
     await prisma.inventory.create({ data: { productId, available: 1 } });
     await prisma.reservation.create({
-      data: { orderId, productId, quantity: 1, status: "ACTIVE", expiresAt: new Date(Date.now() + 3_600_000) },
+      data: {
+        orderId,
+        productId,
+        quantity: 1,
+        status: "ACTIVE",
+        expiresAt: new Date(Date.now() + 3_600_000),
+      },
     });
 
     await sweepOnce();
-    expect(await prisma.reservation.count({ where: { orderId, status: "ACTIVE" } })).toBe(1);
-    expect((await prisma.inventory.findUnique({ where: { productId } }))?.available).toBe(1);
+    expect(await prisma.reservation.count({ where: { orderId, status: "ACTIVE" } })).toBe(
+      1
+    );
+    expect((await prisma.inventory.findUnique({ where: { productId } }))?.available).toBe(
+      1
+    );
   });
 });

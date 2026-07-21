@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "./generated/prisma";
 import type { ReserveTx } from "./reserve";
 import type { ReleaseTx } from "./release";
 
@@ -7,7 +7,10 @@ import type { ReleaseTx } from "./release";
 export function reserveTx(tx: Prisma.TransactionClient, traceId: string): ReserveTx {
   return {
     async markProcessed(eventId, type) {
-      const r = await tx.processedEvent.createMany({ data: [{ eventId, type }], skipDuplicates: true });
+      const r = await tx.processedEvent.createMany({
+        data: [{ eventId, type }],
+        skipDuplicates: true,
+      });
       return r.count > 0;
     },
     async tryDecrement(productId, qty) {
@@ -18,16 +21,32 @@ export function reserveTx(tx: Prisma.TransactionClient, traceId: string): Reserv
       return r.count > 0;
     },
     async increment(productId, qty) {
-      await tx.inventory.update({ where: { productId }, data: { available: { increment: qty } } });
+      await tx.inventory.update({
+        where: { productId },
+        data: { available: { increment: qty } },
+      });
     },
     async createReservation(orderId, item, expiresAt) {
       await tx.reservation.create({
-        data: { orderId, productId: item.productId, quantity: item.quantity, status: "ACTIVE", expiresAt },
+        data: {
+          orderId,
+          productId: item.productId,
+          quantity: item.quantity,
+          status: "ACTIVE",
+          expiresAt,
+        },
       });
     },
     async enqueue(type, orderId, payload) {
       await tx.outbox.create({
-        data: { aggregateType: "inventory", aggregateId: orderId, type, traceId, producer: "inventory", payload: payload as Prisma.InputJsonValue },
+        data: {
+          aggregateType: "inventory",
+          aggregateId: orderId,
+          type,
+          traceId,
+          producer: "inventory",
+          payload: payload as Prisma.InputJsonValue,
+        },
       });
     },
   };
@@ -36,7 +55,10 @@ export function reserveTx(tx: Prisma.TransactionClient, traceId: string): Reserv
 export function releaseTx(tx: Prisma.TransactionClient, traceId: string): ReleaseTx {
   return {
     async markProcessed(eventId, type) {
-      const r = await tx.processedEvent.createMany({ data: [{ eventId, type }], skipDuplicates: true });
+      const r = await tx.processedEvent.createMany({
+        data: [{ eventId, type }],
+        skipDuplicates: true,
+      });
       return r.count > 0;
     },
     async activeByOrder(orderId) {
@@ -47,7 +69,10 @@ export function releaseTx(tx: Prisma.TransactionClient, traceId: string): Releas
       return rows;
     },
     async increment(productId, qty) {
-      await tx.inventory.update({ where: { productId }, data: { available: { increment: qty } } });
+      await tx.inventory.update({
+        where: { productId },
+        data: { available: { increment: qty } },
+      });
     },
     async markReleased(id) {
       const r = await tx.reservation.updateMany({
@@ -58,7 +83,14 @@ export function releaseTx(tx: Prisma.TransactionClient, traceId: string): Releas
     },
     async enqueue(type, orderId, payload) {
       await tx.outbox.create({
-        data: { aggregateType: "inventory", aggregateId: orderId, type, traceId, producer: "inventory", payload: payload as Prisma.InputJsonValue },
+        data: {
+          aggregateType: "inventory",
+          aggregateId: orderId,
+          type,
+          traceId,
+          producer: "inventory",
+          payload: payload as Prisma.InputJsonValue,
+        },
       });
     },
   };

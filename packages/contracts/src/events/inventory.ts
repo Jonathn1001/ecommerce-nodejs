@@ -15,7 +15,9 @@ export const InventoryReservationFailedPayloadSchema = z.object({
   orderId: z.string().min(1),
   reason: z.string().min(1),
 });
-export type InventoryReservationFailedPayload = z.infer<typeof InventoryReservationFailedPayloadSchema>;
+export type InventoryReservationFailedPayload = z.infer<
+  typeof InventoryReservationFailedPayloadSchema
+>;
 
 export const InventoryReleasedPayloadSchema = z.object({
   orderId: z.string().min(1),

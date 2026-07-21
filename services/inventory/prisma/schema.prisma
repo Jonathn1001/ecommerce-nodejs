@@ -1,5 +1,9 @@
 generator client {
   provider = "prisma-client-js"
+  // Custom output so this service's client does not collide with other
+  // services' Prisma clients in the shared pnpm store (each schema owns its
+  // own generated client). Gitignored via **/generated/.
+  output   = "../src/generated/prisma"
 }
 
 datasource db {

@@ -42,9 +42,14 @@ describe("inventory slice e2e (needs docker compose up + migrated)", () => {
     await admin.disconnect();
 
     await producer.connect();
-    relay = startOutboxRelay(outboxPort, producer, (aggregateType) => `${aggregateType}.events`, {
-      intervalMs: 300,
-    });
+    relay = startOutboxRelay(
+      outboxPort,
+      producer,
+      (aggregateType) => `${aggregateType}.events`,
+      {
+        intervalMs: 300,
+      }
+    );
 
     await orderConsumer.connect();
     await orderConsumer.run([ORDER_TOPIC], handleOrderEvent);
@@ -81,11 +86,18 @@ describe("inventory slice e2e (needs docker compose up + migrated)", () => {
     );
 
     const deadline = Date.now() + 25_000;
-    while (!reserved.some((e) => (e.payload as { orderId: string }).orderId === orderId) && Date.now() < deadline) {
+    while (
+      !reserved.some((e) => (e.payload as { orderId: string }).orderId === orderId) &&
+      Date.now() < deadline
+    ) {
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    expect(reserved.some((e) => (e.payload as { orderId: string }).orderId === orderId)).toBe(true);
-    expect((await prisma.inventory.findUnique({ where: { productId } }))?.available).toBe(6);
+    expect(
+      reserved.some((e) => (e.payload as { orderId: string }).orderId === orderId)
+    ).toBe(true);
+    expect((await prisma.inventory.findUnique({ where: { productId } }))?.available).toBe(
+      6
+    );
   });
 });

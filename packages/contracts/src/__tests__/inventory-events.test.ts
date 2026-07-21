@@ -15,7 +15,10 @@ describe("order + inventory event contracts", () => {
   it("OrderPlaced requires a non-empty item list with positive int quantities", () => {
     expect(() => OrderPlacedPayloadSchema.parse({ orderId: "o1", items: [] })).toThrow();
     expect(() =>
-      OrderPlacedPayloadSchema.parse({ orderId: "o1", items: [{ productId: "p1", quantity: 0 }] })
+      OrderPlacedPayloadSchema.parse({
+        orderId: "o1",
+        items: [{ productId: "p1", quantity: 0 }],
+      })
     ).toThrow();
     const ok = OrderPlacedPayloadSchema.parse({
       orderId: "o1",
@@ -30,13 +33,21 @@ describe("order + inventory event contracts", () => {
   });
 
   it("InventoryReservationFailed requires a reason", () => {
-    expect(() => InventoryReservationFailedPayloadSchema.parse({ orderId: "o1" })).toThrow();
-    const p = InventoryReservationFailedPayloadSchema.parse({ orderId: "o1", reason: "INSUFFICIENT_STOCK" });
+    expect(() =>
+      InventoryReservationFailedPayloadSchema.parse({ orderId: "o1" })
+    ).toThrow();
+    const p = InventoryReservationFailedPayloadSchema.parse({
+      orderId: "o1",
+      reason: "INSUFFICIENT_STOCK",
+    });
     expect(p.reason).toBe("INSUFFICIENT_STOCK");
   });
 
   it("InventoryReserved echoes orderId + items", () => {
-    const p = InventoryReservedPayloadSchema.parse({ orderId: "o1", items: [{ productId: "p1", quantity: 1 }] });
+    const p = InventoryReservedPayloadSchema.parse({
+      orderId: "o1",
+      items: [{ productId: "p1", quantity: 1 }],
+    });
     expect(p.orderId).toBe("o1");
     expect(p.items).toHaveLength(1);
   });

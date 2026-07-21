@@ -15,16 +15,22 @@ describe("inventory HTTP admin (integration — needs docker compose up + migrat
 
   it("POST /inventory/stock seeds then increments the same product", async () => {
     const productId = `p_${randomUUID()}`;
-    const seed = await request(app).post("/inventory/stock").send({ productId, quantity: 5 });
+    const seed = await request(app)
+      .post("/inventory/stock")
+      .send({ productId, quantity: 5 });
     expect(seed.status).toBe(201);
     expect(seed.body).toEqual({ productId, available: 5 });
 
-    const add = await request(app).post("/inventory/stock").send({ productId, quantity: 3 });
+    const add = await request(app)
+      .post("/inventory/stock")
+      .send({ productId, quantity: 3 });
     expect(add.body.available).toBe(8);
   });
 
   it("POST /inventory/stock rejects a non-positive quantity", async () => {
-    const res = await request(app).post("/inventory/stock").send({ productId: "x", quantity: 0 });
+    const res = await request(app)
+      .post("/inventory/stock")
+      .send({ productId: "x", quantity: 0 });
     expect(res.status).toBe(400);
   });
 

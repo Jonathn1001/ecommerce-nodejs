@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "./generated/prisma";
 import { createLogger } from "@ecom/shared";
 import { prisma } from "./db";
 import { releaseRows, type ReleaseCoreTx } from "./release";
@@ -9,7 +9,10 @@ const log = createLogger("inventory-sweeper");
 function sweepTx(tx: Prisma.TransactionClient, traceId: string): ReleaseCoreTx {
   return {
     async increment(productId, qty) {
-      await tx.inventory.update({ where: { productId }, data: { available: { increment: qty } } });
+      await tx.inventory.update({
+        where: { productId },
+        data: { available: { increment: qty } },
+      });
     },
     async markReleased(id) {
       const r = await tx.reservation.updateMany({
@@ -20,7 +23,14 @@ function sweepTx(tx: Prisma.TransactionClient, traceId: string): ReleaseCoreTx {
     },
     async enqueue(type, orderId, payload) {
       await tx.outbox.create({
-        data: { aggregateType: "inventory", aggregateId: orderId, type, traceId, producer: "inventory", payload: payload as Prisma.InputJsonValue },
+        data: {
+          aggregateType: "inventory",
+          aggregateId: orderId,
+          type,
+          traceId,
+          producer: "inventory",
+          payload: payload as Prisma.InputJsonValue,
+        },
       });
     },
   };

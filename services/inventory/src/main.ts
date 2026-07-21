@@ -23,9 +23,14 @@ async function main() {
   await producer.connect();
 
   // Relay drains the outbox; `inventory` aggregate rows go to `inventory.events`.
-  const relay = startOutboxRelay(outboxPort, producer, (aggregateType) => `${aggregateType}.events`, {
-    intervalMs: 500,
-  });
+  const relay = startOutboxRelay(
+    outboxPort,
+    producer,
+    (aggregateType) => `${aggregateType}.events`,
+    {
+      intervalMs: 500,
+    }
+  );
 
   const consumer = createConsumer(kafka, "inventory-consumers");
   await consumer.connect();
@@ -34,7 +39,9 @@ async function main() {
   const sweeper = startExpirySweeper(config.SWEEP_INTERVAL_MS);
 
   const app = createApp();
-  const server = app.listen(config.PORT, () => log.info("inventory_listening", { port: config.PORT }));
+  const server = app.listen(config.PORT, () =>
+    log.info("inventory_listening", { port: config.PORT })
+  );
 
   // runClosers() tears down in REVERSE of this array, so it is written
   // backwards: backing stores first here (torn down LAST), the HTTP server

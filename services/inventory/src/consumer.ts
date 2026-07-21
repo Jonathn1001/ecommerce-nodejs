@@ -41,7 +41,11 @@ async function handlePlaced(env: EventEnvelope): Promise<void> {
         expiresAt: new Date(Date.now() + config.RESERVATION_TTL_MS),
       })
     );
-    log.info("order_placed_handled", { orderId: payload.orderId, outcome, traceId: env.traceId });
+    log.info("order_placed_handled", {
+      orderId: payload.orderId,
+      outcome,
+      traceId: env.traceId,
+    });
   } finally {
     for (const handle of held) await releaseLock(handle);
   }
@@ -50,7 +54,14 @@ async function handlePlaced(env: EventEnvelope): Promise<void> {
 async function handleCancelled(env: EventEnvelope): Promise<void> {
   const payload = OrderCancelledPayloadSchema.parse(env.payload);
   const outcome = await prisma.$transaction((tx) =>
-    releaseForCancel(releaseTx(tx, env.traceId), { eventId: env.eventId, orderId: payload.orderId })
+    releaseForCancel(releaseTx(tx, env.traceId), {
+      eventId: env.eventId,
+      orderId: payload.orderId,
+    })
   );
-  log.info("order_cancelled_handled", { orderId: payload.orderId, outcome, traceId: env.traceId });
+  log.info("order_cancelled_handled", {
+    orderId: payload.orderId,
+    outcome,
+    traceId: env.traceId,
+  });
 }
