@@ -11,7 +11,7 @@ import {
   startOutboxRelay,
   createLogger,
   gracefulShutdown,
-  getRedis,
+  closeRedis,
 } from "@ecom/shared";
 
 const log = createLogger("inventory-main");
@@ -36,16 +36,37 @@ async function main() {
   const app = createApp();
   const server = app.listen(config.PORT, () => log.info("inventory_listening", { port: config.PORT }));
 
-  // Closers run in REVERSE registration order: stop accepting traffic first,
-  // then the consumer/relay/sweeper/producer, then the backing stores.
+  // runClosers() tears down in REVERSE of this array, so it is written
+  // backwards: backing stores first here (torn down LAST), the HTTP server
+  // last here (torn down FIRST — stop accepting traffic, then drain the rest).
+  // Each closer awaits its own work so shutdown actually drains before exit.
+  // Resulting teardown order:
+  //   server.close -> consumer.disconnect -> sweeper.stop -> relay.stop
+  //   -> producer.disconnect -> closeRedis -> prisma.$disconnect
   gracefulShutdown([
-    async () => void server.close(),
-    async () => void consumer.disconnect(),
-    async () => relay.stop(),
-    async () => sweeper.stop(),
-    async () => void producer.disconnect(),
-    async () => void (await getRedis()).quit(),
-    async () => void prisma.$disconnect(),
+    async () => {
+      await prisma.$disconnect();
+    },
+    async () => {
+      await closeRedis();
+    },
+    async () => {
+      await producer.disconnect();
+    },
+    async () => {
+      relay.stop();
+    },
+    async () => {
+      sweeper.stop();
+    },
+    async () => {
+      await consumer.disconnect();
+    },
+    async () => {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve()))
+      );
+    },
   ]);
 }
 
