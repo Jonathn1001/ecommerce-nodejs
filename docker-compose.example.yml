@@ -92,5 +92,28 @@ services:
       timeout: 5s
       retries: 10
 
+  inventory:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: services/inventory/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/inventory
+      KAFKA_BROKERS: kafka:19092
+      REDIS_URL: redis://redis:6379
+      RESERVATION_TTL_MS: 900000
+      SWEEP_INTERVAL_MS: 5000
+      PORT: 3001
+    ports: ["3001:3001"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
