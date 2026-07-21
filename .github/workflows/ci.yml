@@ -44,9 +44,11 @@ jobs:
           printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
           docker compose up -d
           timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 4 ]; do sleep 3; done'
-      # Shared broker integration tests (Redis/Kafka/RabbitMQ) — no service DB.
+      # Vitest positional args are SUBSTRING path filters, not globs — select
+      # test files by directory substring (a glob like "**/*.int.test.ts" here
+      # matches nothing). Shared runs unit+int (Redis/Kafka/RabbitMQ; no DB).
       - name: Shared integration tests
-        run: pnpm vitest run "packages/shared/**/*.int.test.ts"
+        run: pnpm vitest run packages/shared
       # Each service runs with ITS OWN database URL, so the two Prisma clients
       # never contend for a single DATABASE_URL inside one test process.
       - name: Hello service (migrate + e2e)
@@ -56,7 +58,7 @@ jobs:
           REDIS_URL: redis://localhost:6379
         run: |
           pnpm --filter @ecom/hello exec prisma migrate deploy
-          pnpm vitest run "services/hello/**/*.test.ts"
+          pnpm vitest run services/hello
       - name: Inventory service (migrate + int/e2e)
         env:
           DATABASE_URL: postgresql://ecom:ecom@localhost:5432/inventory
@@ -64,4 +66,4 @@ jobs:
           REDIS_URL: redis://localhost:6379
         run: |
           pnpm --filter @ecom/inventory exec prisma migrate deploy
-          pnpm vitest run "services/inventory/**/*.int.test.ts" "services/inventory/**/*.e2e.test.ts"
+          pnpm vitest run services/inventory
