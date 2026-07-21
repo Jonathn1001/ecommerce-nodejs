@@ -58,61 +58,76 @@ and the decremented `available` in the DB.
 
 The `inventory` database already exists — created by the Phase 0 infra init script
 (`infra/postgres/init/01-databases.sql`). One Prisma schema for this service;
-migrations via `prisma migrate dev` only (never hand-edited).
+migrations via `prisma migrate dev` only (never hand-edited). Models follow the
+convention established by `services/hello`: **PascalCase Prisma models, camelCase
+fields, no `@map`** (the umbrella prose uses snake_case logical names — the Prisma
+model is the implementation shape).
 
-- **`inventories(product_id PK, available int CHECK (available >= 0), location text, updated_at timestamptz)`**
-  — a **single sellable pool**. This mirrors the legacy `invent_stock`: reserve
-  decrements `available`, release increments it. No `shop_id`, no product foreign
-  key — Inventory trusts the incoming `productId`; product validity is Catalog's
-  concern (DB-per-service rule; this intentionally drops legacy's cross-service
-  `findProductById` check). Because the pool is already the *sellable* count, a
-  confirmed order needs no Inventory action — the stock was deducted at reserve
-  time — which is why `OrderConfirmed` is not consumed.
-- **`reservations(id PK, order_id text, product_id text, quantity int, status text, expires_at timestamptz, created_at timestamptz, released_at timestamptz null)`**
-  — `status ∈ {ACTIVE, RELEASED}`. One row per (order, product) line. Tracks each
-  hold so it can be released on cancel or expiry.
-- **`outbox(...)`** — same shape as the `hello` service's outbox (id, aggregate_type,
-  aggregate_id, type, version, trace_id, producer, payload jsonb, occurred_at, sent_at).
-- **`processed_events(event_id PK, consumer text, processed_at timestamptz)`** —
-  atomic idempotency ledger for consumed Kafka events.
+- **`model Inventory { productId String @id; available Int; location String; updatedAt DateTime }`**
+  — a **single sellable pool** (`available >= 0`, DB check constraint). Mirrors the
+  legacy `invent_stock`: reserve decrements `available`, release increments it. No
+  `shopId`, no product foreign key — Inventory trusts the incoming `productId`;
+  product validity is Catalog's concern (DB-per-service rule; this intentionally
+  drops legacy's cross-service `findProductById` check). Because the pool is already
+  the *sellable* count, a confirmed order needs no Inventory action — the stock was
+  deducted at reserve time — which is why `OrderConfirmed` is not consumed.
+- **`model Reservation { id String @id @default(uuid()); orderId String; productId String; quantity Int; status String; expiresAt DateTime; createdAt DateTime @default(now()); releasedAt DateTime? }`**
+  — `status ∈ {ACTIVE, RELEASED}`. One row per (order, product) line. Add a
+  **partial unique index** `@@unique([orderId, productId])` scoped to
+  `status='ACTIVE'` (via a raw partial index in the migration) so a double-reserve
+  is impossible at the DB level even outside the `ProcessedEvent` dedup.
+- **`model Outbox {...}`** — the exact shape from `services/hello/prisma/schema.prisma`
+  (`id, aggregateType, aggregateId, type, version, traceId, producer, payload,
+  occurredAt, sentAt`, `@@index([sentAt])`).
+- **`model ProcessedEvent { eventId String @id; type String; processedAt DateTime @default(now()) }`**
+  — **reuses the sibling `hello` model verbatim** (`services/hello/prisma/schema.prisma:31`)
+  as the atomic idempotency ledger. No `consumer` column — Inventory is a single
+  service with one consumer group; `type` carries the event type, matching hello.
 
 ## Reserve flow — consume `OrderPlaced` (multi-item, all-or-nothing)
 
 ```
-items sorted by product_id
+items sorted by productId
 acquireLock(product) for each product, in sorted order   // deadlock-free; distributed-lock lesson
 try:
   BEGIN
-    INSERT processed_events(event_id, consumer='inventory') ON CONFLICT DO NOTHING
+    INSERT ProcessedEvent(eventId, type='order.placed') ON CONFLICT DO NOTHING
       -- 0 rows affected => this event was already handled => COMMIT and ack (exactly-once)
     SAVEPOINT s
     ok = true
     for item in items:
-      UPDATE inventories SET available = available - item.quantity, updated_at = now()
-        WHERE product_id = item.productId AND available >= item.quantity
+      UPDATE Inventory SET available = available - item.quantity, updatedAt = now()
+        WHERE productId = item.productId AND available >= item.quantity
       if rowcount == 0: ok = false; break        -- shortfall on this line
     if ok:
-      INSERT reservations(order_id, product_id, quantity, status='ACTIVE',
-                          expires_at = now() + RESERVATION_TTL) for each item
-      INSERT outbox <- InventoryReserved { orderId, items }
+      INSERT Reservation(orderId, productId, quantity, status='ACTIVE',
+                         expiresAt = now() + RESERVATION_TTL) for each item
+      INSERT Outbox <- InventoryReserved { orderId, items }
     else:
-      ROLLBACK TO SAVEPOINT s                     -- undo partial decrements, keep processed_events
-      INSERT outbox <- InventoryReservationFailed { orderId, reason: 'INSUFFICIENT_STOCK' }
+      ROLLBACK TO SAVEPOINT s                     -- undo partial decrements, keep ProcessedEvent
+      INSERT Outbox <- InventoryReservationFailed { orderId, reason: 'INSUFFICIENT_STOCK' }
   COMMIT
 finally:
   releaseLock(product) for each
 ```
 
+- **Insufficient stock is a business outcome, never a thrown error.** The shared
+  Kafka consumer parks any thrown handler error to `<topic>.dlq` and commits
+  (`packages/shared/src/kafka.ts`), so a shortfall must be emitted as
+  `InventoryReservationFailed` and the handler must return normally — throwing would
+  dead-letter a perfectly valid `OrderPlaced` to `order.events.dlq` and silently
+  break the saga's failure branch. Only *unexpected* errors (DB down, lock backend
+  unreachable) propagate to the DLQ.
 - The **conditional `UPDATE` is the correctness guarantee** — Postgres row locking
   makes each decrement atomic, so the reservation is race-safe even without the
   Redis lock. The Redis per-product lock is kept to **exercise and teach the
   distributed-lock pattern**; a code comment states SQL is the real guard.
 - The **`SAVEPOINT`** lets a shortfall roll back the partial stock decrements while
-  keeping the `processed_events` insert and emitting `InventoryReservationFailed` —
+  keeping the `ProcessedEvent` insert and emitting `InventoryReservationFailed` —
   consume + outcome + emit commit atomically in one transaction.
-- **At-least-once safe:** a crash before `COMMIT` leaves no `processed_events` row
-  and no stock change, so a redelivery simply retries. A crash after `COMMIT` is
-  deduped by the `processed_events` unique key.
+- **At-least-once safe:** a crash before `COMMIT` leaves no `ProcessedEvent` row and
+  no stock change, so a redelivery simply retries. A crash after `COMMIT` is deduped
+  by the `ProcessedEvent` primary key.
 
 ## Release flow — consume `OrderCancelled`, and the expiry sweeper
 
@@ -121,17 +136,22 @@ or per expired ACTIVE reservation (sweeper):
 
 ```
 BEGIN
-  (cancel path only) INSERT processed_events(event_id, consumer='inventory') ON CONFLICT DO NOTHING
+  (cancel path only) INSERT ProcessedEvent(eventId, type='order.cancelled') ON CONFLICT DO NOTHING
                        -- 0 rows => already handled => COMMIT and ack
-  for each ACTIVE reservation r in scope:
-    UPDATE inventories SET available = available + r.quantity, updated_at = now()
-      WHERE product_id = r.product_id
-    UPDATE reservations SET status='RELEASED', released_at=now() WHERE id = r.id
-  INSERT outbox <- InventoryReleased { orderId, items }
+  active = ACTIVE reservations in scope (this order, or expired for the sweeper)
+  if active is empty: COMMIT and return   -- no-op: nothing held; do NOT emit InventoryReleased
+  for each reservation r in active:
+    UPDATE Inventory SET available = available + r.quantity, updatedAt = now()
+      WHERE productId = r.productId
+    UPDATE Reservation SET status='RELEASED', releasedAt=now() WHERE id = r.id
+  INSERT Outbox <- InventoryReleased { orderId, items }   -- only when something was actually released
 COMMIT
 ```
 
-- **`OrderCancelled`** is deduped via `processed_events`, same as reserve.
+- **Empty-release guard:** when no ACTIVE reservations remain (e.g. the sweeper
+  already released the order before `OrderCancelled` arrived), the path commits and
+  returns without emitting a spurious empty `InventoryReleased`.
+- **`OrderCancelled`** is deduped via `ProcessedEvent`, same as reserve.
 - **Expiry sweeper** runs on an interval (`SWEEP_INTERVAL_MS`), selecting
   `status='ACTIVE' AND expires_at < now()`, releasing each and emitting
   `InventoryReleased`. In Phase 1 — with no Order to confirm a reservation — this is
@@ -161,6 +181,14 @@ consumers import them so they cannot drift.
 
 Fail-fast zod config (via `@ecom/shared`): `DATABASE_URL`, `KAFKA_BROKERS`,
 `REDIS_URL`, `RESERVATION_TTL_MS`, `SWEEP_INTERVAL_MS`, `PORT`, `LOG_LEVEL`.
+
+> **Forward note:** once Order (Phase 2) drives the real saga, `RESERVATION_TTL_MS`
+> must exceed the maximum saga duration (reserve → charge → confirm), or the sweeper
+> will release legitimate in-flight orders before they confirm. Phase 1 has no
+> confirm path, so this only bites in Phase 2 — flagged here so it isn't forgotten.
+
+The outbox relay maps only `inventory → inventory.events` (`topicFor(aggregateType)`);
+Inventory is the sole producer on that topic.
 
 Every production primitive is inherited from Phase 0 `shared`, not re-invented:
 - `/healthz` (liveness) and `/readyz` (readiness — probes Postgres, Kafka, Redis).
@@ -195,5 +223,8 @@ Every production primitive is inherited from Phase 0 `shared`, not re-invented:
 
 ## Open questions
 
-None outstanding — the three design forks (drive surface, concurrency control,
-Phase-1 scope) were resolved during brainstorming on 2026-07-21.
+None blocking — the three design forks (drive surface, concurrency control, Phase-1
+scope) were resolved during brainstorming on 2026-07-21. Decisions locked in review:
+the **single sellable pool** model (no separate `reserved` column) is intentional and
+final; **`ProcessedEvent` retention/pruning** is deferred (matches `hello`, which has
+none) — revisit before Phase 7 if the ledger grows unbounded.
