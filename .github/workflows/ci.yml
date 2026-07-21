@@ -15,10 +15,16 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: "pnpm" }
       - run: pnpm install --frozen-lockfile
+      # Prisma clients are gitignored, so generate them before typecheck/build.
+      # Each service owns its own client output (default location for hello, a
+      # custom path for inventory) so multiple schemas never clobber one client.
+      - name: Generate Prisma clients
+        run: pnpm --filter "./services/*" exec prisma generate
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm vitest run packages/**/*.test.ts --exclude "**/*.int.test.ts"
+      # All unit tests (packages + services); infra-backed int/e2e run separately.
+      - run: pnpm vitest run --exclude "**/*.int.test.ts" --exclude "**/*.e2e.test.ts"
       - run: pnpm -r build
       - run: pnpm audit --audit-level high || true
 
@@ -30,15 +36,32 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: "pnpm" }
       - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma clients
+        run: pnpm --filter "./services/*" exec prisma generate
       - name: Start infra
         run: |
           cp docker-compose.example.yml docker-compose.yml
           printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
           docker compose up -d
           timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 4 ]; do sleep 3; done'
-      - name: Migrate hello DB
+      # Shared broker integration tests (Redis/Kafka/RabbitMQ) — no service DB.
+      - name: Shared integration tests
+        run: pnpm vitest run "packages/shared/**/*.int.test.ts"
+      # Each service runs with ITS OWN database URL, so the two Prisma clients
+      # never contend for a single DATABASE_URL inside one test process.
+      - name: Hello service (migrate + e2e)
+        env:
+          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/hello
+          KAFKA_BROKERS: localhost:9092
+          REDIS_URL: redis://localhost:6379
         run: |
-          printf 'DATABASE_URL=postgresql://ecom:ecom@localhost:5432/hello\nKAFKA_BROKERS=localhost:9092\nREDIS_URL=redis://localhost:6379\n' > services/hello/.env
           pnpm --filter @ecom/hello exec prisma migrate deploy
-      - name: Integration + e2e tests
-        run: pnpm vitest run "**/*.int.test.ts" "**/*.e2e.test.ts"
+          pnpm vitest run "services/hello/**/*.test.ts"
+      - name: Inventory service (migrate + int/e2e)
+        env:
+          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/inventory
+          KAFKA_BROKERS: localhost:9092
+          REDIS_URL: redis://localhost:6379
+        run: |
+          pnpm --filter @ecom/inventory exec prisma migrate deploy
+          pnpm vitest run "services/inventory/**/*.int.test.ts" "services/inventory/**/*.e2e.test.ts"
