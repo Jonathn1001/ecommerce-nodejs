@@ -12,7 +12,11 @@ function sweepTx(tx: Prisma.TransactionClient, traceId: string): ReleaseCoreTx {
       await tx.inventory.update({ where: { productId }, data: { available: { increment: qty } } });
     },
     async markReleased(id) {
-      await tx.reservation.update({ where: { id }, data: { status: "RELEASED", releasedAt: new Date() } });
+      const r = await tx.reservation.updateMany({
+        where: { id, status: "ACTIVE" },
+        data: { status: "RELEASED", releasedAt: new Date() },
+      });
+      return r.count > 0;
     },
     async enqueue(type, orderId, payload) {
       await tx.outbox.create({

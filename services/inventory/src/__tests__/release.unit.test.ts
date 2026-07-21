@@ -24,7 +24,9 @@ function fake(active: Record<string, ReleasableRow[]>, stock: Record<string, num
       stock[productId] = (stock[productId] ?? 0) + qty;
     },
     async markReleased(id) {
+      if (released.has(id)) return false;
       released.add(id);
+      return true;
     },
     async enqueue(type, orderId, payload) {
       emitted.push({ type, orderId, payload });
@@ -65,5 +67,22 @@ describe("release core", () => {
     const outcome = await releaseRows(f.tx, "o9", []);
     expect(outcome).toBe("NOOP");
     expect(f.emitted).toHaveLength(0);
+  });
+
+  it("guards against double-credit when the same row is released twice (e.g. sweeper + cancel race)", async () => {
+    const f = fake({}, { p1: 3 });
+    const row: ReleasableRow = { id: "r10", productId: "p1", quantity: 2 };
+
+    // First releaser wins the flip and credits stock.
+    const first = await releaseRows(f.tx, "o10", [row]);
+    expect(first).toBe("RELEASED");
+    expect(f.stock).toEqual({ p1: 5 });
+
+    // Second releaser (racing concurrent caller) sees an already-RELEASED row:
+    // the conditional markReleased loses, so no credit and no emit.
+    const second = await releaseRows(f.tx, "o10", [row]);
+    expect(second).toBe("NOOP");
+    expect(f.stock).toEqual({ p1: 5 }); // unchanged — no double credit
+    expect(f.emitted).toHaveLength(1); // only the first call's emit
   });
 });

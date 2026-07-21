@@ -4,7 +4,7 @@ export type ReleasableRow = { id: string; productId: string; quantity: number };
 
 export interface ReleaseCoreTx {
   increment(productId: string, qty: number): Promise<void>;
-  markReleased(reservationId: string): Promise<void>;
+  markReleased(reservationId: string): Promise<boolean>;
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
 }
 
@@ -20,14 +20,18 @@ export async function releaseRows(
   orderId: string,
   rows: ReleasableRow[]
 ): Promise<"RELEASED" | "NOOP"> {
-  if (rows.length === 0) return "NOOP";
+  const released: ReleasableRow[] = [];
   for (const r of rows) {
-    await tx.increment(r.productId, r.quantity);
-    await tx.markReleased(r.id);
+    // Conditional flip is the single coordination point: only the winner credits stock.
+    if (await tx.markReleased(r.id)) {
+      await tx.increment(r.productId, r.quantity);
+      released.push(r);
+    }
   }
+  if (released.length === 0) return "NOOP";
   await tx.enqueue(INVENTORY_RELEASED, orderId, {
     orderId,
-    items: rows.map((r) => ({ productId: r.productId, quantity: r.quantity })),
+    items: released.map((r) => ({ productId: r.productId, quantity: r.quantity })),
   });
   return "RELEASED";
 }
