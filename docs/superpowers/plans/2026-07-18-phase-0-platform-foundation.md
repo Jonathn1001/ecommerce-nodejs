@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: a resolvable pnpm workspace covering `packages/*` and `services/*`; a `tsconfig.base.json` every package extends; `pnpm test` wired to vitest.
 
-- [ ] **Step 1: Move the monolith into `legacy/`**
+- [x] **Step 1: Move the monolith into `legacy/`**
 
 ```bash
 mkdir -p legacy
@@ -46,7 +46,7 @@ git mv package.json legacy/package.json
 git mv package-lock.json legacy/package-lock.json
 ```
 
-- [ ] **Step 2: Create `pnpm-workspace.yaml`**
+- [x] **Step 2: Create `pnpm-workspace.yaml`**
 
 ```yaml
 packages:
@@ -54,7 +54,7 @@ packages:
   - "services/*"
 ```
 
-- [ ] **Step 3: Create root `package.json`**
+- [x] **Step 3: Create root `package.json`**
 
 ```json
 {
@@ -76,7 +76,7 @@ packages:
 }
 ```
 
-- [ ] **Step 4: Create `tsconfig.base.json`**
+- [x] **Step 4: Create `tsconfig.base.json`**
 
 ```json
 {
@@ -96,7 +96,7 @@ packages:
 }
 ```
 
-- [ ] **Step 5: Create `vitest.config.ts`**
+- [x] **Step 5: Create `vitest.config.ts`**
 
 ```ts
 import { defineConfig } from "vitest/config";
@@ -110,7 +110,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 6: Update `.gitignore`** — append the real compose file, build output, and Prisma client artifacts
+- [x] **Step 6: Update `.gitignore`** — append the real compose file, build output, and Prisma client artifacts
 
 ```gitignore
 # --- monorepo additions ---
@@ -126,7 +126,7 @@ docker-compose.yml
 above re-include the committed `.env.example` templates — root and per-service —
 which the existing `.env*` rule would otherwise swallow.)
 
-- [ ] **Step 7: Install and verify the workspace resolves**
+- [x] **Step 7: Install and verify the workspace resolves**
 
 Run: `pnpm install`
 Expected: completes with no error; creates root `node_modules` and `pnpm-lock.yaml`.
@@ -134,7 +134,7 @@ Expected: completes with no error; creates root `node_modules` and `pnpm-lock.ya
 Run: `pnpm -w exec tsc --version`
 Expected: prints `Version 5.7.x`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add pnpm-workspace.yaml package.json tsconfig.base.json vitest.config.ts .gitignore pnpm-lock.yaml legacy
@@ -156,7 +156,7 @@ git commit -m "chore(phase0): pnpm monorepo scaffold + move monolith to legacy/"
   - `HelloCreatedPayloadSchema` (zod) + `HelloCreatedPayload` type: `{ helloId: string; name: string }`.
   - `HELLO_CREATED = "hello.created"` constant.
 
-- [ ] **Step 1: Create `packages/contracts/package.json`**
+- [x] **Step 1: Create `packages/contracts/package.json`**
 
 ```json
 {
@@ -179,7 +179,7 @@ git commit -m "chore(phase0): pnpm monorepo scaffold + move monolith to legacy/"
 }
 ```
 
-- [ ] **Step 2: Create `packages/contracts/tsconfig.json`**
+- [x] **Step 2: Create `packages/contracts/tsconfig.json`**
 
 ```json
 {
@@ -189,7 +189,7 @@ git commit -m "chore(phase0): pnpm monorepo scaffold + move monolith to legacy/"
 }
 ```
 
-- [ ] **Step 3: Write the failing test** — `packages/contracts/src/__tests__/envelope.test.ts`
+- [x] **Step 3: Write the failing test** — `packages/contracts/src/__tests__/envelope.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -224,12 +224,12 @@ describe("EventEnvelope", () => {
 });
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+- [x] **Step 4: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/contracts`
 Expected: FAIL — cannot resolve `../index`.
 
-- [ ] **Step 5: Write `packages/contracts/src/envelope.ts`**
+- [x] **Step 5: Write `packages/contracts/src/envelope.ts`**
 
 ```ts
 import { z } from "zod";
@@ -268,7 +268,7 @@ export function makeEnvelope(input: {
 }
 ```
 
-- [ ] **Step 6: Write `packages/contracts/src/events/hello.ts`**
+- [x] **Step 6: Write `packages/contracts/src/events/hello.ts`**
 
 ```ts
 import { z } from "zod";
@@ -283,19 +283,19 @@ export const HelloCreatedPayloadSchema = z.object({
 export type HelloCreatedPayload = z.infer<typeof HelloCreatedPayloadSchema>;
 ```
 
-- [ ] **Step 7: Write `packages/contracts/src/index.ts`**
+- [x] **Step 7: Write `packages/contracts/src/index.ts`**
 
 ```ts
 export * from "./envelope";
 export * from "./events/hello";
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/contracts`
 Expected: PASS (3 tests).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/contracts pnpm-lock.yaml
@@ -313,7 +313,7 @@ git commit -m "feat(contracts): event envelope + HelloCreated schema"
 **Interfaces:**
 - Produces: `createLogger(service: string)` → `{ info(msg, meta?), warn(msg, meta?), error(msg, meta?) }`. Emits JSON with `{ service, level, message, traceId?, ...meta }`. Callers pass ids/codes only — the logger never inspects or logs request bodies.
 
-- [ ] **Step 1: Create `packages/shared/package.json`**
+- [x] **Step 1: Create `packages/shared/package.json`**
 
 ```json
 {
@@ -333,7 +333,7 @@ git commit -m "feat(contracts): event envelope + HelloCreated schema"
 }
 ```
 
-- [ ] **Step 2: Create `packages/shared/tsconfig.json`**
+- [x] **Step 2: Create `packages/shared/tsconfig.json`**
 
 ```json
 {
@@ -343,7 +343,7 @@ git commit -m "feat(contracts): event envelope + HelloCreated schema"
 }
 ```
 
-- [ ] **Step 3: Write the failing test** — `packages/shared/src/__tests__/logger.test.ts`
+- [x] **Step 3: Write the failing test** — `packages/shared/src/__tests__/logger.test.ts`
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
@@ -366,12 +366,12 @@ describe("createLogger", () => {
 });
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+- [x] **Step 4: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/logger.test.ts`
 Expected: FAIL — cannot resolve `../logger`.
 
-- [ ] **Step 5: Write `packages/shared/src/logger.ts`**
+- [x] **Step 5: Write `packages/shared/src/logger.ts`**
 
 ```ts
 import { createLogger as createWinston, format, transports } from "winston";
@@ -399,18 +399,18 @@ export function createLogger(service: string): Logger {
 }
 ```
 
-- [ ] **Step 6: Write `packages/shared/src/index.ts`**
+- [x] **Step 6: Write `packages/shared/src/index.ts`**
 
 ```ts
 export * from "./logger";
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/logger.test.ts`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/shared pnpm-lock.yaml
@@ -429,7 +429,7 @@ git commit -m "feat(shared): structured JSON logger, ids-only (no PII)"
 **Interfaces:**
 - Produces: `AppError` (base, fields `statusCode: number`, `status: "fail" | "err"`, `isOperational: true`), and `NotFoundError`, `AuthenticationError`, `ForbiddenError`, `BadRequestError`, each defaulting its own status code. `HTTP_STATUS` map with `NOT_FOUND=404, UNAUTHORIZED=401, FORBIDDEN=403, BAD_REQUEST=400`.
 
-- [ ] **Step 1: Write the failing test** — `packages/shared/src/__tests__/errors.test.ts`
+- [x] **Step 1: Write the failing test** — `packages/shared/src/__tests__/errors.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -461,12 +461,12 @@ describe("AppError family", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/errors.test.ts`
 Expected: FAIL — cannot resolve `../errors`.
 
-- [ ] **Step 3: Write `packages/shared/src/http-status.ts`**
+- [x] **Step 3: Write `packages/shared/src/http-status.ts`**
 
 ```ts
 export const HTTP_STATUS = {
@@ -478,7 +478,7 @@ export const HTTP_STATUS = {
 } as const;
 ```
 
-- [ ] **Step 4: Write `packages/shared/src/errors.ts`** (ported from `legacy/src/utils/AppError.js`, typed)
+- [x] **Step 4: Write `packages/shared/src/errors.ts`** (ported from `legacy/src/utils/AppError.js`, typed)
 
 ```ts
 import { HTTP_STATUS } from "./http-status";
@@ -519,7 +519,7 @@ export class BadRequestError extends AppError {
 }
 ```
 
-- [ ] **Step 5: Update `packages/shared/src/index.ts`**
+- [x] **Step 5: Update `packages/shared/src/index.ts`**
 
 ```ts
 export * from "./logger";
@@ -527,12 +527,12 @@ export * from "./http-status";
 export * from "./errors";
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/errors.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src
@@ -551,7 +551,7 @@ git commit -m "feat(shared): typed AppError family ported from legacy"
 **Interfaces:**
 - Produces: `traceMiddleware(): (req, res, next) => void`. Reads incoming `x-trace-id` header or mints a uuid; sets `req.traceId`, echoes `res` header `x-trace-id`. Logs `http_request` with method, path, traceId ONLY (never body/query values). Also exports `TRACE_HEADER = "x-trace-id"`.
 
-- [ ] **Step 1: Add express deps to `packages/shared/package.json`** (merge into existing `dependencies`/`devDependencies`)
+- [x] **Step 1: Add express deps to `packages/shared/package.json`** (merge into existing `dependencies`/`devDependencies`)
 
 ```json
 {
@@ -572,7 +572,7 @@ git commit -m "feat(shared): typed AppError family ported from legacy"
 
 Run: `pnpm install`
 
-- [ ] **Step 2: Write the failing test** — `packages/shared/src/__tests__/trace.test.ts`
+- [x] **Step 2: Write the failing test** — `packages/shared/src/__tests__/trace.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -602,12 +602,12 @@ describe("traceMiddleware", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/trace.test.ts`
 Expected: FAIL — cannot resolve `../trace`.
 
-- [ ] **Step 4: Write `packages/shared/src/trace.ts`** (ported from `legacy/src/middlewares/trace-log.middleware.js`; logs metadata only — the legacy version logged `req.body`, which is a PII leak and is removed here)
+- [x] **Step 4: Write `packages/shared/src/trace.ts`** (ported from `legacy/src/middlewares/trace-log.middleware.js`; logs metadata only — the legacy version logged `req.body`, which is a PII leak and is removed here)
 
 ```ts
 import type { Request, Response, NextFunction } from "express";
@@ -639,7 +639,7 @@ export function traceMiddleware() {
 }
 ```
 
-- [ ] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./trace";`
+- [x] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./trace";`
 
 ```ts
 export * from "./logger";
@@ -648,12 +648,12 @@ export * from "./errors";
 export * from "./trace";
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/trace.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src packages/shared/package.json pnpm-lock.yaml
@@ -670,7 +670,7 @@ git commit -m "feat(shared): trace-id middleware (PII-safe port)"
 **Interfaces:**
 - Produces: a runnable local stack — Postgres (one container, one DB per service created at init), Kafka (KRaft, no ZooKeeper), RabbitMQ + management UI, Redis, Kafka-UI. Standard endpoints: Postgres `localhost:5432`, Kafka `localhost:9092`, RabbitMQ `localhost:5672` (UI `15672`), Redis `localhost:6379`, Kafka-UI `localhost:8080`.
 
-- [ ] **Step 1: Create `docker-compose.example.yml`**
+- [x] **Step 1: Create `docker-compose.example.yml`**
 
 ```yaml
 # Copy to docker-compose.yml (gitignored) before running:  cp docker-compose.example.yml docker-compose.yml
@@ -748,7 +748,7 @@ volumes:
   pgdata:
 ```
 
-- [ ] **Step 2: Create the Postgres init script** — `infra/postgres/init/01-databases.sql` (creates one database per service; DB-per-service on a single container)
+- [x] **Step 2: Create the Postgres init script** — `infra/postgres/init/01-databases.sql` (creates one database per service; DB-per-service on a single container)
 
 ```sql
 CREATE DATABASE hello;
@@ -760,7 +760,7 @@ CREATE DATABASE payment;
 CREATE DATABASE notification;
 ```
 
-- [ ] **Step 3: Create the root `.env.example`** (compose credentials only; per-service connection strings live in each service's own `.env.example`)
+- [x] **Step 3: Create the root `.env.example`** (compose credentials only; per-service connection strings live in each service's own `.env.example`)
 
 ```bash
 # Copy to .env (gitignored). Consumed by docker-compose for container credentials.
@@ -770,7 +770,7 @@ RABBITMQ_USER=ecom
 RABBITMQ_PASSWORD=ecom
 ```
 
-- [ ] **Step 4: Create `docs/infra.md`**
+- [x] **Step 4: Create `docs/infra.md`**
 
 ````markdown
 # Local Infrastructure
@@ -811,7 +811,7 @@ creates a database per service. To re-run it, remove the volume:
 `docker compose down -v` (destroys all local data).
 ````
 
-- [ ] **Step 5: Bring the stack up and verify health**
+- [x] **Step 5: Bring the stack up and verify health**
 
 Run:
 ```bash
@@ -823,7 +823,7 @@ Expected: `postgres`, `kafka`, `rabbitmq`, `redis` all show `healthy`.
 Run: `docker compose exec -T postgres psql -U ecom -lqt`
 Expected: lists databases including `hello`, `identity`, `inventory`.
 
-- [ ] **Step 6: Commit** (compose EXAMPLE only; the real `docker-compose.yml` and `.env` are gitignored)
+- [x] **Step 6: Commit** (compose EXAMPLE only; the real `docker-compose.yml` and `.env` are gitignored)
 
 ```bash
 git add docker-compose.example.yml .env.example docs/infra.md infra/postgres/init/01-databases.sql
@@ -846,7 +846,7 @@ git commit -m "chore(phase0): local infra compose example (KRaft, PG-per-service
   - `markProcessed(eventId: string, ttlSec?: number): Promise<boolean>` — `SET NX EX`; returns `true` the first time an eventId is seen, `false` for duplicates (idempotency guard).
   - `acquireLock(resource, opts?): Promise<{ key: string; token: string } | null>` and `releaseLock(handle): Promise<number>` — the ported distributed lock (decoupled from any repository; concurrency primitive only).
 
-- [ ] **Step 1: Add redis dep to `packages/shared/package.json`** (merge into `dependencies`)
+- [x] **Step 1: Add redis dep to `packages/shared/package.json`** (merge into `dependencies`)
 
 ```json
 { "dependencies": { "redis": "^4.7.0" } }
@@ -854,7 +854,7 @@ git commit -m "chore(phase0): local infra compose example (KRaft, PG-per-service
 
 Run: `pnpm install`
 
-- [ ] **Step 2: Write the failing integration test** — `packages/shared/src/__tests__/redis.int.test.ts`
+- [x] **Step 2: Write the failing integration test** — `packages/shared/src/__tests__/redis.int.test.ts`
 
 ```ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -883,12 +883,12 @@ describe("redis helpers (integration — needs docker compose up)", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/redis.int.test.ts`
 Expected: FAIL — cannot resolve `../redis`.
 
-- [ ] **Step 4: Write `packages/shared/src/redis.ts`** (lock logic ported from `legacy/src/services/redis.service.js`, minus the inventory-repo coupling)
+- [x] **Step 4: Write `packages/shared/src/redis.ts`** (lock logic ported from `legacy/src/services/redis.service.js`, minus the inventory-repo coupling)
 
 ```ts
 import { createClient, type RedisClientType } from "redis";
@@ -943,14 +943,14 @@ export async function releaseLock(handle: { key: string; token: string }): Promi
 }
 ```
 
-- [ ] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./redis";`
+- [x] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./redis";`
 
-- [ ] **Step 6: Run test to verify it passes** (stack must be up)
+- [x] **Step 6: Run test to verify it passes** (stack must be up)
 
 Run: `pnpm vitest run packages/shared/src/__tests__/redis.int.test.ts`
 Expected: PASS (2 tests).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src packages/shared/package.json pnpm-lock.yaml
@@ -972,7 +972,7 @@ git commit -m "feat(shared): redis client, idempotency guard, ported lock"
   - `createProducer(kafka): { connect, disconnect, publish(topic, envelope: EventEnvelope) }` — `publish` sends `key = envelope.eventId`, `value = JSON.stringify(envelope)`.
   - `createConsumer(kafka, groupId): { connect, disconnect, run(topics: string[], handler: (env: EventEnvelope) => Promise<void>) }` — parses+validates each message via `EventEnvelopeSchema` before calling `handler`.
 
-- [ ] **Step 1: Add kafkajs dep to `packages/shared/package.json`** (merge into `dependencies`)
+- [x] **Step 1: Add kafkajs dep to `packages/shared/package.json`** (merge into `dependencies`)
 
 ```json
 { "dependencies": { "kafkajs": "^2.2.4" } }
@@ -980,7 +980,7 @@ git commit -m "feat(shared): redis client, idempotency guard, ported lock"
 
 Run: `pnpm install`
 
-- [ ] **Step 2: Write the failing integration test** — `packages/shared/src/__tests__/kafka.int.test.ts`
+- [x] **Step 2: Write the failing integration test** — `packages/shared/src/__tests__/kafka.int.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1024,12 +1024,12 @@ describe("kafka wrapper (integration — needs docker compose up)", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/kafka.int.test.ts`
 Expected: FAIL — cannot resolve `../kafka`.
 
-- [ ] **Step 4: Write `packages/shared/src/kafka.ts`**
+- [x] **Step 4: Write `packages/shared/src/kafka.ts`**
 
 ```ts
 import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
@@ -1077,14 +1077,14 @@ export function createConsumer(kafka: Kafka, groupId: string) {
 }
 ```
 
-- [ ] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./kafka";`
+- [x] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./kafka";`
 
-- [ ] **Step 6: Run test to verify it passes** (stack up)
+- [x] **Step 6: Run test to verify it passes** (stack up)
 
 Run: `pnpm vitest run packages/shared/src/__tests__/kafka.int.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src packages/shared/package.json pnpm-lock.yaml
@@ -1103,7 +1103,7 @@ git commit -m "feat(shared): kafka producer/consumer wrapper (envelope-validated
 **Interfaces:**
 - Produces: `createRabbit(): Promise<{ sendCommand(queue, envelope), consumeCommands(queue, handler), assertWorkQueue(queue), close() }>`. `assertWorkQueue` creates a durable queue wired to a dead-letter exchange `<queue>.dlx` → `<queue>.dlq`; a handler that throws causes the message to be `nack`'d (no requeue) and routed to the DLQ.
 
-- [ ] **Step 1: Add amqplib dep to `packages/shared/package.json`** (merge into `dependencies` and `devDependencies`)
+- [x] **Step 1: Add amqplib dep to `packages/shared/package.json`** (merge into `dependencies` and `devDependencies`)
 
 ```json
 {
@@ -1114,7 +1114,7 @@ git commit -m "feat(shared): kafka producer/consumer wrapper (envelope-validated
 
 Run: `pnpm install`
 
-- [ ] **Step 2: Write the failing integration test** — `packages/shared/src/__tests__/rabbitmq.int.test.ts`
+- [x] **Step 2: Write the failing integration test** — `packages/shared/src/__tests__/rabbitmq.int.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1155,12 +1155,12 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/rabbitmq.int.test.ts`
 Expected: FAIL — cannot resolve `../rabbitmq`.
 
-- [ ] **Step 4: Write `packages/shared/src/rabbitmq.ts`**
+- [x] **Step 4: Write `packages/shared/src/rabbitmq.ts`**
 
 ```ts
 import amqp, { type Channel, type Connection } from "amqplib";
@@ -1223,14 +1223,14 @@ export async function createRabbit() {
 }
 ```
 
-- [ ] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./rabbitmq";`
+- [x] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./rabbitmq";`
 
-- [ ] **Step 6: Run test to verify it passes** (stack up)
+- [x] **Step 6: Run test to verify it passes** (stack up)
 
 Run: `pnpm vitest run packages/shared/src/__tests__/rabbitmq.int.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src packages/shared/package.json pnpm-lock.yaml
@@ -1253,7 +1253,7 @@ git commit -m "feat(shared): rabbitmq wrapper with dead-letter queue"
   - `ProducerPort` — `{ publish(topic: string, envelope: EventEnvelope): Promise<unknown> }`.
   - `drainOutbox(port: OutboxPort, producer: ProducerPort, topicFor: (aggregateType: string) => string, limit?: number): Promise<number>` — publishes each unsent row (envelope built from the row) and marks it sent; returns the count drained. `startOutboxRelay(...)` wraps it in a `setInterval` and returns a `stop()` function.
 
-- [ ] **Step 1: Write the failing test** — `packages/shared/src/__tests__/outbox.unit.test.ts`
+- [x] **Step 1: Write the failing test** — `packages/shared/src/__tests__/outbox.unit.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1305,12 +1305,12 @@ describe("drainOutbox", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/outbox.unit.test.ts`
 Expected: FAIL — cannot resolve `../outbox`.
 
-- [ ] **Step 3: Write `packages/shared/src/outbox.ts`**
+- [x] **Step 3: Write `packages/shared/src/outbox.ts`**
 
 ```ts
 import { makeEnvelope, type EventEnvelope } from "@ecom/contracts";
@@ -1386,19 +1386,19 @@ export function startOutboxRelay(
 
 Note: `eventId === outbox row id` gives producers exactly-one identity per event, so downstream idempotency dedups correctly even if the relay publishes a row twice after a crash.
 
-- [ ] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./outbox";`
+- [x] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./outbox";`
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/outbox.unit.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Typecheck the whole shared package**
+- [x] **Step 6: Typecheck the whole shared package**
 
 Run: `pnpm --filter @ecom/shared typecheck`
 Expected: no errors.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src
@@ -1417,7 +1417,7 @@ git commit -m "feat(shared): transactional outbox drain + polling relay"
 - Consumes: everything from `@ecom/shared` (kafka, outbox, redis idempotency, trace, logger) and `@ecom/contracts` (`makeEnvelope`, `HELLO_CREATED`, `HelloCreatedPayloadSchema`).
 - Produces: an Express app with `POST /hello { name }` that writes a `HelloRecord` + an `Outbox` row in ONE transaction; a relay draining `hello` → topic `hello.events`; a consumer that idempotently records processed events in `ProcessedEvent`.
 
-- [ ] **Step 1: Create `services/hello/package.json`**
+- [x] **Step 1: Create `services/hello/package.json`**
 
 ```json
 {
@@ -1447,7 +1447,7 @@ git commit -m "feat(shared): transactional outbox drain + polling relay"
 
 Run: `pnpm install`
 
-- [ ] **Step 2: Create `services/hello/tsconfig.json`**
+- [x] **Step 2: Create `services/hello/tsconfig.json`**
 
 ```json
 {
@@ -1457,7 +1457,7 @@ Run: `pnpm install`
 }
 ```
 
-- [ ] **Step 3: Create `services/hello/prisma/schema.prisma`**
+- [x] **Step 3: Create `services/hello/prisma/schema.prisma`**
 
 ```prisma
 generator client {
@@ -1497,7 +1497,7 @@ model ProcessedEvent {
 }
 ```
 
-- [ ] **Step 4: Create the per-service env, then run the migration**
+- [x] **Step 4: Create the per-service env, then run the migration**
 
 Create `services/hello/.env.example` (committed — re-included by the `.gitignore`
 negation from Task 1):
@@ -1515,7 +1515,7 @@ cd services/hello && cp .env.example .env && pnpm exec prisma migrate dev --name
 ```
 Expected: creates `prisma/migrations/*/migration.sql`, applies it, generates the client. (Do not hand-edit the generated migration.)
 
-- [ ] **Step 5: Write `services/hello/src/db.ts`** (per-service env: loads `services/hello/.env` regardless of cwd, before Prisma reads `DATABASE_URL`)
+- [x] **Step 5: Write `services/hello/src/db.ts`** (per-service env: loads `services/hello/.env` regardless of cwd, before Prisma reads `DATABASE_URL`)
 
 ```ts
 import { config } from "dotenv";
@@ -1529,7 +1529,7 @@ config({ path: path.resolve(__dirname, "../.env") });
 export const prisma = new PrismaClient();
 ```
 
-- [ ] **Step 6: Write `services/hello/src/outbox-adapter.ts`** — adapts Prisma to the shared `OutboxPort`
+- [x] **Step 6: Write `services/hello/src/outbox-adapter.ts`** — adapts Prisma to the shared `OutboxPort`
 
 ```ts
 import type { OutboxPort, OutboxRow } from "@ecom/shared";
@@ -1550,7 +1550,7 @@ export const outboxPort: OutboxPort = {
 };
 ```
 
-- [ ] **Step 7: Write `services/hello/src/app.ts`** — HTTP write persists record + outbox in ONE transaction
+- [x] **Step 7: Write `services/hello/src/app.ts`** — HTTP write persists record + outbox in ONE transaction
 
 ```ts
 import express from "express";
@@ -1594,7 +1594,7 @@ export function createApp() {
 }
 ```
 
-- [ ] **Step 8: Write `services/hello/src/consumer.ts`** — Redis primary guard + durable DB backstop
+- [x] **Step 8: Write `services/hello/src/consumer.ts`** — Redis primary guard + durable DB backstop
 
 ```ts
 import { markProcessed, createLogger, type Logger } from "@ecom/shared";
@@ -1628,7 +1628,7 @@ export async function handleEvent(env: EventEnvelope): Promise<void> {
 }
 ```
 
-- [ ] **Step 9: Write `services/hello/src/main.ts`** — wires app + relay + consumer (the runnable service)
+- [x] **Step 9: Write `services/hello/src/main.ts`** — wires app + relay + consumer (the runnable service)
 
 ```ts
 import { createApp } from "./app";
@@ -1668,7 +1668,7 @@ main().catch((e) => {
 });
 ```
 
-- [ ] **Step 10: Write the failing e2e test** — `services/hello/src/__tests__/hello.e2e.test.ts` (needs the stack up + migration applied)
+- [x] **Step 10: Write the failing e2e test** — `services/hello/src/__tests__/hello.e2e.test.ts` (needs the stack up + migration applied)
 
 ```ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -1723,12 +1723,12 @@ describe("hello tracer bullet (e2e — needs docker compose up + migrated)", () 
 });
 ```
 
-- [ ] **Step 11: Run test to verify it fails first**
+- [x] **Step 11: Run test to verify it fails first**
 
 Run: `pnpm vitest run services/hello/src/__tests__/hello.e2e.test.ts`
 Expected: initially FAIL if the service files/migration are incomplete; once Steps 3–9 are in place and the stack is up + migrated, it PASSES.
 
-- [ ] **Step 12: Run the e2e test to verify it passes** (stack up, migration applied)
+- [x] **Step 12: Run the e2e test to verify it passes** (stack up, migration applied)
 
 Run:
 ```bash
@@ -1737,12 +1737,12 @@ pnpm vitest run services/hello/src/__tests__/hello.e2e.test.ts
 ```
 Expected: PASS — `processedEvent` has exactly one row for the posted helloId.
 
-- [ ] **Step 13: Typecheck everything and run the full unit suite**
+- [x] **Step 13: Typecheck everything and run the full unit suite**
 
 Run: `pnpm -r typecheck && pnpm vitest run packages`
 Expected: no type errors; all unit tests pass.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add services/hello pnpm-lock.yaml
@@ -1760,7 +1760,7 @@ git commit -m "feat(hello): tracer bullet — outbox -> kafka -> idempotent cons
 **Interfaces:**
 - Produces: `pnpm lint` (fails on lint errors) and `pnpm format` (writes) / `pnpm format:check` (verifies) — run by CI.
 
-- [ ] **Step 1: Add dev deps + scripts to root `package.json`** (merge)
+- [x] **Step 1: Add dev deps + scripts to root `package.json`** (merge)
 
 ```json
 {
@@ -1789,7 +1789,7 @@ git commit -m "feat(hello): tracer bullet — outbox -> kafka -> idempotent cons
 
 Run: `pnpm install`
 
-- [ ] **Step 2: Create `eslint.config.js`** (ESLint 9 flat config)
+- [x] **Step 2: Create `eslint.config.js`** (ESLint 9 flat config)
 
 ```js
 const js = require("@eslint/js");
@@ -1810,18 +1810,18 @@ module.exports = tseslint.config(
 );
 ```
 
-- [ ] **Step 3: Create `.prettierrc.json`**
+- [x] **Step 3: Create `.prettierrc.json`**
 
 ```json
 { "semi": true, "singleQuote": false, "trailingComma": "es5", "printWidth": 90 }
 ```
 
-- [ ] **Step 4: Run lint + format check across the workspace**
+- [x] **Step 4: Run lint + format check across the workspace**
 
 Run: `pnpm format && pnpm lint`
 Expected: prettier rewrites files to a consistent style; eslint exits 0 (fix any reported errors before committing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add eslint.config.js .prettierrc.json package.json pnpm-lock.yaml packages services
@@ -1840,7 +1840,7 @@ git commit -m "chore(phase0): eslint + prettier, repo-wide"
 **Interfaces:**
 - Produces: `loadConfig<S extends ZodTypeAny>(schema: S, env?): z.infer<S>` — parses `process.env` against `schema`; on failure throws `Error` naming the invalid/missing keys (so a service crashes at boot, not mid-request). Never logs values.
 
-- [ ] **Step 1: Write the failing test** — `packages/shared/src/__tests__/config.test.ts`
+- [x] **Step 1: Write the failing test** — `packages/shared/src/__tests__/config.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1864,12 +1864,12 @@ describe("loadConfig", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/config.test.ts`
 Expected: FAIL — cannot resolve `../config`.
 
-- [ ] **Step 3: Write `packages/shared/src/config.ts`**
+- [x] **Step 3: Write `packages/shared/src/config.ts`**
 
 ```ts
 import { ZodError, type ZodTypeAny, type z } from "zod";
@@ -1891,14 +1891,14 @@ export function loadConfig<S extends ZodTypeAny>(
 }
 ```
 
-- [ ] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./config";`
+- [x] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./config";`
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/config.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/shared/src
@@ -1917,7 +1917,7 @@ git commit -m "feat(shared): fail-fast zod config loader"
 **Interfaces:**
 - Produces: `createHealthRouter(checks?: Record<string, () => Promise<void>>): Router` — `GET /healthz` → `200 {status:"ok"}` (liveness, no deps); `GET /readyz` → runs every check, `200 {status:"ready"}` if all resolve else `503 {status:"unready", failed:[names]}`.
 
-- [ ] **Step 1: Write the failing test** — `packages/shared/src/__tests__/health.test.ts`
+- [x] **Step 1: Write the failing test** — `packages/shared/src/__tests__/health.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1949,12 +1949,12 @@ describe("createHealthRouter", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/health.test.ts`
 Expected: FAIL — cannot resolve `../health`.
 
-- [ ] **Step 3: Write `packages/shared/src/health.ts`**
+- [x] **Step 3: Write `packages/shared/src/health.ts`**
 
 ```ts
 import { Router } from "express";
@@ -1982,14 +1982,14 @@ export function createHealthRouter(checks: Record<string, ReadinessCheck> = {}):
 }
 ```
 
-- [ ] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./health";`
+- [x] **Step 4: Update `packages/shared/src/index.ts`** — add `export * from "./health";`
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/health.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/shared/src
@@ -2011,7 +2011,7 @@ git commit -m "feat(shared): health/readiness router"
   - `runClosers(closers: Closer[], timeoutMs: number): Promise<void>` — runs closers in REVERSE registration order; rejects if not done within `timeoutMs`.
   - `gracefulShutdown(closers: Closer[], opts?: { timeoutMs?: number }): void` — installs SIGTERM/SIGINT handlers that call `runClosers` then `process.exit`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/shared/src/__tests__/retry.test.ts`:
 
@@ -2072,12 +2072,12 @@ describe("runClosers", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/retry.test.ts packages/shared/src/__tests__/lifecycle.test.ts`
 Expected: FAIL — cannot resolve `../retry` / `../lifecycle`.
 
-- [ ] **Step 3: Write `packages/shared/src/retry.ts`**
+- [x] **Step 3: Write `packages/shared/src/retry.ts`**
 
 ```ts
 export async function withRetry<T>(
@@ -2101,7 +2101,7 @@ export async function withRetry<T>(
 }
 ```
 
-- [ ] **Step 4: Write `packages/shared/src/lifecycle.ts`**
+- [x] **Step 4: Write `packages/shared/src/lifecycle.ts`**
 
 ```ts
 import { createLogger } from "./logger";
@@ -2145,14 +2145,14 @@ export function gracefulShutdown(closers: Closer[], opts: { timeoutMs?: number }
 }
 ```
 
-- [ ] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./retry";` and `export * from "./lifecycle";`
+- [x] **Step 5: Update `packages/shared/src/index.ts`** — add `export * from "./retry";` and `export * from "./lifecycle";`
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/retry.test.ts packages/shared/src/__tests__/lifecycle.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared/src
@@ -2173,7 +2173,7 @@ git commit -m "feat(shared): withRetry backoff + graceful shutdown"
   - `createProducer(kafka)` uses an **idempotent** producer; `connect` wrapped in `withRetry`.
   - `createConsumer(kafka, groupId)` — `run(topics, handler, opts?)`: on handler failure, retries `opts.maxRetries` times (backoff) then **parks the message on `<topic>.dlq`** and commits, so one poison message can't wedge the partition. Requires an internal producer for parking.
 
-- [ ] **Step 1: Write the failing integration test** — `packages/shared/src/__tests__/kafka-dlq.int.test.ts`
+- [x] **Step 1: Write the failing integration test** — `packages/shared/src/__tests__/kafka-dlq.int.test.ts`
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -2215,12 +2215,12 @@ describe("kafka consumer error boundary (integration — needs stack up)", () =>
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/kafka-dlq.int.test.ts`
 Expected: FAIL — `run` does not accept a retry option / no parking behavior yet.
 
-- [ ] **Step 3: Replace `packages/shared/src/kafka.ts`** with the resilient version
+- [x] **Step 3: Replace `packages/shared/src/kafka.ts`** with the resilient version
 
 ```ts
 import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
@@ -2290,12 +2290,12 @@ export function createConsumer(kafka: Kafka, groupId: string) {
 }
 ```
 
-- [ ] **Step 4: Run the new DLQ test AND the original round-trip test** (stack up)
+- [x] **Step 4: Run the new DLQ test AND the original round-trip test** (stack up)
 
 Run: `pnpm vitest run packages/shared/src/__tests__/kafka-dlq.int.test.ts packages/shared/src/__tests__/kafka.int.test.ts`
 Expected: both PASS. (The Task 8 round-trip test still passes — `run`'s new third arg is optional.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/shared/src
@@ -2315,7 +2315,7 @@ git commit -m "feat(shared): kafka resilience — retry connect, idempotent prod
 - Consumes: `loadConfig`, `createHealthRouter`, `gracefulShutdown`, `getRedis` from `@ecom/shared`.
 - Produces: `services/hello/src/config.ts` exporting a validated `config`; a `hello` image built by a multi-stage Dockerfile; a `--profile app` compose service.
 
-- [ ] **Step 1: Write `services/hello/src/config.ts`**
+- [x] **Step 1: Write `services/hello/src/config.ts`**
 
 ```ts
 import { z } from "zod";
@@ -2331,7 +2331,7 @@ export const config = loadConfig(
 );
 ```
 
-- [ ] **Step 2: Update `services/hello/src/app.ts`** — mount the health router and use validated config
+- [x] **Step 2: Update `services/hello/src/app.ts`** — mount the health router and use validated config
 
 ```ts
 import express from "express";
@@ -2382,7 +2382,7 @@ export function createApp() {
 }
 ```
 
-- [ ] **Step 3: Update `services/hello/src/main.ts`** — validated config + graceful shutdown
+- [x] **Step 3: Update `services/hello/src/main.ts`** — validated config + graceful shutdown
 
 ```ts
 import { createApp } from "./app";
@@ -2432,7 +2432,7 @@ main().catch((e) => {
 });
 ```
 
-- [ ] **Step 4: Create `services/hello/.dockerignore`**
+- [x] **Step 4: Create `services/hello/.dockerignore`**
 
 ```
 node_modules
@@ -2440,7 +2440,7 @@ dist
 .env
 ```
 
-- [ ] **Step 5: Create `services/hello/Dockerfile`** (multi-stage; build context is the repo root)
+- [x] **Step 5: Create `services/hello/Dockerfile`** (multi-stage; build context is the repo root)
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -2466,7 +2466,7 @@ EXPOSE 3000
 CMD ["pnpm", "exec", "tsx", "src/main.ts"]
 ```
 
-- [ ] **Step 6: Add a prod `app` profile service to `docker-compose.example.yml`** (append under `services:`, before `volumes:`)
+- [x] **Step 6: Add a prod `app` profile service to `docker-compose.example.yml`** (append under `services:`, before `volumes:`)
 
 ```yaml
   hello:
@@ -2491,7 +2491,7 @@ CMD ["pnpm", "exec", "tsx", "src/main.ts"]
       retries: 10
 ```
 
-- [ ] **Step 7: Build the image and verify readiness** (infra must be up + `hello` DB migrated)
+- [x] **Step 7: Build the image and verify readiness** (infra must be up + `hello` DB migrated)
 
 Run:
 ```bash
@@ -2501,7 +2501,7 @@ sleep 15 && curl -fsS localhost:3000/readyz
 ```
 Expected: `docker compose build` succeeds; `/readyz` returns `{"status":"ready"}`.
 
-- [ ] **Step 8: Typecheck + commit**
+- [x] **Step 8: Typecheck + commit**
 
 Run: `pnpm --filter @ecom/hello typecheck`
 Expected: no errors.
@@ -2522,13 +2522,13 @@ git commit -m "feat(hello): dockerfile, prod compose profile, config+health+shut
 **Interfaces:**
 - Produces: CI that runs on every push/PR — install → lint → format check → typecheck → unit tests → (with infra up) integration + e2e → build → `pnpm audit`.
 
-- [ ] **Step 1: Remove the obsolete legacy workflow**
+- [x] **Step 1: Remove the obsolete legacy workflow**
 
 ```bash
 git rm .github/workflows/node.js.yml
 ```
 
-- [ ] **Step 2: Create `.github/workflows/ci.yml`**
+- [x] **Step 2: Create `.github/workflows/ci.yml`**
 
 ```yaml
 name: CI
@@ -2578,12 +2578,12 @@ jobs:
         run: pnpm vitest run "**/*.int.test.ts" "**/*.e2e.test.ts"
 ```
 
-- [ ] **Step 3: Validate the workflow YAML locally**
+- [x] **Step 3: Validate the workflow YAML locally**
 
 Run: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml')); print('ci.yml OK')"`
 Expected: `ci.yml OK`. (Full CI runs on push; this just catches YAML errors before committing.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
