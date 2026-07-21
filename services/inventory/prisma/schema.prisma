@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Single sellable pool: `available` is the sellable count. Reserve decrements it
+// (guarded by WHERE available >= qty), release increments it. No shopId, no
+// product FK — Inventory trusts the incoming productId (DB-per-service).
+model Inventory {
+  productId String   @id
+  available Int
+  location  String   @default("Main Store")
+  updatedAt DateTime @updatedAt
+}
+
+model Reservation {
+  id         String    @id @default(uuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  status     String    @default("ACTIVE") // ACTIVE | RELEASED
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  releasedAt DateTime?
+
+  @@index([orderId])
+  @@index([status, expiresAt]) // sweeper scan
+}
+
+model Outbox {
+  id            String    @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  type          String
+  version       Int       @default(1)
+  traceId       String
+  producer      String
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([sentAt])
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
