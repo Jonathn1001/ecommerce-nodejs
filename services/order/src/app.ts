@@ -2,6 +2,8 @@ import express from "express";
 import { z } from "zod";
 import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
 import { prisma } from "./db";
+import { placeOrder } from "./place-order";
+import { placeOrderTx } from "./tx-adapters";
 
 const log = createLogger("order");
 
@@ -122,6 +124,68 @@ export function createApp(): express.Application {
       res.status(201).json({ productId: row.productId, price: row.price });
     } catch {
       log.error("catalog_upsert_failed", { productId, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  // Place the current user's cart. Cart read + pricing + order write + cart
+  // clear + outbox insert all commit in one transaction.
+  app.post("/orders", async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(400).json({ error: "missing x-user-id" });
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const cart = await tx.cart.findUnique({ where: { userId }, include: { items: true } });
+        const items = (cart?.items ?? []).map((i) => ({ productId: i.productId, quantity: i.quantity }));
+        return placeOrder(placeOrderTx(tx, userId, req.traceId), { userId, items });
+      });
+
+      if (result.outcome === "EMPTY") return res.status(400).json({ error: "cart is empty" });
+      if (result.outcome === "UNPRICED")
+        return res.status(422).json({ error: "unpriced product", productId: result.unpricedProductId });
+
+      const order = await prisma.order.findUnique({
+        where: { id: result.orderId! },
+        include: { items: true },
+      });
+      log.info("order_placed", { orderId: order!.id, traceId: req.traceId });
+      res.status(201).json({
+        orderId: order!.id,
+        status: order!.status,
+        totalPrice: order!.totalPrice,
+        items: order!.items.map((i) => ({
+          productId: i.productId,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+        })),
+      });
+    } catch {
+      log.error("order_place_failed", { traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  app.get("/orders/:id", async (req, res) => {
+    try {
+      const order = await prisma.order.findUnique({
+        where: { id: req.params.id },
+        include: { items: true },
+      });
+      if (!order) return res.status(404).json({ error: "not found" });
+      res.json({
+        id: order.id,
+        userId: order.userId,
+        status: order.status,
+        totalPrice: order.totalPrice,
+        items: order.items.map((i) => ({
+          productId: i.productId,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+        })),
+        createdAt: order.createdAt.toISOString(),
+      });
+    } catch {
+      log.error("order_get_failed", { orderId: req.params.id, traceId: req.traceId });
       res.status(500).json({ error: "internal error" });
     }
   });
