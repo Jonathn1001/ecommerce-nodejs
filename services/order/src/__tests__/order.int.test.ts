@@ -11,7 +11,10 @@ async function seedPrice(productId: string, price: number) {
   await request(app).post("/admin/catalog").send({ productId, name: "x", price });
 }
 async function addToCart(userId: string, productId: string, quantity: number) {
-  await request(app).post("/cart/items").set("x-user-id", userId).send({ productId, quantity });
+  await request(app)
+    .post("/cart/items")
+    .set("x-user-id", userId)
+    .send({ productId, quantity });
 }
 
 describe("order checkout (integration — needs docker compose up + migrated)", () => {
@@ -34,9 +37,13 @@ describe("order checkout (integration — needs docker compose up + migrated)", 
     expect(res.body.totalPrice).toBe(450);
     const orderId = res.body.orderId as string;
 
-    expect(await prisma.order.count({ where: { id: orderId, status: "PENDING" } })).toBe(1);
+    expect(await prisma.order.count({ where: { id: orderId, status: "PENDING" } })).toBe(
+      1
+    );
     expect(await prisma.orderItem.count({ where: { orderId } })).toBe(2);
-    expect(await prisma.outbox.count({ where: { aggregateId: orderId, type: ORDER_PLACED } })).toBe(1);
+    expect(
+      await prisma.outbox.count({ where: { aggregateId: orderId, type: ORDER_PLACED } })
+    ).toBe(1);
 
     const cart = await request(app).get("/cart").set("x-user-id", userId);
     expect(cart.body.items).toEqual([]);

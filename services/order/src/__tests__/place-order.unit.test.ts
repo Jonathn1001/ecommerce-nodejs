@@ -31,7 +31,10 @@ describe("placeOrder", () => {
     const f = fakeTx({ p1: 100, p2: 250 });
     const res = await placeOrder(f.tx, {
       userId: "u1",
-      items: [{ productId: "p1", quantity: 2 }, { productId: "p2", quantity: 1 }],
+      items: [
+        { productId: "p1", quantity: 2 },
+        { productId: "p2", quantity: 1 },
+      ],
     });
     expect(res.outcome).toBe("PLACED");
     expect(res.orderId).toBe("order_1");
@@ -44,7 +47,10 @@ describe("placeOrder", () => {
         orderId: "order_1",
         payload: {
           orderId: "order_1",
-          items: [{ productId: "p1", quantity: 2 }, { productId: "p2", quantity: 1 }],
+          items: [
+            { productId: "p1", quantity: 2 },
+            { productId: "p2", quantity: 1 },
+          ],
         },
       },
     ]);
@@ -63,7 +69,10 @@ describe("placeOrder", () => {
     const f = fakeTx({ p1: 100 });
     const res = await placeOrder(f.tx, {
       userId: "u1",
-      items: [{ productId: "p1", quantity: 1 }, { productId: "pX", quantity: 1 }],
+      items: [
+        { productId: "p1", quantity: 1 },
+        { productId: "pX", quantity: 1 },
+      ],
     });
     expect(res.outcome).toBe("UNPRICED");
     expect(res.unpricedProductId).toBe("pX");
@@ -74,7 +83,10 @@ describe("placeOrder", () => {
 
   it("treats a zero (or negative) price as unpriced", async () => {
     const f = fakeTx({ p1: 0 });
-    const res = await placeOrder(f.tx, { userId: "u1", items: [{ productId: "p1", quantity: 1 }] });
+    const res = await placeOrder(f.tx, {
+      userId: "u1",
+      items: [{ productId: "p1", quantity: 1 }],
+    });
     expect(res.outcome).toBe("UNPRICED");
   });
 });

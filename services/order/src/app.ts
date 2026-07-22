@@ -72,7 +72,10 @@ export function createApp(): express.Application {
         await prisma.cartItem.deleteMany({ where: { userId, productId } });
         return res.status(200).json({ productId, quantity: 0 });
       }
-      const r = await prisma.cartItem.updateMany({ where: { userId, productId }, data: { quantity } });
+      const r = await prisma.cartItem.updateMany({
+        where: { userId, productId },
+        data: { quantity },
+      });
       if (r.count === 0) return res.status(404).json({ error: "not in cart" });
       res.status(200).json({ productId, quantity });
     } catch {
@@ -98,10 +101,15 @@ export function createApp(): express.Application {
     const userId = userIdOf(req);
     if (!userId) return res.status(400).json({ error: "missing x-user-id" });
     try {
-      const cart = await prisma.cart.findUnique({ where: { userId }, include: { items: true } });
+      const cart = await prisma.cart.findUnique({
+        where: { userId },
+        include: { items: true },
+      });
       const items = (cart?.items ?? [])
         .map((i) => ({ productId: i.productId, quantity: i.quantity }))
-        .sort((a, b) => (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0));
+        .sort((a, b) =>
+          a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0
+        );
       res.json({ userId, items });
     } catch {
       log.error("cart_get_failed", { traceId: req.traceId });
@@ -135,25 +143,43 @@ export function createApp(): express.Application {
     if (!userId) return res.status(400).json({ error: "missing x-user-id" });
     try {
       const result = await prisma.$transaction(async (tx) => {
-        const cart = await tx.cart.findUnique({ where: { userId }, include: { items: true } });
-        const items = (cart?.items ?? []).map((i) => ({ productId: i.productId, quantity: i.quantity }));
-        return placeOrder(placeOrderTx(tx, userId, req.traceId), { userId, items });
+        const cart = await tx.cart.findUnique({
+          where: { userId },
+          include: { items: true },
+        });
+        const items = (cart?.items ?? []).map((i) => ({
+          productId: i.productId,
+          quantity: i.quantity,
+        }));
+        const r = await placeOrder(placeOrderTx(tx, req.traceId), { userId, items });
+        if (r.outcome !== "PLACED") {
+          return {
+            outcome: r.outcome,
+            unpricedProductId: r.unpricedProductId,
+            order: null,
+          };
+        }
+        const order = await tx.order.findUnique({
+          where: { id: r.orderId! },
+          include: { items: true },
+        });
+        return { outcome: r.outcome, unpricedProductId: undefined, order };
       });
 
-      if (result.outcome === "EMPTY") return res.status(400).json({ error: "cart is empty" });
+      if (result.outcome === "EMPTY")
+        return res.status(400).json({ error: "cart is empty" });
       if (result.outcome === "UNPRICED")
-        return res.status(422).json({ error: "unpriced product", productId: result.unpricedProductId });
+        return res
+          .status(422)
+          .json({ error: "unpriced product", productId: result.unpricedProductId });
 
-      const order = await prisma.order.findUnique({
-        where: { id: result.orderId! },
-        include: { items: true },
-      });
-      log.info("order_placed", { orderId: order!.id, traceId: req.traceId });
+      const order = result.order!;
+      log.info("order_placed", { orderId: order.id, traceId: req.traceId });
       res.status(201).json({
-        orderId: order!.id,
-        status: order!.status,
-        totalPrice: order!.totalPrice,
-        items: order!.items.map((i) => ({
+        orderId: order.id,
+        status: order.status,
+        totalPrice: order.totalPrice,
+        items: order.items.map((i) => ({
           productId: i.productId,
           quantity: i.quantity,
           unitPrice: i.unitPrice,

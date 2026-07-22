@@ -4,7 +4,12 @@ import { randomUUID } from "crypto";
 import { createApp } from "../app";
 import { outboxPort } from "../outbox-adapter";
 import { prisma } from "../db";
-import { createKafka, createProducer, createConsumer, startOutboxRelay } from "@ecom/shared";
+import {
+  createKafka,
+  createProducer,
+  createConsumer,
+  startOutboxRelay,
+} from "@ecom/shared";
 import { ORDER_PLACED, type EventEnvelope } from "@ecom/contracts";
 
 const ORDER_TOPIC = "order.events";
@@ -27,7 +32,9 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
     await admin.disconnect();
 
     await producer.connect();
-    relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, { intervalMs: 300 });
+    relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, {
+      intervalMs: 300,
+    });
 
     await orderConsumer.connect();
     await orderConsumer.run([ORDER_TOPIC], async (env) => {
@@ -45,8 +52,13 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
   it("POST /orders -> OrderPlaced on order.events with matching items", async () => {
     const userId = `u_${randomUUID()}`;
     const pid = `p_${randomUUID()}`;
-    await request(app).post("/admin/catalog").send({ productId: pid, name: "x", price: 150 });
-    await request(app).post("/cart/items").set("x-user-id", userId).send({ productId: pid, quantity: 4 });
+    await request(app)
+      .post("/admin/catalog")
+      .send({ productId: pid, name: "x", price: 150 });
+    await request(app)
+      .post("/cart/items")
+      .set("x-user-id", userId)
+      .send({ productId: pid, quantity: 4 });
 
     const res = await request(app).post("/orders").set("x-user-id", userId);
     expect(res.status).toBe(201);
@@ -60,8 +72,12 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    const evt = placed.find((e) => (e.payload as { orderId: string }).orderId === orderId);
+    const evt = placed.find(
+      (e) => (e.payload as { orderId: string }).orderId === orderId
+    );
     expect(evt).toBeDefined();
-    expect((evt!.payload as { items: unknown[] }).items).toEqual([{ productId: pid, quantity: 4 }]);
+    expect((evt!.payload as { items: unknown[] }).items).toEqual([
+      { productId: pid, quantity: 4 },
+    ]);
   }, 30000);
 });

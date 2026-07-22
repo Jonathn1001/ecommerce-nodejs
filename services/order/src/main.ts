@@ -26,7 +26,9 @@ async function main() {
   );
 
   const app = createApp();
-  const server = app.listen(config.PORT, () => log.info("order_listening", { port: config.PORT }));
+  const server = app.listen(config.PORT, () =>
+    log.info("order_listening", { port: config.PORT })
+  );
 
   // runClosers() tears down in REVERSE of this array. Resulting order:
   //   server.close -> relay.stop -> producer.disconnect -> prisma.$disconnect

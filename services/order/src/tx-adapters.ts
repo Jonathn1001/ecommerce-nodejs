@@ -5,7 +5,6 @@ import type { PlaceOrderTx } from "./place-order";
 // closured so the domain core stays free of transport concerns.
 export function placeOrderTx(
   tx: Prisma.TransactionClient,
-  userId: string,
   traceId: string
 ): PlaceOrderTx {
   return {
