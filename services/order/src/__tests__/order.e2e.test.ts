@@ -63,5 +63,5 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
     const evt = placed.find((e) => (e.payload as { orderId: string }).orderId === orderId);
     expect(evt).toBeDefined();
     expect((evt!.payload as { items: unknown[] }).items).toEqual([{ productId: pid, quantity: 4 }]);
-  });
+  }, 30000);
 });
