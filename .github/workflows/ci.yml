@@ -85,3 +85,10 @@ jobs:
         run: |
           pnpm --filter @ecom/inventory exec prisma migrate deploy
           pnpm vitest run services/inventory
+      - name: Order service (migrate + int/e2e)
+        env:
+          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/order
+          KAFKA_BROKERS: localhost:9092
+        run: |
+          pnpm --filter @ecom/order exec prisma migrate deploy
+          pnpm vitest run services/order
