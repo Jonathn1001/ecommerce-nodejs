@@ -87,7 +87,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/generated"]
 }
 ```
 
