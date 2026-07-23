@@ -1,57 +1,56 @@
 import {
-  INVENTORY_RESERVED,
-  INVENTORY_RESERVATION_FAILED,
-  ORDER_CANCELLED,
+  INVENTORY_RESERVED, INVENTORY_RESERVATION_FAILED,
+  ORDER_CANCELLED, ORDER_CONFIRMED,
+  CHARGE_PAYMENT, PAYMENT_SUCCEEDED, PAYMENT_FAILED,
 } from "@ecom/contracts";
 
 export type OrderStatus = "PENDING" | "AWAITING_PAYMENT" | "CANCELLED" | "CONFIRMED";
 
-// Pure transition table. Only PENDING is a live source this slice; every other
-// (status, event) pair — a late, duplicate, or out-of-order event — returns null
-// so the caller no-ops instead of corrupting state.
+// Pure transition table. Widened for the payment leg (3b).
 export function nextStatus(
   current: string,
   eventType: string
-): "AWAITING_PAYMENT" | "CANCELLED" | null {
-  if (current === "PENDING" && eventType === INVENTORY_RESERVED)
-    return "AWAITING_PAYMENT";
-  if (current === "PENDING" && eventType === INVENTORY_RESERVATION_FAILED)
-    return "CANCELLED";
+): "AWAITING_PAYMENT" | "CANCELLED" | "CONFIRMED" | null {
+  if (current === "PENDING" && eventType === INVENTORY_RESERVED) return "AWAITING_PAYMENT";
+  if (current === "PENDING" && eventType === INVENTORY_RESERVATION_FAILED) return "CANCELLED";
+  if (current === "AWAITING_PAYMENT" && eventType === PAYMENT_SUCCEEDED) return "CONFIRMED";
+  if (current === "AWAITING_PAYMENT" && eventType === PAYMENT_FAILED) return "CANCELLED";
   return null;
 }
 
 export interface TransitionTx {
-  loadOrderStatus(orderId: string): Promise<string | null>; // null => no such order
-  markProcessed(eventId: string, type: string): Promise<boolean>; // false => already processed
+  loadOrder(orderId: string): Promise<{ status: string; totalPrice: number } | null>;
+  markProcessed(eventId: string, type: string): Promise<boolean>;
   setStatus(orderId: string, status: OrderStatus): Promise<void>;
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
 }
 
 export type ApplyOutcome =
-  "UNKNOWN_ORDER" | "DUPLICATE" | "NO_OP" | "AWAITING_PAYMENT" | "CANCELLED";
+  "UNKNOWN_ORDER" | "DUPLICATE" | "NO_OP" | "AWAITING_PAYMENT" | "CANCELLED" | "CONFIRMED";
 
-// Domain core over a tx-bound port (mirrors inventory/reserve.ts). Order of
-// operations is load-bearing: load the order BEFORE the ledger so an unknown
-// order is acked without a ProcessedEvent row and stays replay-recoverable.
-export async function applyInventoryResult(
+// Domain core over a tx port. Load-before-ledger (unknown order acked without a
+// ProcessedEvent row → replay-safe). Covers inventory + payment events.
+export async function applyResult(
   tx: TransitionTx,
   p: { eventId: string; type: string; orderId: string }
 ): Promise<ApplyOutcome> {
-  const status = await tx.loadOrderStatus(p.orderId);
-  if (status === null) return "UNKNOWN_ORDER"; // not ledgered — replay-safe
+  const order = await tx.loadOrder(p.orderId);
+  if (order === null) return "UNKNOWN_ORDER";
 
   const fresh = await tx.markProcessed(p.eventId, p.type);
-  if (!fresh) return "DUPLICATE"; // at-least-once redelivery
+  if (!fresh) return "DUPLICATE";
 
-  const next = nextStatus(status, p.type);
-  if (next === null) return "NO_OP"; // ledgered; late/out-of-order guard
+  const next = nextStatus(order.status, p.type);
+  if (next === null) return "NO_OP";
 
-  // `next` is now "AWAITING_PAYMENT" | "CANCELLED" — both valid ApplyOutcomes.
-  // Widening nextStatus to a status outside ApplyOutcome (e.g. CONFIRMED in a
-  // later slice) without widening ApplyOutcome is a COMPILE error here, by
-  // design — the future footgun fails at build, not silently as a NO_OP.
   await tx.setStatus(p.orderId, next);
-  if (next === "CANCELLED") {
+  if (next === "AWAITING_PAYMENT") {
+    // Atomic command emission: the ChargePayment outbox row commits with the
+    // status change; the relay routes it to RabbitMQ payment.charge.
+    await tx.enqueue(CHARGE_PAYMENT, p.orderId, { orderId: p.orderId, amount: order.totalPrice });
+  } else if (next === "CONFIRMED") {
+    await tx.enqueue(ORDER_CONFIRMED, p.orderId, { orderId: p.orderId });
+  } else if (next === "CANCELLED") {
     await tx.enqueue(ORDER_CANCELLED, p.orderId, { orderId: p.orderId });
   }
   return next;

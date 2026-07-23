@@ -1,113 +1,84 @@
 import { describe, it, expect } from "vitest";
-import { nextStatus, applyInventoryResult, type TransitionTx } from "../transition";
+import { nextStatus, applyResult, type TransitionTx } from "../transition";
 import {
-  INVENTORY_RESERVED,
-  INVENTORY_RESERVATION_FAILED,
-  ORDER_CANCELLED,
+  INVENTORY_RESERVED, INVENTORY_RESERVATION_FAILED,
+  ORDER_CANCELLED, ORDER_CONFIRMED,
+  CHARGE_PAYMENT, PAYMENT_SUCCEEDED, PAYMENT_FAILED,
 } from "@ecom/contracts";
 
-function fakeTx(initialStatus: string | null) {
+function fakeTx(init: { status: string | null; totalPrice?: number }) {
   const processed = new Set<string>();
   const emitted: Array<{ type: string; orderId: string; payload: unknown }> = [];
-  let status = initialStatus;
+  let status = init.status;
+  const totalPrice = init.totalPrice ?? 500;
   const tx: TransitionTx = {
-    async loadOrderStatus() {
-      return status;
-    },
-    async markProcessed(eventId) {
-      if (processed.has(eventId)) return false;
-      processed.add(eventId);
-      return true;
-    },
-    async setStatus(_orderId, s) {
-      status = s;
-    },
-    async enqueue(type, orderId, payload) {
-      emitted.push({ type, orderId, payload });
-    },
+    async loadOrder() { return status === null ? null : { status, totalPrice }; },
+    async markProcessed(eventId) { if (processed.has(eventId)) return false; processed.add(eventId); return true; },
+    async setStatus(_o, s) { status = s; },
+    async enqueue(type, orderId, payload) { emitted.push({ type, orderId, payload }); },
   };
   return { tx, emitted, processed, statusNow: () => status };
 }
 
-describe("nextStatus (pure transition table)", () => {
+describe("nextStatus (widened table)", () => {
   it("PENDING + reserved -> AWAITING_PAYMENT", () => {
     expect(nextStatus("PENDING", INVENTORY_RESERVED)).toBe("AWAITING_PAYMENT");
   });
-  it("PENDING + failed -> CANCELLED", () => {
+  it("PENDING + reservation-failed -> CANCELLED", () => {
     expect(nextStatus("PENDING", INVENTORY_RESERVATION_FAILED)).toBe("CANCELLED");
   });
-  it("guards every other (status, event) to null", () => {
+  it("AWAITING_PAYMENT + payment-succeeded -> CONFIRMED", () => {
+    expect(nextStatus("AWAITING_PAYMENT", PAYMENT_SUCCEEDED)).toBe("CONFIRMED");
+  });
+  it("AWAITING_PAYMENT + payment-failed -> CANCELLED", () => {
+    expect(nextStatus("AWAITING_PAYMENT", PAYMENT_FAILED)).toBe("CANCELLED");
+  });
+  it("guards every other pair to null", () => {
+    expect(nextStatus("CONFIRMED", PAYMENT_SUCCEEDED)).toBeNull();
+    expect(nextStatus("PENDING", PAYMENT_SUCCEEDED)).toBeNull();
     expect(nextStatus("AWAITING_PAYMENT", INVENTORY_RESERVED)).toBeNull();
-    expect(nextStatus("CANCELLED", INVENTORY_RESERVATION_FAILED)).toBeNull();
-    expect(nextStatus("PENDING", "something.else")).toBeNull();
   });
 });
 
-describe("applyInventoryResult", () => {
-  it("reserved on a PENDING order -> AWAITING_PAYMENT, ledgered, no emit", async () => {
-    const f = fakeTx("PENDING");
-    const outcome = await applyInventoryResult(f.tx, {
-      eventId: "e1",
-      type: INVENTORY_RESERVED,
-      orderId: "o1",
-    });
+describe("applyResult", () => {
+  it("reserved -> AWAITING_PAYMENT and emits ChargePayment(amount=totalPrice)", async () => {
+    const f = fakeTx({ status: "PENDING", totalPrice: 700 });
+    const outcome = await applyResult(f.tx, { eventId: "e1", type: INVENTORY_RESERVED, orderId: "o1" });
     expect(outcome).toBe("AWAITING_PAYMENT");
-    expect(f.statusNow()).toBe("AWAITING_PAYMENT");
-    expect(f.processed.has("e1")).toBe(true);
-    expect(f.emitted).toEqual([]);
-  });
-
-  it("failed on a PENDING order -> CANCELLED and emits OrderCancelled", async () => {
-    const f = fakeTx("PENDING");
-    const outcome = await applyInventoryResult(f.tx, {
-      eventId: "e2",
-      type: INVENTORY_RESERVATION_FAILED,
-      orderId: "o2",
-    });
-    expect(outcome).toBe("CANCELLED");
-    expect(f.statusNow()).toBe("CANCELLED");
     expect(f.emitted).toEqual([
-      { type: ORDER_CANCELLED, orderId: "o2", payload: { orderId: "o2" } },
+      { type: CHARGE_PAYMENT, orderId: "o1", payload: { orderId: "o1", amount: 700 } },
     ]);
   });
-
-  it("unknown order -> UNKNOWN_ORDER without ledgering (replay-safe)", async () => {
-    const f = fakeTx(null);
-    const outcome = await applyInventoryResult(f.tx, {
-      eventId: "e3",
-      type: INVENTORY_RESERVED,
-      orderId: "missing",
-    });
-    expect(outcome).toBe("UNKNOWN_ORDER");
-    expect(f.processed.size).toBe(0); // NOT ledgered
-    expect(f.emitted).toEqual([]);
+  it("reservation-failed -> CANCELLED + OrderCancelled", async () => {
+    const f = fakeTx({ status: "PENDING" });
+    const outcome = await applyResult(f.tx, { eventId: "e2", type: INVENTORY_RESERVATION_FAILED, orderId: "o2" });
+    expect(outcome).toBe("CANCELLED");
+    expect(f.emitted).toEqual([{ type: ORDER_CANCELLED, orderId: "o2", payload: { orderId: "o2" } }]);
   });
-
-  it("dedupes a redelivered event (second call is DUPLICATE, no re-effect)", async () => {
-    const f = fakeTx("PENDING");
-    await applyInventoryResult(f.tx, {
-      eventId: "e4",
-      type: INVENTORY_RESERVED,
-      orderId: "o4",
-    });
-    const outcome = await applyInventoryResult(f.tx, {
-      eventId: "e4",
-      type: INVENTORY_RESERVED,
-      orderId: "o4",
-    });
-    expect(outcome).toBe("DUPLICATE");
-    expect(f.statusNow()).toBe("AWAITING_PAYMENT"); // unchanged
-    expect(f.emitted).toEqual([]);
+  it("payment-succeeded -> CONFIRMED + OrderConfirmed", async () => {
+    const f = fakeTx({ status: "AWAITING_PAYMENT" });
+    const outcome = await applyResult(f.tx, { eventId: "e3", type: PAYMENT_SUCCEEDED, orderId: "o3" });
+    expect(outcome).toBe("CONFIRMED");
+    expect(f.emitted).toEqual([{ type: ORDER_CONFIRMED, orderId: "o3", payload: { orderId: "o3" } }]);
   });
-
-  it("out-of-order guard: reserved on a CANCELLED order -> NO_OP", async () => {
-    const f = fakeTx("CANCELLED");
-    const outcome = await applyInventoryResult(f.tx, {
-      eventId: "e5",
-      type: INVENTORY_RESERVED,
-      orderId: "o5",
-    });
-    expect(outcome).toBe("NO_OP");
-    expect(f.statusNow()).toBe("CANCELLED");
+  it("payment-failed -> CANCELLED + OrderCancelled", async () => {
+    const f = fakeTx({ status: "AWAITING_PAYMENT" });
+    const outcome = await applyResult(f.tx, { eventId: "e4", type: PAYMENT_FAILED, orderId: "o4" });
+    expect(outcome).toBe("CANCELLED");
+    expect(f.emitted).toEqual([{ type: ORDER_CANCELLED, orderId: "o4", payload: { orderId: "o4" } }]);
+  });
+  it("unknown order -> UNKNOWN_ORDER without ledgering", async () => {
+    const f = fakeTx({ status: null });
+    expect(await applyResult(f.tx, { eventId: "e5", type: PAYMENT_SUCCEEDED, orderId: "x" })).toBe("UNKNOWN_ORDER");
+    expect(f.processed.size).toBe(0);
+  });
+  it("dedupes a redelivered event", async () => {
+    const f = fakeTx({ status: "AWAITING_PAYMENT" });
+    await applyResult(f.tx, { eventId: "e6", type: PAYMENT_SUCCEEDED, orderId: "o6" });
+    expect(await applyResult(f.tx, { eventId: "e6", type: PAYMENT_SUCCEEDED, orderId: "o6" })).toBe("DUPLICATE");
+  });
+  it("out-of-order guard: payment-succeeded on CONFIRMED -> NO_OP", async () => {
+    const f = fakeTx({ status: "CONFIRMED" });
+    expect(await applyResult(f.tx, { eventId: "e7", type: PAYMENT_SUCCEEDED, orderId: "o7" })).toBe("NO_OP");
   });
 });
