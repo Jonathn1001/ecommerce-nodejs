@@ -1,11 +1,20 @@
 import amqp, { type Channel, type ChannelModel } from "amqplib";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
+import { withRetry } from "./retry";
 
 export async function createRabbit() {
   const conn: ChannelModel = await amqp.connect(
     process.env.RABBITMQ_URL ?? "amqp://ecom:ecom@localhost:5672"
   );
   const ch: Channel = await conn.createChannel();
+
+  let healthy = true;
+  conn.on("close", () => {
+    healthy = false;
+  });
+  conn.on("error", () => {
+    healthy = false;
+  });
 
   async function assertWorkQueue(queue: string): Promise<void> {
     const dlx = `${queue}.dlx`;
@@ -22,16 +31,28 @@ export async function createRabbit() {
 
   async function consumeCommands(
     queue: string,
-    handler: (env: EventEnvelope) => Promise<void>
+    handler: (env: EventEnvelope) => Promise<void>,
+    opts: { maxRetries?: number } = {}
   ): Promise<void> {
+    const { maxRetries = 3 } = opts;
     await ch.consume(queue, async (msg) => {
       if (!msg) return;
+      let env: EventEnvelope;
       try {
-        const env = EventEnvelopeSchema.parse(JSON.parse(msg.content.toString()));
-        await handler(env);
+        env = EventEnvelopeSchema.parse(JSON.parse(msg.content.toString()));
+      } catch {
+        ch.nack(msg, false, false); // malformed envelope -> DLQ; retrying can't help
+        return;
+      }
+      try {
+        await withRetry(() => handler(env), {
+          retries: maxRetries,
+          baseMs: 200,
+          label: `consume:${queue}`,
+        });
         ch.ack(msg);
       } catch {
-        ch.nack(msg, false, false); // no requeue -> routed to the DLX/DLQ
+        ch.nack(msg, false, false); // handler exhausted retries -> DLX/DLQ
       }
     });
   }
@@ -49,10 +70,14 @@ export async function createRabbit() {
     return null;
   }
 
+  async function checkHealth(): Promise<void> {
+    if (!healthy) throw new Error("rabbit connection is down");
+  }
+
   async function close(): Promise<void> {
     await ch.close();
     await conn.close();
   }
 
-  return { assertWorkQueue, sendCommand, consumeCommands, consumeDlqOnce, close };
+  return { assertWorkQueue, sendCommand, consumeCommands, consumeDlqOnce, checkHealth, close };
 }
