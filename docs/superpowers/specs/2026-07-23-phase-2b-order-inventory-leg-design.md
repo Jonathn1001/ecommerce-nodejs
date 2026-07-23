@@ -92,21 +92,27 @@ handleInventoryEvent(env):
     return                                             -- not ours; no-op, no DLQ
   payload = parse(env.payload)                         -- both payloads carry orderId
   return prisma.$transaction(tx =>
+    status = tx.loadOrderStatus(payload.orderId)
+    if status is null:
+      return "UNKNOWN_ORDER"                           -- log + ack; NOT ledgered (replay-safe)
     if tx.processedEvent.exists(env.eventId):
       return "DUPLICATE"                               -- dedup: redelivery
     tx.processedEvent.insert(env.eventId, env.type)
-    status = tx.loadOrderStatus(payload.orderId)
-    if status is null:
-      return "UNKNOWN_ORDER"                           -- log + ack, no DLQ
     next = nextStatus(status, env.type)                -- pure core
     if next is null:
-      return "NO_OP"                                   -- guard: late/dup/out-of-order
+      return "NO_OP"                                   -- guard: late/out-of-order (still ledgered)
     tx.setStatus(payload.orderId, next)
     if next == "CANCELLED":
       tx.enqueue(ORDER_CANCELLED, payload.orderId, { orderId: payload.orderId })
     return next
   )
 ```
+
+**Order of operations is load-bearing:** the order is loaded **before** the ledger is
+touched. An event whose `orderId` has no row (`UNKNOWN_ORDER`) is acked *without* a
+`ProcessedEvent` row, so a later replay — once the order materializes — can still apply
+the transition (keeps Known-limitation #3's replay path honest). A duplicate or
+out-of-order event *for a known order* is still ledgered / status-guarded as normal.
 
 **Idempotency is belt-and-suspenders:**
 - The `ProcessedEvent` primary key (`eventId`) stops any *re-effect* on redelivery —
@@ -133,6 +139,11 @@ Convention as established: PascalCase models, camelCase fields, no `@map`.
 - **New — `model ProcessedEvent { eventId String @id; type String; processedAt DateTime @default(now()) }`**
   — the dedup ledger. `eventId` is the envelope id; `type` is retained for debugging /
   future replay tooling. No index beyond the primary key (lookups are by `eventId`).
+  Adding a brand-new table is trivially **expand/contract-safe** (the umbrella
+  Per-service DoD) — no existing column is altered, so it is a pure additive migration.
+  **Retention:** the ledger grows unbounded this slice — no pruning/TTL. Acceptable for
+  the learning scope; bounding it (periodic prune by `processedAt`, or the umbrella's
+  Redis `SET NX` + TTL alternative) is deferred future work, not built here.
 - **Reused unchanged — `Order`** (`status` is a string; new values `AWAITING_PAYMENT`,
   `CANCELLED` require no schema change), **`Outbox`** (the `ORDER_CANCELLED` emit reuses
   the exact shape from 2a / Inventory), `Cart`, `CartItem`, `OrderItem`,
@@ -182,7 +193,12 @@ this slice adds no lock and reuses the existing `KAFKA_BROKERS`. Config stays
   error-boundary, not by flipping the service unready). Order holds no Redis client, so
   it has no `redis` check either.
 - Broker connect retry/backoff and the consumer error boundary are inherited from
-  `@ecom/shared`; a handler that throws is retried, not silently dropped.
+  `@ecom/shared`. A throwing handler is **retried** (`withRetry`, `maxRetries` default
+  3, exponential backoff — `kafka.ts`), then on exhaustion **parked to
+  `inventory.events.dlq`** and committed so the partition keeps moving — never silently
+  dropped. This is Order's inherited DLQ path for the umbrella DoD's "DLQ + replay
+  documented"; a business no-op (`UNKNOWN_ORDER`/`DUPLICATE`/`NO_OP`) *returns* rather
+  than throws, so it acks normally and never reaches the DLQ.
 - Dockerfile, `app` compose profile, and CI are unchanged from 2a (the workspace CI
   already builds/lints/typechecks/tests every service).
 
@@ -196,10 +212,13 @@ this slice adds no lock and reuses the existing `KAFKA_BROKERS`. Config stays
    (`RESERVATION_TTL_MS` must exceed the full saga duration or the sweeper releases
    legitimate in-flight orders) only bites once a confirm path exists to protect —
    Phase 3. Flagged so it is not forgotten.
-3. **Unknown-order events are acked, not dead-lettered.** An inventory event whose
-   `orderId` has no matching Order row is logged and acked (`UNKNOWN_ORDER`). Order
-   emitted the originating `OrderPlaced`, so this should not occur outside a
-   manual/replay scenario; treating it as a no-op avoids a poison-message stall.
+3. **Unknown-order events are acked, not dead-lettered — and stay replay-recoverable.**
+   An inventory event whose `orderId` has no matching Order row is logged and acked
+   (`UNKNOWN_ORDER`) **without** a `ProcessedEvent` row, so if the order later
+   materializes a replay of that event still applies the transition. Order emitted the
+   originating `OrderPlaced`, so this should not occur outside a manual/replay scenario;
+   acking (not throwing) avoids a poison-message stall, and skipping the ledger keeps
+   the replay path open.
 4. **`x-user-id` header auth.** Unchanged temporary stand-in until Gateway/Identity.
 
 ## Testing (TDD)
@@ -214,7 +233,9 @@ this slice adds no lock and reuses the existing `KAFKA_BROKERS`. Config stays
     **one** `ORDER_CANCELLED` outbox row (payload `{ orderId }`).
   - **Duplicate `eventId` redelivered** → second delivery is a no-op: status
     unchanged, no second outbox row, still one `ProcessedEvent` row (dedup proven).
-  - Event for an unknown `orderId` → `UNKNOWN_ORDER`: acked, no throw, no state change.
+  - Event for an unknown `orderId` → `UNKNOWN_ORDER`: acked, no throw, no state change,
+    **and no `ProcessedEvent` row** (so a later replay after the order exists still
+    transitions it).
   - Out-of-order guard: `INVENTORY_RESERVED` after the order is already `CANCELLED`
     → `null` no-op, status stays `CANCELLED`.
 - **Slice e2e** (real Inventory service on the compose stack):
@@ -243,3 +264,9 @@ idempotency uses a **`ProcessedEvent` ledger** (canonical, reusable, same-tx) ra
 than status-guard-only; Order **emits `OrderCancelled`** on the reservation-failed
 cancel (uniform lifecycle + exercises outbox-from-consumer; safe via Inventory's
 `status = ACTIVE` release guard).
+
+Design review (review-design-plan, 2026-07-23) resolved: load the order **before**
+touching the ledger so `UNKNOWN_ORDER` events stay **replay-recoverable** (not
+ledgered); the inherited consumer error boundary retries then parks to
+`inventory.events.dlq` (named as Order's DLQ path); `ProcessedEvent` retention is
+deferred future work; the new-table migration is expand/contract-safe.
