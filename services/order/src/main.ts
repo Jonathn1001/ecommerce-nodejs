@@ -1,7 +1,7 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
-import { handleInventoryEvent } from "./consumer";
+import { handleEvent } from "./consumer";
 import { prisma } from "./db";
 import {
   createKafka,
@@ -31,7 +31,7 @@ async function main() {
   // Consume Inventory's reservation result and drive the order state machine.
   const consumer = createConsumer(kafka, "order-consumers");
   await consumer.connect();
-  await consumer.run([INVENTORY_TOPIC], handleInventoryEvent);
+  await consumer.run([INVENTORY_TOPIC], handleEvent);
 
   const app = createApp();
   const server = app.listen(config.PORT, () =>

@@ -56,12 +56,12 @@ export function transitionTx(
   traceId: string
 ): TransitionTx {
   return {
-    async loadOrderStatus(orderId) {
+    async loadOrder(orderId) {
       const row = await tx.order.findUnique({
         where: { id: orderId },
-        select: { status: true },
+        select: { status: true, totalPrice: true },
       });
-      return row ? row.status : null;
+      return row ? { status: row.status, totalPrice: row.totalPrice } : null;
     },
     async markProcessed(eventId, type) {
       const r = await tx.processedEvent.createMany({

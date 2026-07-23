@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { randomUUID } from "crypto";
 import { createApp } from "../app";
-import { handleInventoryEvent } from "../consumer";
+import { handleEvent } from "../consumer";
 import { prisma } from "../db";
 import { createKafka, createProducer, createConsumer } from "@ecom/shared";
 import {
@@ -54,7 +54,7 @@ describe("order inventory-leg slice e2e (needs docker compose up + migrated)", (
 
     await producer.connect();
     await consumer.connect();
-    await consumer.run([INVENTORY_TOPIC], handleInventoryEvent);
+    await consumer.run([INVENTORY_TOPIC], handleEvent);
   });
 
   afterAll(async () => {
