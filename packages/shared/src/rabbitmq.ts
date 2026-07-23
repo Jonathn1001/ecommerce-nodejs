@@ -79,5 +79,12 @@ export async function createRabbit() {
     await conn.close();
   }
 
-  return { assertWorkQueue, sendCommand, consumeCommands, consumeDlqOnce, checkHealth, close };
+  return {
+    assertWorkQueue,
+    sendCommand,
+    consumeCommands,
+    consumeDlqOnce,
+    checkHealth,
+    close,
+  };
 }

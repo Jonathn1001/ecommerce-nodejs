@@ -16,7 +16,9 @@ async function seedOrder(status = "PENDING"): Promise<string> {
       userId: `u_${randomUUID()}`,
       status,
       totalPrice: 100,
-      items: { create: [{ productId: `p_${randomUUID()}`, quantity: 1, unitPrice: 100 }] },
+      items: {
+        create: [{ productId: `p_${randomUUID()}`, quantity: 1, unitPrice: 100 }],
+      },
     },
   });
   return order.id;

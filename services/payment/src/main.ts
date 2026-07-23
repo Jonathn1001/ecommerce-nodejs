@@ -21,14 +21,18 @@ async function main() {
   await producer.connect();
 
   // Relay drains the outbox; `payment` aggregate rows go to `payment.events`.
-  const relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, { intervalMs: 500 });
+  const relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, {
+    intervalMs: 500,
+  });
 
   const rabbit = await createRabbit();
   await rabbit.assertWorkQueue(CHARGE_QUEUE);
   await rabbit.consumeCommands(CHARGE_QUEUE, handleChargePayment, { maxRetries: 3 });
 
   const app = createApp({ rabbitHealth: rabbit.checkHealth });
-  const server = app.listen(config.PORT, () => log.info("payment_listening", { port: config.PORT }));
+  const server = app.listen(config.PORT, () =>
+    log.info("payment_listening", { port: config.PORT })
+  );
 
   // Reverse teardown: server.close -> rabbit.close -> relay.stop -> producer.disconnect
   //   -> prisma.$disconnect

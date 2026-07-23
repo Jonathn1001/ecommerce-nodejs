@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { nextStatus, applyInventoryResult, type TransitionTx } from "../transition";
-import { INVENTORY_RESERVED, INVENTORY_RESERVATION_FAILED, ORDER_CANCELLED } from "@ecom/contracts";
+import {
+  INVENTORY_RESERVED,
+  INVENTORY_RESERVATION_FAILED,
+  ORDER_CANCELLED,
+} from "@ecom/contracts";
 
 function fakeTx(initialStatus: string | null) {
   const processed = new Set<string>();
@@ -81,7 +85,11 @@ describe("applyInventoryResult", () => {
 
   it("dedupes a redelivered event (second call is DUPLICATE, no re-effect)", async () => {
     const f = fakeTx("PENDING");
-    await applyInventoryResult(f.tx, { eventId: "e4", type: INVENTORY_RESERVED, orderId: "o4" });
+    await applyInventoryResult(f.tx, {
+      eventId: "e4",
+      type: INVENTORY_RESERVED,
+      orderId: "o4",
+    });
     const outcome = await applyInventoryResult(f.tx, {
       eventId: "e4",
       type: INVENTORY_RESERVED,

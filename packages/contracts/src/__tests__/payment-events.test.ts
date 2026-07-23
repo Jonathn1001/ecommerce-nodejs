@@ -20,16 +20,24 @@ describe("payment contracts", () => {
       orderId: "o1",
       amount: 100,
     });
-    expect(ChargePaymentPayloadSchema.safeParse({ orderId: "o1", amount: 0 }).success).toBe(false);
-    expect(ChargePaymentPayloadSchema.safeParse({ orderId: "", amount: 100 }).success).toBe(false);
-    expect(ChargePaymentPayloadSchema.safeParse({ orderId: "o1", amount: 1.5 }).success).toBe(false);
+    expect(
+      ChargePaymentPayloadSchema.safeParse({ orderId: "o1", amount: 0 }).success
+    ).toBe(false);
+    expect(
+      ChargePaymentPayloadSchema.safeParse({ orderId: "", amount: 100 }).success
+    ).toBe(false);
+    expect(
+      ChargePaymentPayloadSchema.safeParse({ orderId: "o1", amount: 1.5 }).success
+    ).toBe(false);
   });
 
   it("PaymentSucceeded / PaymentFailed payloads validate their shapes", () => {
     expect(
       PaymentSucceededPayloadSchema.parse({ orderId: "o1", paymentId: "p1", amount: 100 })
     ).toEqual({ orderId: "o1", paymentId: "p1", amount: 100 });
-    expect(PaymentFailedPayloadSchema.parse({ orderId: "o1", reason: "CARD_DECLINED" })).toEqual({
+    expect(
+      PaymentFailedPayloadSchema.parse({ orderId: "o1", reason: "CARD_DECLINED" })
+    ).toEqual({
       orderId: "o1",
       reason: "CARD_DECLINED",
     });

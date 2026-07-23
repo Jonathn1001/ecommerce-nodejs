@@ -40,7 +40,10 @@ export async function chargeOrder(
       amount: p.amount,
     });
   } else {
-    await tx.enqueue(PAYMENT_FAILED, p.orderId, { orderId: p.orderId, reason: "CARD_DECLINED" });
+    await tx.enqueue(PAYMENT_FAILED, p.orderId, {
+      orderId: p.orderId,
+      reason: "CARD_DECLINED",
+    });
   }
   return outcome;
 }

@@ -42,33 +42,57 @@ describe("simulateCharge (magic amounts)", () => {
 describe("chargeOrder", () => {
   it("charges a fresh order -> SUCCEEDED + PaymentSucceeded", async () => {
     const f = fakeTx();
-    const outcome = await chargeOrder(f.tx, { eventId: "e1", orderId: "o1", amount: 500 });
+    const outcome = await chargeOrder(f.tx, {
+      eventId: "e1",
+      orderId: "o1",
+      amount: 500,
+    });
     expect(outcome).toBe("SUCCEEDED");
     expect(f.emitted).toEqual([
-      { type: PAYMENT_SUCCEEDED, orderId: "o1", payload: { orderId: "o1", paymentId: "pay_1", amount: 500 } },
+      {
+        type: PAYMENT_SUCCEEDED,
+        orderId: "o1",
+        payload: { orderId: "o1", paymentId: "pay_1", amount: 500 },
+      },
     ]);
   });
 
   it("declines a ...01 total -> FAILED + PaymentFailed(reason CARD_DECLINED)", async () => {
     const f = fakeTx();
-    const outcome = await chargeOrder(f.tx, { eventId: "e2", orderId: "o2", amount: 101 });
+    const outcome = await chargeOrder(f.tx, {
+      eventId: "e2",
+      orderId: "o2",
+      amount: 101,
+    });
     expect(outcome).toBe("FAILED");
     expect(f.emitted).toEqual([
-      { type: PAYMENT_FAILED, orderId: "o2", payload: { orderId: "o2", reason: "CARD_DECLINED" } },
+      {
+        type: PAYMENT_FAILED,
+        orderId: "o2",
+        payload: { orderId: "o2", reason: "CARD_DECLINED" },
+      },
     ]);
   });
 
   it("dedupes a redelivered command -> DUPLICATE, no second charge", async () => {
     const f = fakeTx();
     await chargeOrder(f.tx, { eventId: "e3", orderId: "o3", amount: 500 });
-    const outcome = await chargeOrder(f.tx, { eventId: "e3", orderId: "o3", amount: 500 });
+    const outcome = await chargeOrder(f.tx, {
+      eventId: "e3",
+      orderId: "o3",
+      amount: 500,
+    });
     expect(outcome).toBe("DUPLICATE");
     expect(f.emitted).toHaveLength(1);
   });
 
   it("re-sent command for an already-charged order -> ALREADY_CHARGED", async () => {
     const f = fakeTx({ existingOrders: ["o4"] });
-    const outcome = await chargeOrder(f.tx, { eventId: "e4", orderId: "o4", amount: 500 });
+    const outcome = await chargeOrder(f.tx, {
+      eventId: "e4",
+      orderId: "o4",
+      amount: 500,
+    });
     expect(outcome).toBe("ALREADY_CHARGED");
     expect(f.emitted).toEqual([]);
   });

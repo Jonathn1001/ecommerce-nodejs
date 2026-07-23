@@ -6,11 +6,17 @@ import type { ChargeTx } from "./charge";
 export function chargeTx(tx: Prisma.TransactionClient, traceId: string): ChargeTx {
   return {
     async markProcessed(eventId, type) {
-      const r = await tx.processedEvent.createMany({ data: [{ eventId, type }], skipDuplicates: true });
+      const r = await tx.processedEvent.createMany({
+        data: [{ eventId, type }],
+        skipDuplicates: true,
+      });
       return r.count > 0;
     },
     async paymentExists(orderId) {
-      const row = await tx.payment.findUnique({ where: { orderId }, select: { id: true } });
+      const row = await tx.payment.findUnique({
+        where: { orderId },
+        select: { id: true },
+      });
       return row !== null;
     },
     async createPayment(orderId, amount, status) {

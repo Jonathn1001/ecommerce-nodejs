@@ -18,7 +18,9 @@ const app = createApp();
 async function placeOrder(): Promise<string> {
   const userId = `u_${randomUUID()}`;
   const pid = `p_${randomUUID()}`;
-  await request(app).post("/admin/catalog").send({ productId: pid, name: "x", price: 150 });
+  await request(app)
+    .post("/admin/catalog")
+    .send({ productId: pid, name: "x", price: 150 });
   await request(app)
     .post("/cart/items")
     .set("x-user-id", userId)
@@ -90,7 +92,9 @@ describe("order inventory-leg slice e2e (needs docker compose up + migrated)", (
     );
     expect(await waitForStatus(orderId, "CANCELLED")).toBe("CANCELLED");
     expect(
-      await prisma.outbox.count({ where: { aggregateId: orderId, type: ORDER_CANCELLED } })
+      await prisma.outbox.count({
+        where: { aggregateId: orderId, type: ORDER_CANCELLED },
+      })
     ).toBe(1);
   }, 30000);
 });

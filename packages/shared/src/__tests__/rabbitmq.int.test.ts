@@ -68,7 +68,13 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     );
     await rabbit.sendCommand(
       q,
-      makeEnvelope({ type: "cmd.retry", version: 1, traceId: "t", producer: "test", payload: {} })
+      makeEnvelope({
+        type: "cmd.retry",
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: {},
+      })
     );
 
     const deadline = Date.now() + 10_000;

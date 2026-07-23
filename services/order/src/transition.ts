@@ -13,8 +13,10 @@ export function nextStatus(
   current: string,
   eventType: string
 ): "AWAITING_PAYMENT" | "CANCELLED" | null {
-  if (current === "PENDING" && eventType === INVENTORY_RESERVED) return "AWAITING_PAYMENT";
-  if (current === "PENDING" && eventType === INVENTORY_RESERVATION_FAILED) return "CANCELLED";
+  if (current === "PENDING" && eventType === INVENTORY_RESERVED)
+    return "AWAITING_PAYMENT";
+  if (current === "PENDING" && eventType === INVENTORY_RESERVATION_FAILED)
+    return "CANCELLED";
   return null;
 }
 
@@ -26,11 +28,7 @@ export interface TransitionTx {
 }
 
 export type ApplyOutcome =
-  | "UNKNOWN_ORDER"
-  | "DUPLICATE"
-  | "NO_OP"
-  | "AWAITING_PAYMENT"
-  | "CANCELLED";
+  "UNKNOWN_ORDER" | "DUPLICATE" | "NO_OP" | "AWAITING_PAYMENT" | "CANCELLED";
 
 // Domain core over a tx-bound port (mirrors inventory/reserve.ts). Order of
 // operations is load-bearing: load the order BEFORE the ledger so an unknown

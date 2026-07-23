@@ -3,8 +3,20 @@ import { randomUUID } from "crypto";
 import { outboxPort } from "../outbox-adapter";
 import { handleChargePayment } from "../consumer";
 import { prisma } from "../db";
-import { createKafka, createProducer, createConsumer, startOutboxRelay, createRabbit } from "@ecom/shared";
-import { makeEnvelope, CHARGE_PAYMENT, PAYMENT_SUCCEEDED, PAYMENT_FAILED, type EventEnvelope } from "@ecom/contracts";
+import {
+  createKafka,
+  createProducer,
+  createConsumer,
+  startOutboxRelay,
+  createRabbit,
+} from "@ecom/shared";
+import {
+  makeEnvelope,
+  CHARGE_PAYMENT,
+  PAYMENT_SUCCEEDED,
+  PAYMENT_FAILED,
+  type EventEnvelope,
+} from "@ecom/contracts";
 
 const PAYMENT_TOPIC = "payment.events";
 const CHARGE_QUEUE = `payment.charge.e2e.${Date.now()}`; // isolated queue per run
@@ -20,11 +32,15 @@ describe("payment slice e2e (needs docker compose up + migrated)", () => {
   beforeAll(async () => {
     const admin = kafka.admin();
     await admin.connect();
-    await admin.createTopics({ topics: [{ topic: PAYMENT_TOPIC, numPartitions: 1, replicationFactor: 1 }] });
+    await admin.createTopics({
+      topics: [{ topic: PAYMENT_TOPIC, numPartitions: 1, replicationFactor: 1 }],
+    });
     await admin.disconnect();
 
     await producer.connect();
-    relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, { intervalMs: 300 });
+    relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, {
+      intervalMs: 300,
+    });
     await consumer.connect();
     await consumer.run([PAYMENT_TOPIC], async (env) => {
       events.push(env);
@@ -43,7 +59,10 @@ describe("payment slice e2e (needs docker compose up + migrated)", () => {
     await prisma.$disconnect();
   });
 
-  async function waitFor(orderId: string, type: string): Promise<EventEnvelope | undefined> {
+  async function waitFor(
+    orderId: string,
+    type: string
+  ): Promise<EventEnvelope | undefined> {
     const deadline = Date.now() + 25_000;
     while (Date.now() < deadline) {
       const hit = events.find(
@@ -52,14 +71,22 @@ describe("payment slice e2e (needs docker compose up + migrated)", () => {
       if (hit) return hit;
       await new Promise((r) => setTimeout(r, 400));
     }
-    return events.find((e) => e.type === type && (e.payload as { orderId: string }).orderId === orderId);
+    return events.find(
+      (e) => e.type === type && (e.payload as { orderId: string }).orderId === orderId
+    );
   }
 
   it("ChargePayment (success amount) -> PaymentSucceeded on payment.events", async () => {
     const orderId = `o_${randomUUID()}`;
     await rabbit.sendCommand(
       CHARGE_QUEUE,
-      makeEnvelope({ type: CHARGE_PAYMENT, version: 1, traceId: "t", producer: "test", payload: { orderId, amount: 500 } })
+      makeEnvelope({
+        type: CHARGE_PAYMENT,
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: { orderId, amount: 500 },
+      })
     );
     const evt = await waitFor(orderId, PAYMENT_SUCCEEDED);
     expect(evt).toBeDefined();
@@ -70,7 +97,13 @@ describe("payment slice e2e (needs docker compose up + migrated)", () => {
     const orderId = `o_${randomUUID()}`;
     await rabbit.sendCommand(
       CHARGE_QUEUE,
-      makeEnvelope({ type: CHARGE_PAYMENT, version: 1, traceId: "t", producer: "test", payload: { orderId, amount: 101 } })
+      makeEnvelope({
+        type: CHARGE_PAYMENT,
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: { orderId, amount: 101 },
+      })
     );
     const evt = await waitFor(orderId, PAYMENT_FAILED);
     expect(evt).toBeDefined();
@@ -80,7 +113,13 @@ describe("payment slice e2e (needs docker compose up + migrated)", () => {
   it("a malformed-payload command (valid envelope) lands in the queue DLQ after retries", async () => {
     await rabbit.sendCommand(
       CHARGE_QUEUE,
-      makeEnvelope({ type: CHARGE_PAYMENT, version: 1, traceId: "t", producer: "test", payload: { orderId: "o_bad" } }) // amount missing -> handler parse throws
+      makeEnvelope({
+        type: CHARGE_PAYMENT,
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: { orderId: "o_bad" },
+      }) // amount missing -> handler parse throws
     );
     const dlq = await rabbit.consumeDlqOnce(`${CHARGE_QUEUE}.dlq`, 15_000);
     expect(dlq?.type).toBe(CHARGE_PAYMENT);

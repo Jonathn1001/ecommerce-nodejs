@@ -2,7 +2,13 @@ import { describe, it, expect, afterAll } from "vitest";
 import { randomUUID } from "crypto";
 import { handleChargePayment } from "../consumer";
 import { prisma } from "../db";
-import { makeEnvelope, CHARGE_PAYMENT, PAYMENT_SUCCEEDED, PAYMENT_FAILED, type EventEnvelope } from "@ecom/contracts";
+import {
+  makeEnvelope,
+  CHARGE_PAYMENT,
+  PAYMENT_SUCCEEDED,
+  PAYMENT_FAILED,
+  type EventEnvelope,
+} from "@ecom/contracts";
 
 function chargeCmd(orderId: string, amount: number): EventEnvelope {
   return makeEnvelope({
@@ -45,7 +51,9 @@ describe("payment charge consumer (integration — needs docker compose up + mig
     await handleChargePayment(cmd);
     await handleChargePayment(cmd); // same eventId
     expect(await prisma.payment.count({ where: { orderId } })).toBe(1);
-    expect(await prisma.processedEvent.count({ where: { eventId: cmd.eventId } })).toBe(1);
+    expect(await prisma.processedEvent.count({ where: { eventId: cmd.eventId } })).toBe(
+      1
+    );
   });
 
   it("re-sent command (new eventId, same order) -> still one payment (ALREADY_CHARGED)", async () => {

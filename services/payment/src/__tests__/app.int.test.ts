@@ -21,7 +21,13 @@ describe("payment app (integration — needs docker compose up + migrated)", () 
   it("GET /payments/:orderId returns the payment after a charge; 404 when unknown", async () => {
     const orderId = `o_${randomUUID()}`;
     await handleChargePayment(
-      makeEnvelope({ type: CHARGE_PAYMENT, version: 1, traceId: "t", producer: "test", payload: { orderId, amount: 700 } })
+      makeEnvelope({
+        type: CHARGE_PAYMENT,
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: { orderId, amount: 700 },
+      })
     );
     const got = await request(app).get(`/payments/${orderId}`);
     expect(got.status).toBe(200);
