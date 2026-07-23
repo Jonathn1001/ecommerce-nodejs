@@ -123,12 +123,14 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/order
       KAFKA_BROKERS: kafka:19092
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-ecom}:${RABBITMQ_PASSWORD:-ecom}@rabbitmq:5672
       PORT: 3002
       LOG_LEVEL: info
     ports: ["3002:3002"]
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3002/readyz || exit 1"]
       interval: 10s

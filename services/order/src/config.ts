@@ -5,6 +5,7 @@ export const config = loadConfig(
   z.object({
     DATABASE_URL: z.string().url(),
     KAFKA_BROKERS: z.string().default("localhost:9092"),
+    RABBITMQ_URL: z.string().default("amqp://ecom:ecom@localhost:5672"),
     PORT: z.coerce.number().int().positive().default(3002),
     LOG_LEVEL: z.string().default("info"),
   })

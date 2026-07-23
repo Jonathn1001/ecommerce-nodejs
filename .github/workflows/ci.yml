@@ -89,6 +89,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://ecom:ecom@localhost:5432/order
           KAFKA_BROKERS: localhost:9092
+          RABBITMQ_URL: amqp://ecom:ecom@localhost:5672
         run: |
           pnpm --filter @ecom/order exec prisma migrate deploy
           pnpm vitest run services/order
