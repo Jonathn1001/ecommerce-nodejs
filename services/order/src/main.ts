@@ -1,16 +1,19 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
+import { handleInventoryEvent } from "./consumer";
 import { prisma } from "./db";
 import {
   createKafka,
   createProducer,
+  createConsumer,
   startOutboxRelay,
   createLogger,
   gracefulShutdown,
 } from "@ecom/shared";
 
 const log = createLogger("order-main");
+const INVENTORY_TOPIC = "inventory.events";
 
 async function main() {
   const kafka = createKafka("order");
@@ -25,13 +28,19 @@ async function main() {
     { intervalMs: 500 }
   );
 
+  // Consume Inventory's reservation result and drive the order state machine.
+  const consumer = createConsumer(kafka, "order-consumers");
+  await consumer.connect();
+  await consumer.run([INVENTORY_TOPIC], handleInventoryEvent);
+
   const app = createApp();
   const server = app.listen(config.PORT, () =>
     log.info("order_listening", { port: config.PORT })
   );
 
   // runClosers() tears down in REVERSE of this array. Resulting order:
-  //   server.close -> relay.stop -> producer.disconnect -> prisma.$disconnect
+  //   server.close -> consumer.disconnect -> relay.stop -> producer.disconnect
+  //   -> prisma.$disconnect
   gracefulShutdown([
     async () => {
       await prisma.$disconnect();
@@ -41,6 +50,9 @@ async function main() {
     },
     async () => {
       relay.stop();
+    },
+    async () => {
+      await consumer.disconnect();
     },
     async () => {
       await new Promise<void>((resolve, reject) =>
