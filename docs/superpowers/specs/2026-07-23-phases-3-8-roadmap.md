@@ -79,9 +79,9 @@ Effectively greenfield (legacy is a stub). The **RabbitMQ showcase** phase.
 
 **Slices**
 1. **5a — Dispatcher:** `order.events` → notification rows + `SendEmail` commands; idempotent on both legs (Kafka `eventId` ledger + unique `(orderId, type)` row).
-2. **5b — Worker + mailpit:** consume queue, render, send; retry/backoff reused from Phase 3; poison → `notifications.dlq`; replay script + runbook.
+2. **5b — Worker + mailpit:** consume queue, render, send; retry/backoff reused from Phase 3; poison → `notifications.dlq`; replay script + runbook. **Harden `consumeCommands` FIRST** (before this second consumer inherits its gaps — surfaced by the Phase-3a whole-branch review): (a) **consumer reconnection** — after a real broker drop `checkHealth` flips unready but nothing re-establishes the consumer, so the command intake silently stalls; add reconnect (or document a liveness-restart contract); (b) **`ch.prefetch()`** back-pressure — no prefetch today means unbounded unacked in-flight (Payment survives via unique-`orderId`+retry, but a worker fleet wants bounded concurrency).
 
-**Hard dependency:** Phase 3 (`order.confirmed` exists; rabbit adapter + retry reused, not rebuilt). Soft on Phase 4 (product names in emails — degrade gracefully).
+**Hard dependency:** Phase 3 (`order.confirmed` exists; rabbit adapter + retry reused, not rebuilt — plus the 5b `consumeCommands` hardening above). Soft on Phase 4 (product names in emails — degrade gracefully).
 
 **Risks:** duplicate emails — at-least-once on *both* legs → dispatcher dedup AND worker sent-marker; PII in logs — log notification id/type, never recipient or rendered body; replay ergonomics — make the DLQ replay the demo, not an afterthought.
 
@@ -149,6 +149,7 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | Item | Absorbed by |
 |---|---|
 | Rabbit retry layer + outbox→command adapter | **3** (3a / 3b) |
+| Rabbit consumer reconnection + `ch.prefetch()` back-pressure (from 3a review) | **5** (5b — harden `consumeCommands` before the SendEmail worker) |
 | Kafka envelope-parse DLQ-bypass fix (`packages/shared/src/kafka.ts`) | **3** (3b) |
 | Trace propagation (AsyncLocalStorage, consumer-side traceId) | **7** (subsumed by OTel) |
 | `ProcessedEvent` retention | **7** (7c) |
