@@ -19,6 +19,7 @@
 - Legacy auth crypto is misleading: "publicKey/privateKey" are two random 64-byte hex strings used as per-user **HS256 symmetric** secrets; identity comes from an `x-client-id` header. Phase 6 **replaces** the scheme, preserving only the *behavior* (refresh rotation + reuse-detection).
 - Legacy catalog factory stores each product in **two collections sharing one `_id`** (base + type-specific, no discriminators); legacy comments use a nested-set model with known insert bugs. Phase 4 collapses to one table + typed JSONB and re-derives the tree model.
 - Deferred backlog to absorb: kafka envelope-parse outside try/catch (malformed envelope bypasses DLQ, stalls the partition), trace propagation HTTP-inbound-only, `ProcessedEvent` retention, no `/metrics` anywhere.
+- **Platform constraint (permanent, don't rediscover per phase):** each service's `db.ts` loads its own env file into the shared `process.env.DATABASE_URL`, so two services can never run in one Vitest process — cross-service e2e is done over the wire against compose-run services (as 2b's e2e does), never in-process. Phase 7's chaos/e2e work depends on that mitigation.
 
 ---
 
@@ -84,7 +85,7 @@ Effectively greenfield (legacy is a stub). The **RabbitMQ showcase** phase.
 
 **Risks:** duplicate emails — at-least-once on *both* legs → dispatcher dedup AND worker sent-marker; PII in logs — log notification id/type, never recipient or rendered body; replay ergonomics — make the DLQ replay the demo, not an afterthought.
 
-**Parked for child specs:** transport port abstraction vs direct nodemailer; template mechanism (lean: template literals); OTP ownership; queue topology (single `notifications` queue vs per-type routing keys).
+**Parked for child specs:** transport port abstraction vs direct nodemailer; template mechanism (lean: template literals); OTP ownership; queue topology (single `notifications` queue vs per-type routing keys); **dedup pattern choice** — Postgres `ProcessedEvent` ledger (same-tx, as Order/Inventory) vs the unused Redis `markProcessed` helper (`packages/shared/src/redis.ts`) — pick deliberately and add a when-to-use-which note to `shared` (two mechanisms with zero guidance is compounding debt).
 
 **Done when:** the saga produces an order-confirmed email visible in the mailpit UI; a poisoned `SendEmail` lands in `notifications.dlq` and is replayed to success via the documented procedure.
 
@@ -92,16 +93,16 @@ Effectively greenfield (legacy is a stub). The **RabbitMQ showcase** phase.
 
 ## Phase 6 — Identity + Gateway — **L**
 
-**Scope in:** `services/identity` — signup/login/logout/refresh with **rotation + reuse-detection preserved as behavior** (legacy-derived tests written first); token crypto **replaced** (identity from token claims, never `x-client-id`); `users`/`key_tokens`/`roles`/`resources`/`grants`; `identity.user_registered` → Kafka. `services/gateway` — **no DB, no business logic**: routing, JWT verify, **httpOnly Secure SameSite cookie** set/refresh, CSRF double-submit on mutations, rate-limit + helmet, traceId minting, **SSE proxy** for the 3c stream. RBAC **enforcement built fresh** (legacy grants model was never consumed by any middleware; the hardcoded accesscontrol file is dead) — a minimal matrix, not a framework.
+**Scope in:** `services/identity` — signup/login/logout/refresh with **rotation + reuse-detection preserved as behavior** (legacy-derived tests written first); token crypto **replaced** (identity from token claims, never `x-client-id`); `users`/`key_tokens`/`roles`/`resources`/`grants`; `identity.user_registered` → Kafka. `services/gateway` — **no DB, no business logic**: routing, JWT verify, **httpOnly Secure SameSite cookie** set/refresh, CSRF double-submit on mutations, rate-limit + helmet, traceId minting, **timeouts + circuit breaker on all proxied routes** (umbrella §Resilience — the gateway is the sole sync service-call edge, so this lands here or nowhere), **SSE proxy** for the 3c stream. RBAC **enforcement built fresh** (legacy grants model was never consumed by any middleware; the hardcoded accesscontrol file is dead) — a minimal matrix, not a framework. **Identity-propagation retrofit:** existing services stop trusting raw client headers (`x-user-id` in Order's cart/order routes — 2a Known-limitation #4; Catalog's admin surface by then) — the gateway injects verified identity, services consume it, and every int/e2e test that sets the header migrates. Real multi-service work; scoped here explicitly so it cannot hide inside "gateway".
 **Scope out:** OAuth/social; api_keys port (parked); admin UI.
 
 **Slices**
 1. **6a — Identity standalone:** behavior tests from legacy flows first, then implementation; JWT issuance; RBAC data model + grant admin; `user_registered` (optional welcome-email cross-check with Phase 5).
-2. **6b — Gateway:** proxy + cookie/CSRF + rate-limit + RBAC enforcement + SSE proxy; e2e browser-style flow through the gateway into Order/Catalog.
+2. **6b — Gateway:** proxy (with per-route timeouts + circuit breaker) + cookie/CSRF + rate-limit + RBAC enforcement + SSE proxy + the identity-propagation retrofit across existing services; e2e browser-style flow through the gateway into Order/Catalog.
 
 **Risks:** crypto replacement silently breaking rotation/reuse-detection semantics → behavior-first TDD; SSE through a proxy (buffering, idle timeouts, cookie-on-EventSource) → integration test streams a *real* saga with heartbeats; cookie/CSRF matrix on local http (`Secure` only in prod compose profile, documented); RBAC scope creep → fix a minimal matrix (admin catalog mutations, order ownership) and stop.
 
-**Parked for child specs:** JWT algorithm (**RS256 recommended** — gateway verifies with a public key, no shared secret) + TTLs; enforcement placement (gateway-only vs gateway+service); api_keys port-or-drop; proxy implementation (`http-proxy-middleware` vs hand-rolled); CSRF mechanics; refresh-token storage shape in Postgres.
+**Parked for child specs:** JWT algorithm (**RS256 recommended** — gateway verifies with a public key, no shared secret) + TTLs; enforcement placement (gateway-only vs gateway+service); circuit-breaker policy + library (gateway edge only — broker paths already have `withRetry`); identity-propagation mechanism (trusted internal header signed/injected by gateway vs re-verified JWT per service); api_keys port-or-drop; proxy implementation (`http-proxy-middleware` vs hand-rolled); CSRF mechanics; refresh-token storage shape in Postgres.
 
 **Done when:** register → login → cookie set → full browse/cart/checkout through the gateway only; order stream live over proxied SSE; an unauthorized admin mutation rejected by RBAC; service ports closed to direct access in the prod compose profile.
 
@@ -112,7 +113,7 @@ Effectively greenfield (legacy is a stub). The **RabbitMQ showcase** phase.
 **Scope in:** `/metrics` via a prom-client module in `packages/shared` (sibling to `health.ts`); RED + domain metrics (consumer lag, DLQ depth, saga-step latency, reservation conflicts); Prometheus + Grafana + Jaeger compose additions; dashboards + SLO burn alerts in `infra/`. OpenTelemetry traces — **absorbs the trace-propagation backlog wholesale** (AsyncLocalStorage context, consumer-side traceId auto-logging, envelope→span linkage). k6 checkout load vs SLOs (p95 < 500 ms, saga p99 < 5 s, error < 1 %); chaos suite (kill broker/service mid-saga; malformed-envelope case proving the 3b parse fix); **ProcessedEvent retention**; runbooks. Umbrella-locked lessons: orchestrated-saga comparison variant + schema-evolution `v1→v2` event.
 **Scope out:** Debezium/logical-decoding outbox upgrade (umbrella-optional — stretch), cloud anything.
 
-**Slices:** **7a** metrics + dashboards + alerting → **7b** OTel/Jaeger + trace context → **7c** k6 + chaos + retention + the two lesson items.
+**Slices:** **7a** metrics + dashboards + alerting → **7b** OTel/Jaeger + trace context → **7c** k6 + chaos + retention + the two lesson items + **test/CI hygiene debt**: periodic e2e-topic reset (durable `inventory.events` replays grow every dev/CI run — fresh consumer groups with `fromBeginning:true` will eventually breach the 25s poll budgets), the **hello service's fate** (retire the tracer bullet or keep it as a deliberate smoke test — decided, not defaulted), and the **CI integration-job matrix refactor** (~8 near-identical hand-written per-service steps by then; 7 already touches CI for the chaos lane).
 
 **Risks:** instrumentation is a wide mechanical diff across 6+ services → build once in `packages/shared`, adopt per service as separate small tasks; chaos flakiness → nightly/local lane, never per-push CI; orchestrated-saga variant scope explosion → confine to a module + comparison doc.
 
@@ -156,7 +157,12 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | Compose: prometheus / grafana / jaeger | **7** |
 | Per-service compose `app` entries + hand-added CI integration steps | every phase (part of its DoD) |
 | Contracts dual ESM+CJS build | **8** (8a, first slice, CI-gated) |
+| Gateway timeouts + circuit breaker (umbrella §Resilience) | **6** (6b) |
+| `x-user-id` → verified-identity retrofit across existing services | **6** (6b) |
+| Dedup-pattern guidance in `shared` (ProcessedEvent vs Redis `markProcessed`) | **5** (5a decides + documents) |
+| e2e durable-topic reset · hello-service fate · CI matrix refactor | **7** (7c) |
 | Discount projection into Order's read model | named backlog (post-4, unscheduled) |
+| Stale repo `CLAUDE.md` (still describes the legacy MVC/MongoDB app — misleads every agent session) | one-off chore, next session touching repo docs |
 
 ## Relative sizes
 
