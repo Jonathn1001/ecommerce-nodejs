@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One payment per order. orderId is the provider idempotency key: a retried
+// ChargePayment cannot double-charge. status in {SUCCEEDED, FAILED} (sync in 3a).
+model Payment {
+  id        String           @id @default(uuid())
+  orderId   String           @unique
+  amount    Int                              // integer minor units
+  status    String
+  attempts  PaymentAttempt[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+// One row per gateway call. 3a writes exactly one; 3c's retry/webhook appends.
+model PaymentAttempt {
+  id        String   @id @default(uuid())
+  paymentId String
+  outcome   String
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+model Outbox {
+  id            String    @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  type          String
+  version       Int       @default(1)
+  traceId       String
+  producer      String
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([sentAt])
+}
