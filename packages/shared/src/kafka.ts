@@ -52,20 +52,14 @@ export function createConsumer(kafka: Kafka, groupId: string) {
         eachMessage: async ({ topic, message }) => {
           if (!message.value) return;
           const raw = message.value.toString();
-          const env = EventEnvelopeSchema.parse(JSON.parse(raw));
           try {
+            const env = EventEnvelopeSchema.parse(JSON.parse(raw));
             await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
           } catch (e) {
-            // Poison message: park it and commit so the partition keeps moving.
-            log.error("event_parked_to_dlq", {
-              eventId: env.eventId,
-              topic,
-              message: (e as Error).message,
-            });
-            await parker.send({
-              topic: `${topic}.dlq`,
-              messages: [{ key: env.eventId, value: raw }],
-            });
+            // Poison message (malformed envelope OR handler exhausted retries): park and
+            // commit so the partition keeps moving. No env.eventId key — env may not parse.
+            log.error("event_parked_to_dlq", { topic, message: (e as Error).message });
+            await parker.send({ topic: `${topic}.dlq`, messages: [{ value: raw }] });
           }
         },
       });

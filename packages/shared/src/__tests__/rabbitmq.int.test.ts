@@ -87,4 +87,18 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     expect(attempts).toBeGreaterThanOrEqual(3);
     expect(dlq).toBeNull(); // never dead-lettered
   });
+
+  it("sendCommand resolves only after the broker confirms the publish", async () => {
+    const q = `test.confirm.${uuidv4()}`;
+    const rabbit = await createRabbit();
+    await rabbit.assertWorkQueue(q);
+    await rabbit.sendCommand(
+      q,
+      makeEnvelope({ type: "cmd.confirm", version: 1, traceId: "t", producer: "test", payload: {} })
+    );
+    // If sendCommand resolved, the confirm-channel acked it; the message is enqueued.
+    const got = await rabbit.consumeDlqOnce(q, 5_000); // read the work queue directly
+    await rabbit.close();
+    expect(got?.type).toBe("cmd.confirm");
+  });
 });

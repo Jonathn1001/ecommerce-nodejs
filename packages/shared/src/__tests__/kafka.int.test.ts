@@ -60,3 +60,57 @@ describe("kafka wrapper (integration — needs docker compose up)", () => {
     expect(received[0].payload).toEqual(sent.payload);
   });
 });
+
+describe("kafka consumer parse fix (integration — needs docker compose up)", () => {
+  it("parks a malformed envelope to <topic>.dlq instead of stalling", async () => {
+    const kafka = createKafka("kafka-parsefix-test");
+    const topic = `test.parse.${uuidv4()}`;
+    const admin = kafka.admin();
+    await admin.connect();
+    await admin.createTopics({
+      topics: [
+        { topic, numPartitions: 1, replicationFactor: 1 },
+        { topic: `${topic}.dlq`, numPartitions: 1, replicationFactor: 1 },
+      ],
+    });
+    await admin.disconnect();
+
+    const consumer = createConsumer(kafka, `kafka-parsefix-${Date.now()}`);
+    await consumer.connect();
+    const seen: string[] = [];
+    await consumer.run([topic], async (env) => { seen.push(env.eventId); });
+
+    // Raw DLQ reader — a bare kafkajs consumer, bypassing the shared wrapper's
+    // envelope-parsing `run()` entirely. The wrapped consumer can only ever
+    // yield a *parsed* envelope, so it can't be used to observe a parked
+    // malformed payload (which by definition fails EventEnvelopeSchema.parse).
+    // Reading raw lets us assert the actual parked content instead of just
+    // "the handler didn't see it".
+    const dlqRaw = kafka.consumer({ groupId: `kafka-parsefix-dlqraw-${Date.now()}` });
+    await dlqRaw.connect();
+    await dlqRaw.subscribe({ topic: `${topic}.dlq`, fromBeginning: true });
+    const dlq: string[] = [];
+    await dlqRaw.run({
+      eachMessage: async ({ message }) => {
+        if (message.value) dlq.push(message.value.toString());
+      },
+    });
+
+    // publish a raw non-envelope value directly (bypass the producer wrapper)
+    const raw = kafka.producer();
+    await raw.connect();
+    await raw.send({ topic, messages: [{ value: JSON.stringify({ not: "an envelope" }) }] });
+    await raw.disconnect();
+
+    const deadline = Date.now() + 10_000;
+    while (dlq.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    await consumer.disconnect();
+    await dlqRaw.disconnect();
+
+    expect(seen).toEqual([]); // the malformed message never reached the handler (proves no stall)
+    expect(dlq).toHaveLength(1); // and it landed in <topic>.dlq
+    expect(JSON.parse(dlq[0])).toEqual({ not: "an envelope" });
+  }, 30000);
+});

@@ -1,4 +1,4 @@
-import amqp, { type Channel, type ChannelModel } from "amqplib";
+import amqp, { type ConfirmChannel, type ChannelModel } from "amqplib";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 
@@ -6,7 +6,7 @@ export async function createRabbit() {
   const conn: ChannelModel = await amqp.connect(
     process.env.RABBITMQ_URL ?? "amqp://ecom:ecom@localhost:5672"
   );
-  const ch: Channel = await conn.createChannel();
+  const ch: ConfirmChannel = await conn.createConfirmChannel();
 
   let healthy = true;
   conn.on("close", () => {
@@ -26,7 +26,14 @@ export async function createRabbit() {
   }
 
   async function sendCommand(queue: string, envelope: EventEnvelope): Promise<void> {
-    ch.sendToQueue(queue, Buffer.from(JSON.stringify(envelope)), { persistent: true });
+    await new Promise<void>((resolve, reject) => {
+      ch.sendToQueue(
+        queue,
+        Buffer.from(JSON.stringify(envelope)),
+        { persistent: true },
+        (err) => (err ? reject(err) : resolve()) // confirm-channel broker ack
+      );
+    });
   }
 
   async function consumeCommands(
