@@ -136,8 +136,11 @@ Transition table (adds the payment rows):
   (the snapshot set at `placeOrder`, 2a). Payload is exactly the 3a contract
   `{ orderId, amount: totalPrice }`.
 - The pure core generalizes from `applyInventoryResult` to `applyResult(tx, { eventId,
-  type, orderId })` — the load-before-ledger ordering and belt-and-suspenders idempotency
+  type, orderId })`, and the consumer `handleInventoryEvent` to `handleEvent` (now two
+  topics) — the load-before-ledger ordering and belt-and-suspenders idempotency
   (`ProcessedEvent` + status guard) are unchanged; it now covers four event types.
+  **The rename cascades:** update 2b's `services/order/src/__tests__/transition.unit.test.ts`
+  (imports `applyInventoryResult`) and the consumer int test's handler name — part of this slice.
 
 ## Order wiring (`services/order/src/main.ts`)
 
@@ -157,10 +160,11 @@ Transition table (adds the payment rows):
 
 - `Reservation.status` gains `CONSUMED` (comment `ACTIVE | RELEASED | CONSUMED`). Additive
   migration (no enum type change — `status` is a `String`).
-- The `order.events` consumer (`handleOrderEvent`) adds an `ORDER_CONFIRMED` branch →
-  `reservations WHERE orderId AND status = "ACTIVE"` → set `CONSUMED`. Idempotent
-  (`updateMany` on ACTIVE; a redelivery finds none ACTIVE → no-op) and deduped via the
-  existing `ProcessedEvent` ledger.
+- The `order.events` consumer (`handleOrderEvent`) adds an `ORDER_CONFIRMED` branch that
+  mirrors `releaseForCancel`'s ordering (`services/inventory/src/release.ts:43`):
+  **`markProcessed(eventId, ORDER_CONFIRMED)` FIRST** (→ `DUPLICATE` no-op on redelivery) →
+  then `updateMany` `reservations WHERE orderId AND status = "ACTIVE"` → set `CONSUMED`.
+  Idempotent both ways (ledger + the ACTIVE-only `updateMany`: a redelivery finds none ACTIVE).
 - **Guard:** if no ACTIVE reservation exists at confirm time (already swept/released — the
   deferred race), log a warning and no-op. Unreachable in 3b's synchronous flow.
 - The expiry **sweeper already releases only `ACTIVE`** rows, so `CONSUMED` reservations
@@ -229,11 +233,21 @@ already exist (3a). No other contract change; `order.confirmed` rides `order.eve
     out-of-order guards hold across all four types.
   - Inventory: `ORDER_CONFIRMED` → reservation `CONSUMED`; a redelivery is a no-op; a
     non-ACTIVE reservation logs + no-ops.
-- **Full-saga e2e** (all real brokers + services driven in-process where possible, else
-  contract-event injection per the 2b/3a precedent): seed price+stock+cart → `POST /orders`
-  → poll `GET /orders/:id` to `CONFIRMED` and assert the reservation is `CONSUMED`; and the
-  **compensation path**: force a decline (order total ending `…01`) → order reaches
-  `CANCELLED` and the reservation is `RELEASED`.
+- **Per-leg slice e2e over real brokers** — two services cannot share a Vitest process
+  (single `process.env.DATABASE_URL`; the roadmap's in-process constraint), so each leg
+  injects the neighbours' **real contract events** (the 2b/3a precedent), NOT a live
+  multi-service loop:
+  - *Order confirm leg:* `POST /orders` → inject a real `InventoryReserved` on
+    `inventory.events` → Order emits a `ChargePayment` outbox row → inject `PaymentSucceeded`
+    on `payment.events` → poll `GET /orders/:id` to `CONFIRMED`.
+  - *Order compensation leg:* same to `AWAITING_PAYMENT` → inject `PaymentFailed` →
+    `CANCELLED`, `OrderCancelled` observed on `order.events`.
+  - *Inventory CONSUMED leg:* inject `OrderConfirmed` on `order.events` → reservation `CONSUMED`.
+- **Scripted manual full-saga demo (the real closed loop, documented):** `docker compose
+  --profile app up` all three services → seed price+stock+cart → `POST /orders` → observe
+  `GET /orders/:id → CONFIRMED` with the reservation `CONSUMED`; then force a decline (order
+  total ending `…01`, per 3a's magic-amount rule) → `CANCELLED` + reservation `RELEASED`.
+  The **automated** cross-service full-saga e2e stays **Phase 7** (chaos suite) per the roadmap.
 
 ## Definition of Done
 
@@ -242,14 +256,30 @@ already exist (3a). No other contract change; `order.confirmed` rides `order.eve
   `OrderConfirmed`.
 - The shared relay drives both transports with lane isolation + a total tick; `sendCommand`
   is confirm-backed; the Kafka consumer parse fix is in.
-- Full saga green both ways (confirm + compensation); `CONSUMED` reservation survives the sweeper.
-- Backward compatibility: inventory/payment/hello relay call sites + tests unchanged.
+- Each leg green (Order confirm + compensation, Inventory CONSUMED) via injected-contract-event
+  e2e; the closed loop verified by the scripted manual demo; `CONSUMED` reservation survives
+  the sweeper. (Automated cross-service full-saga → Phase 7.)
+- **Backward-compat regression gate:** inventory/payment/hello relay call sites + tests
+  unchanged AND green; because `createRabbit` gains a confirm channel, **re-run the Payment
+  suite + `packages/shared` rabbit int test** and confirm both still pass.
+- Order `docker-compose.example.yml` `app` entry gains `RABBITMQ_URL` +
+  `depends_on: rabbitmq: { condition: service_healthy }` (mirrors payment's entry); the CI
+  `Order service` step's env gains `RABBITMQ_URL`.
 - Inherited DoD (config incl. Order's `RABBITMQ_URL`, health — Order `/readyz` stays
   Postgres-only, outbox absorbs rabbit outages — graceful shutdown, CI) satisfied.
-- Unit + integration + full-saga e2e green.
+- Unit + integration + per-leg e2e green.
 
 ## Open questions
 
 None blocking. Resolved: command-relay = generalized relay with a `commands` channel
 (oracle, high confidence); confirm channel included; confirm-after-release deferred to 3c
 with an ACTIVE-guard; single task-decomposed slice.
+
+Design review (review-design-plan, 2026-07-23) resolved: 3b's **automated** e2e is
+per-service legs with injected contract events (the in-process constraint rules out a live
+multi-service loop); the closed loop is a **scripted manual demo**, with the automated
+cross-service full-saga deferred to **Phase 7**. Also folded: the `applyInventoryResult →
+applyResult` / `handleInventoryEvent → handleEvent` rename cascades to 2b's Order tests;
+the confirm-channel change carries an explicit **re-run-Payment + shared-rabbit** regression
+gate; the Inventory `CONSUMED` handler is `markProcessed`-first (mirrors `releaseForCancel`);
+Order's compose `app` entry gains `RABBITMQ_URL` + a `rabbitmq` healthcheck dependency.
