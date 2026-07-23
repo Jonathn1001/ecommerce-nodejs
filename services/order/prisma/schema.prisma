@@ -74,3 +74,11 @@ model Outbox {
 
   @@index([sentAt])
 }
+
+// Dedup ledger for at-least-once Kafka delivery. First Order consumer needs it;
+// reused by every later consumer (payment results, catalog projection).
+model ProcessedEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
