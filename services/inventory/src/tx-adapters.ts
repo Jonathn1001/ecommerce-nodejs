@@ -1,6 +1,7 @@
 import { Prisma } from "./generated/prisma";
 import type { ReserveTx } from "./reserve";
 import type { ReleaseTx } from "./release";
+import type { ConsumeTx } from "./consume";
 
 // Bind a ReserveTx to one Prisma interactive-transaction client. traceId is
 // closured so the domain core stays free of transport concerns.
@@ -92,6 +93,22 @@ export function releaseTx(tx: Prisma.TransactionClient, traceId: string): Releas
           payload: payload as Prisma.InputJsonValue,
         },
       });
+    },
+  };
+}
+
+export function consumeTx(tx: Prisma.TransactionClient): ConsumeTx {
+  return {
+    async markProcessed(eventId, type) {
+      const r = await tx.processedEvent.createMany({ data: [{ eventId, type }], skipDuplicates: true });
+      return r.count > 0;
+    },
+    async consumeActive(orderId) {
+      const r = await tx.reservation.updateMany({
+        where: { orderId, status: "ACTIVE" },
+        data: { status: "CONSUMED" },
+      });
+      return r.count;
     },
   };
 }

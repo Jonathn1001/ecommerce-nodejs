@@ -3,20 +3,24 @@ import {
   EventEnvelope,
   ORDER_PLACED,
   ORDER_CANCELLED,
+  ORDER_CONFIRMED,
   OrderPlacedPayloadSchema,
   OrderCancelledPayloadSchema,
+  OrderConfirmedPayloadSchema,
 } from "@ecom/contracts";
 import { prisma } from "./db";
 import { config } from "./config";
 import { reserveOrder } from "./reserve";
 import { releaseForCancel } from "./release";
-import { reserveTx, releaseTx } from "./tx-adapters";
+import { consumeForConfirm } from "./consume";
+import { reserveTx, releaseTx, consumeTx } from "./tx-adapters";
 
 const log: Logger = createLogger("inventory-consumer");
 
 export async function handleOrderEvent(env: EventEnvelope): Promise<void> {
   if (env.type === ORDER_PLACED) return handlePlaced(env);
   if (env.type === ORDER_CANCELLED) return handleCancelled(env);
+  if (env.type === ORDER_CONFIRMED) return handleConfirmed(env);
   // Other event types on the topic are not ours — ignore (no-op, no DLQ).
 }
 
@@ -64,4 +68,14 @@ async function handleCancelled(env: EventEnvelope): Promise<void> {
     outcome,
     traceId: env.traceId,
   });
+}
+
+async function handleConfirmed(env: EventEnvelope): Promise<void> {
+  const payload = OrderConfirmedPayloadSchema.parse(env.payload);
+  const outcome = await prisma.$transaction((tx) =>
+    consumeForConfirm(consumeTx(tx), { eventId: env.eventId, orderId: payload.orderId })
+  );
+  if (outcome === "NOOP")
+    log.warn("confirm_no_active_reservation", { orderId: payload.orderId, traceId: env.traceId });
+  log.info("order_confirmed_handled", { orderId: payload.orderId, outcome, traceId: env.traceId });
 }
