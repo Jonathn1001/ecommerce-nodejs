@@ -56,6 +56,10 @@ simulateCharge(amount: number): "SUCCEEDED" | "FAILED"
 - Deterministic ⇒ reproducible happy-path and forced-failure tests without randomness.
 - 3a implements only SUCCEEDED/FAILED; the `…99` timeout branch is reserved and
   documented so 3c is a pure addition, not a rewrite.
+- **Consequence — any total `≡ 1 (mod 100)` always declines** (`1`, `101`, `2501`, …),
+  including a legitimate order that happens to end in `…01`, and the 1-minor-unit edge
+  (`amount === 1` → FAILED). This is the intended magic-amount behaviour: **demo/seed
+  prices must avoid `…01` endings unless deliberately exercising the decline path.**
 
 ## Contracts (`packages/contracts/src/events/payment.ts`, new)
 
@@ -108,8 +112,16 @@ handleChargePayment(env):                        -- env.type === CHARGE_PAYMENT
       tx.enqueue(PAYMENT_FAILED, orderId, { orderId, reason: "CARD_DECLINED" })
     return outcome
   )
+  log("charge_handled", { orderId, outcome, traceId })   -- returns void; see below
   -- tx commits, THEN the rabbit consumer acks the command
 ```
+
+The outcome string is **for logging/tests only**: `consumeCommands` types the handler as
+`(env) => Promise<void>` and acks on no-throw — it does **not** branch on the return. So
+`handleChargePayment` logs the outcome (ids only) and returns void, exactly like
+`services/inventory/src/consumer.ts`. `CHARGE_PAYMENT`'s value (`"payment.charge"`) is
+intentionally the same string as the queue name — different namespaces (event type vs
+queue), equal by convention; not a collision.
 
 - **Belt-and-suspenders idempotency:** `ProcessedEvent` (command `eventId`, `markProcessed` via
   `createMany + skipDuplicates`) **and** unique `Payment.orderId`. A redelivered `ChargePayment`
@@ -147,9 +159,12 @@ there is no lock (no concurrent shared resource; one payment per order is enforc
   consumeCommands("payment.charge", handleChargePayment, { maxRetries: 3 })`. Graceful shutdown
   (reverse teardown): HTTP server drains first → rabbit `close()` → relay `stop()` →
   producer `disconnect()` → `prisma.$disconnect()` last.
-- **`/healthz`** + **`/readyz`** (`createHealthRouter({ db })`, Postgres only — matching the
-  inventory/order convention, which does not probe brokers in readiness; broker blips are handled by
-  connect-retry + the consumer's own error boundary).
+- **`/healthz`** + **`/readyz`** — `createHealthRouter({ db, rabbit })`, probing Postgres **and
+  RabbitMQ**. This **deliberately diverges** from the inventory/order convention (db-only): Payment's
+  entire purpose is consuming commands off `payment.charge`, so a RabbitMQ-unreachable instance is not
+  ready even though its DB is fine — reporting "ready" while it can charge nothing would be wrong for
+  the money leg. (Kafka is still not probed — the outbox relay tolerates a Kafka blip by leaving rows
+  unsent; the command intake does not.)
 - **`db.ts`** loads this service's `.env` then constructs `PrismaClient` from `./generated/prisma`
   (custom per-service output, gitignored) — the inventory/order pattern, not `@prisma/client`.
 - Plain express + zod `safeParse` at the edge; `traceMiddleware` in front.
@@ -169,6 +184,10 @@ there is no lock (no concurrent shared resource; one payment per order is enforc
 4. **Kafka events keyed by `eventId`, not aggregate.** Existing platform behaviour (`createProducer.publish`);
    partition-by-orderId is a platform concern, not fixed here.
 5. **`GET /payments/:orderId` is unauthenticated** — a demo/observability surface until the gateway (Phase 6) fronts it.
+6. **The charge amount is trusted from the command.** Payment charges exactly the `amount` in
+   `ChargePayment` with no cross-check against the order — correct under DB-per-service (Order is the
+   pricing authority and owns the total; Payment never reads Order's DB). Documented so it reads as an
+   intentional property, not a missing validation.
 
 ## Testing (TDD)
 
@@ -200,3 +219,10 @@ the minor-units total, `…01` declines; no test-control field on the contract; 
 for 3c); Rabbit retry lands in the **shared `consumeCommands`** (reusable), idempotency stays
 caller-side; belt-and-suspenders dedup = `ProcessedEvent` + unique `Payment.orderId`; charge is
 synchronous this slice (`CHARGING`/timeout/webhook/refund all deferred to 3c).
+
+Design review (review-design-plan, 2026-07-23) resolved two forks: **`PaymentAttempt` is built in 3a**
+(the umbrella lists `payment_attempts`; it's written in the same handler tx at zero extra cost and
+avoids a 3c migration — 3a always writes exactly one row, 3c appends), and **`/readyz` probes RabbitMQ**
+in addition to Postgres (justified divergence from the db-only convention — see Configuration). Also
+folded: the magic-amount `…01` demo caveat, the trusted-amount property (Known-limitation #6), and the
+handler-returns-void clarification.
