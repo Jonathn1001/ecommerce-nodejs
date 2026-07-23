@@ -32,7 +32,7 @@ real reservation **and** a real Order transition end-to-end.
 ## Scope
 
 **In:**
-- **Kafka consumer** on `inventory.events`, consumer group `order`, dispatching on
+- **Kafka consumer** on `inventory.events`, consumer group `order-consumers`, dispatching on
   event type — `INVENTORY_RESERVED`, `INVENTORY_RESERVATION_FAILED`; any other type on
   the topic is ignored (no-op, never DLQ). Mirrors Inventory's `order.events` consumer.
 - **Order state machine** — a pure `transition.ts` core (transition table +

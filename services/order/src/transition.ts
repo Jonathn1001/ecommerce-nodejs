@@ -9,7 +9,10 @@ export type OrderStatus = "PENDING" | "AWAITING_PAYMENT" | "CANCELLED" | "CONFIR
 // Pure transition table. Only PENDING is a live source this slice; every other
 // (status, event) pair — a late, duplicate, or out-of-order event — returns null
 // so the caller no-ops instead of corrupting state.
-export function nextStatus(current: string, eventType: string): OrderStatus | null {
+export function nextStatus(
+  current: string,
+  eventType: string
+): "AWAITING_PAYMENT" | "CANCELLED" | null {
   if (current === "PENDING" && eventType === INVENTORY_RESERVED) return "AWAITING_PAYMENT";
   if (current === "PENDING" && eventType === INVENTORY_RESERVATION_FAILED) return "CANCELLED";
   return null;
@@ -44,13 +47,11 @@ export async function applyInventoryResult(
 
   const next = nextStatus(status, p.type);
   if (next === null) return "NO_OP"; // ledgered; late/out-of-order guard
-  if (next !== "AWAITING_PAYMENT" && next !== "CANCELLED") {
-    // Defensive: today's transition table never produces PENDING/CONFIRMED
-    // here. Narrowing this way (instead of an unsafe cast) lets TypeScript
-    // prove `next` fits ApplyOutcome below.
-    return "NO_OP";
-  }
 
+  // `next` is now "AWAITING_PAYMENT" | "CANCELLED" — both valid ApplyOutcomes.
+  // Widening nextStatus to a status outside ApplyOutcome (e.g. CONFIRMED in a
+  // later slice) without widening ApplyOutcome is a COMPILE error here, by
+  // design — the future footgun fails at build, not silently as a NO_OP.
   await tx.setStatus(p.orderId, next);
   if (next === "CANCELLED") {
     await tx.enqueue(ORDER_CANCELLED, p.orderId, { orderId: p.orderId });
