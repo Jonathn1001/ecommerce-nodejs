@@ -19,3 +19,10 @@ export const OrderCancelledPayloadSchema = z.object({
   orderId: z.string().min(1),
 });
 export type OrderCancelledPayload = z.infer<typeof OrderCancelledPayloadSchema>;
+
+export const ORDER_CONFIRMED = "order.confirmed" as const;
+
+export const OrderConfirmedPayloadSchema = z.object({
+  orderId: z.string().min(1),
+});
+export type OrderConfirmedPayload = z.infer<typeof OrderConfirmedPayloadSchema>;
