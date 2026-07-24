@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { finalizePayment, type ResolveTx } from "../resolve";
-import { PAYMENT_SUCCEEDED, PAYMENT_FAILED } from "@ecom/contracts";
+import { finalizePayment, refundPayment, type ResolveTx } from "../resolve";
+import { PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_REFUNDED } from "@ecom/contracts";
 
 function fakeResolveTx(init: { status: string | null; amount?: number }) {
   const emitted: Array<{ type: string; payload: unknown }> = [];
@@ -47,5 +47,29 @@ describe("finalizePayment (webhook core)", () => {
   it("unknown order -> NOT_FOUND", async () => {
     const f = fakeResolveTx({ status: null });
     expect(await finalizePayment(f.tx, { orderId: "x", outcome: "SUCCEEDED" })).toBe("NOT_FOUND");
+  });
+});
+
+describe("refundPayment (admin stub core)", () => {
+  it("SUCCEEDED -> REFUNDED + emits payment.refunded(amount)", async () => {
+    const f = fakeResolveTx({ status: "SUCCEEDED", amount: 700 });
+    expect(await refundPayment(f.tx, { orderId: "o1" })).toBe("REFUNDED");
+    expect(f.statusNow()).toBe("REFUNDED");
+    expect(f.emitted).toEqual([
+      { type: PAYMENT_REFUNDED, payload: { orderId: "o1", paymentId: "pay_1", amount: 700 } },
+    ]);
+  });
+  it("already REFUNDED -> NOOP, no event", async () => {
+    const f = fakeResolveTx({ status: "REFUNDED" });
+    expect(await refundPayment(f.tx, { orderId: "o1" })).toBe("NOOP");
+    expect(f.emitted).toEqual([]);
+  });
+  it("PROCESSING/FAILED -> NOT_REFUNDABLE", async () => {
+    const f = fakeResolveTx({ status: "PROCESSING" });
+    expect(await refundPayment(f.tx, { orderId: "o1" })).toBe("NOT_REFUNDABLE");
+  });
+  it("unknown order -> NOT_FOUND", async () => {
+    const f = fakeResolveTx({ status: null });
+    expect(await refundPayment(f.tx, { orderId: "x" })).toBe("NOT_FOUND");
   });
 });

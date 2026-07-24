@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
 import { prisma } from "./db";
-import { finalizePayment } from "./resolve";
+import { finalizePayment, refundPayment } from "./resolve";
 import { resolveTx } from "./tx-adapters";
 
 const log = createLogger("payment");
@@ -62,6 +62,25 @@ export function createApp(deps: {
       return res.status(200).json({ orderId, result: r }); // FINALIZED or NOOP
     } catch {
       log.error("webhook_failed", { orderId, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  // Admin refund stub — marks a SUCCEEDED payment REFUNDED and emits payment.refunded.
+  // No consumer this slice. Unauthenticated (Phase 6). Concurrent-safe via CAS.
+  app.post("/admin/payments/:orderId/refund", async (req, res) => {
+    const { orderId } = req.params;
+    try {
+      const r = await prisma.$transaction((tx) =>
+        refundPayment(resolveTx(tx, req.traceId), { orderId })
+      );
+      if (r === "NOT_FOUND") return res.status(404).json({ error: "not found" });
+      if (r === "NOT_REFUNDABLE")
+        return res.status(409).json({ error: "not refundable", orderId });
+      log.info("refund_handled", { orderId, result: r, traceId: req.traceId });
+      return res.status(200).json({ orderId, result: r }); // REFUNDED or NOOP
+    } catch {
+      log.error("refund_failed", { orderId, traceId: req.traceId });
       res.status(500).json({ error: "internal error" });
     }
   });
