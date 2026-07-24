@@ -95,3 +95,23 @@ export function transitionTx(
     },
   };
 }
+
+// Catalog read-model projection. catalog.events are keyed by eventId (not
+// productId), so a two-step updateMany-then-create upsert would have a
+// create-side TOCTOU under concurrency — this uses one atomic conditional
+// upsert instead: idempotent, out-of-order-safe (version guard), and
+// concurrency-safe (single statement, no read-then-write race).
+export function catalogProjectionTx(tx: Prisma.TransactionClient) {
+  return {
+    async apply(p: { productId: string; name: string; price: number; version: number }) {
+      // Single atomic conditional upsert — idempotent, out-of-order- and concurrency-safe.
+      await tx.$executeRaw`
+        INSERT INTO "CatalogReadModel" ("productId", name, price, version, "updatedAt")
+        VALUES (${p.productId}, ${p.name}, ${p.price}, ${p.version}, now())
+        ON CONFLICT ("productId") DO UPDATE
+          SET name = EXCLUDED.name, price = EXCLUDED.price,
+              version = EXCLUDED.version, "updatedAt" = now()
+          WHERE EXCLUDED.version > "CatalogReadModel".version`;
+    },
+  };
+}

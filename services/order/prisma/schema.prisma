@@ -57,6 +57,7 @@ model CatalogReadModel {
   productId String   @id
   name      String
   price     Int                             // integer minor units
+  version   Int      @default(0)
   updatedAt DateTime @updatedAt
 }
 

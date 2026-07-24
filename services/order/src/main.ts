@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { handleEvent } from "./consumer";
+import { handleCatalogEvent } from "./catalog-projection";
 import { createOrderListener } from "./sse-listener";
 import { prisma } from "./db";
 import {
@@ -43,14 +44,21 @@ async function main() {
   await consumer.connect();
   await consumer.run(["inventory.events", "payment.events"], handleEvent);
 
+  // Separate consumer group for the catalog read-model projection — its own
+  // offsets, independent of the saga consumer above.
+  const catalogConsumer = createConsumer(kafka, "order-catalog-projection");
+  await catalogConsumer.connect();
+  await catalogConsumer.run(["catalog.events"], handleCatalogEvent);
+
   const app = createApp({ sseRegistry: listener.registry });
   const server = app.listen(config.PORT, () =>
     log.info("order_listening", { port: config.PORT })
   );
 
   // Reverse teardown. Effective order:
-  //   server.close -> consumer.disconnect -> relay.stop -> rabbit.close
-  //   -> producer.disconnect -> listener.close -> prisma.$disconnect
+  //   server.close -> consumer.disconnect -> catalogConsumer.disconnect
+  //   -> relay.stop -> rabbit.close -> producer.disconnect -> listener.close
+  //   -> prisma.$disconnect
   // The relay must stop before its Rabbit send channel closes.
   gracefulShutdown([
     async () => {
@@ -67,6 +75,9 @@ async function main() {
     },
     async () => {
       relay.stop();
+    },
+    async () => {
+      await catalogConsumer.disconnect();
     },
     async () => {
       await consumer.disconnect();
