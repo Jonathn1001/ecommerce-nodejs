@@ -49,30 +49,55 @@ describe("drainOutbox", () => {
 describe("drainOutbox — command channel routing", () => {
   it("routes command rows to the sender and event rows to the Kafka producer", async () => {
     const rows = [
-      fakeRow({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", type: "order.confirmed", aggregateType: "order" }),
-      fakeRow({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", type: "payment.charge", aggregateType: "order" }),
+      fakeRow({
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        type: "order.confirmed",
+        aggregateType: "order",
+      }),
+      fakeRow({
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        type: "payment.charge",
+        aggregateType: "order",
+      }),
     ];
     const published: string[] = [];
     const commanded: Array<{ queue: string; eventId: string }> = [];
     const marked: string[] = [];
     const commands: CommandChannel = {
-      sender: { sendCommand: async (queue, env) => { commanded.push({ queue, eventId: env.eventId }); } },
+      sender: {
+        sendCommand: async (queue, env) => {
+          commanded.push({ queue, eventId: env.eventId });
+        },
+      },
       queueFor: (r) => (r.type === "payment.charge" ? "payment.charge" : null),
     };
     const count = await drainOutbox(
-      { fetchUnsent: async () => rows, markSent: async (id) => { marked.push(id); } },
-      { publish: async (topic) => { published.push(topic); } },
+      {
+        fetchUnsent: async () => rows,
+        markSent: async (id) => {
+          marked.push(id);
+        },
+      },
+      {
+        publish: async (topic) => {
+          published.push(topic);
+        },
+      },
       (a) => `${a}.events`,
       100,
       commands
     );
     expect(count).toBe(2);
     expect(published).toEqual(["order.events"]);
-    expect(commanded).toEqual([{ queue: "payment.charge", eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }]);
-    expect(marked.sort()).toEqual([
-      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-    ].sort());
+    expect(commanded).toEqual([
+      { queue: "payment.charge", eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+    ]);
+    expect(marked.sort()).toEqual(
+      [
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      ].sort()
+    );
   });
 
   it("a failing rabbit lane does not stop the kafka lane (allSettled)", async () => {
@@ -82,11 +107,20 @@ describe("drainOutbox — command channel routing", () => {
     ];
     const marked: string[] = [];
     const commands: CommandChannel = {
-      sender: { sendCommand: async () => { throw new Error("rabbit down"); } },
+      sender: {
+        sendCommand: async () => {
+          throw new Error("rabbit down");
+        },
+      },
       queueFor: (r) => (r.type === "payment.charge" ? "payment.charge" : null),
     };
     await drainOutbox(
-      { fetchUnsent: async () => rows, markSent: async (id) => { marked.push(id); } },
+      {
+        fetchUnsent: async () => rows,
+        markSent: async (id) => {
+          marked.push(id);
+        },
+      },
       { publish: async () => {} },
       (a) => `${a}.events`,
       100,

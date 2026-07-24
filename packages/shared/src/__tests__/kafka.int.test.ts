@@ -78,7 +78,9 @@ describe("kafka consumer parse fix (integration — needs docker compose up)", (
     const consumer = createConsumer(kafka, `kafka-parsefix-${Date.now()}`);
     await consumer.connect();
     const seen: string[] = [];
-    await consumer.run([topic], async (env) => { seen.push(env.eventId); });
+    await consumer.run([topic], async (env) => {
+      seen.push(env.eventId);
+    });
 
     // Raw DLQ reader — a bare kafkajs consumer, bypassing the shared wrapper's
     // envelope-parsing `run()` entirely. The wrapped consumer can only ever
@@ -99,7 +101,10 @@ describe("kafka consumer parse fix (integration — needs docker compose up)", (
     // publish a raw non-envelope value directly (bypass the producer wrapper)
     const raw = kafka.producer();
     await raw.connect();
-    await raw.send({ topic, messages: [{ value: JSON.stringify({ not: "an envelope" }) }] });
+    await raw.send({
+      topic,
+      messages: [{ value: JSON.stringify({ not: "an envelope" }) }],
+    });
     await raw.disconnect();
 
     const deadline = Date.now() + 10_000;

@@ -100,7 +100,10 @@ export function releaseTx(tx: Prisma.TransactionClient, traceId: string): Releas
 export function consumeTx(tx: Prisma.TransactionClient): ConsumeTx {
   return {
     async markProcessed(eventId, type) {
-      const r = await tx.processedEvent.createMany({ data: [{ eventId, type }], skipDuplicates: true });
+      const r = await tx.processedEvent.createMany({
+        data: [{ eventId, type }],
+        skipDuplicates: true,
+      });
       return r.count > 0;
     },
     async consumeActive(orderId) {

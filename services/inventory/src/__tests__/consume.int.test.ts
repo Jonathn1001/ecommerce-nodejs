@@ -6,17 +6,30 @@ import { makeEnvelope, ORDER_CONFIRMED, type EventEnvelope } from "@ecom/contrac
 
 async function activeReservation(orderId: string) {
   await prisma.reservation.create({
-    data: { orderId, productId: `p_${randomUUID()}`, quantity: 1, status: "ACTIVE",
-      expiresAt: new Date(Date.now() + 900_000) },
+    data: {
+      orderId,
+      productId: `p_${randomUUID()}`,
+      quantity: 1,
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 900_000),
+    },
   });
 }
 const confirm = (orderId: string): EventEnvelope =>
-  makeEnvelope({ type: ORDER_CONFIRMED, version: 1, traceId: "t", producer: "test", payload: { orderId } });
+  makeEnvelope({
+    type: ORDER_CONFIRMED,
+    version: 1,
+    traceId: "t",
+    producer: "test",
+    payload: { orderId },
+  });
 const statusOf = async (orderId: string) =>
   (await prisma.reservation.findFirst({ where: { orderId } }))?.status;
 
 describe("inventory CONSUMED (integration — needs compose up + migrated)", () => {
-  afterAll(async () => { await prisma.$disconnect(); });
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
 
   it("OrderConfirmed marks the ACTIVE reservation CONSUMED", async () => {
     const orderId = `o_${randomUUID()}`;
@@ -29,7 +42,8 @@ describe("inventory CONSUMED (integration — needs compose up + migrated)", () 
     const orderId = `o_${randomUUID()}`;
     await activeReservation(orderId);
     const e = confirm(orderId);
-    await handleOrderEvent(e); await handleOrderEvent(e);
+    await handleOrderEvent(e);
+    await handleOrderEvent(e);
     expect(await statusOf(orderId)).toBe("CONSUMED");
     expect(await prisma.processedEvent.count({ where: { eventId: e.eventId } })).toBe(1);
   });

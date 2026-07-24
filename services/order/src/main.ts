@@ -4,8 +4,13 @@ import { outboxPort } from "./outbox-adapter";
 import { handleEvent } from "./consumer";
 import { prisma } from "./db";
 import {
-  createKafka, createProducer, createConsumer, startOutboxRelay,
-  createRabbit, createLogger, gracefulShutdown,
+  createKafka,
+  createProducer,
+  createConsumer,
+  startOutboxRelay,
+  createRabbit,
+  createLogger,
+  gracefulShutdown,
 } from "@ecom/shared";
 import { CHARGE_PAYMENT } from "@ecom/contracts";
 
@@ -35,18 +40,30 @@ async function main() {
   await consumer.run(["inventory.events", "payment.events"], handleEvent);
 
   const app = createApp();
-  const server = app.listen(config.PORT, () => log.info("order_listening", { port: config.PORT }));
+  const server = app.listen(config.PORT, () =>
+    log.info("order_listening", { port: config.PORT })
+  );
 
   // Reverse teardown. Effective order:
   //   server.close -> consumer.disconnect -> relay.stop -> rabbit.close
   //   -> producer.disconnect -> prisma.$disconnect
   // The relay must stop before its Rabbit send channel closes.
   gracefulShutdown([
-    async () => { await prisma.$disconnect(); },
-    async () => { await producer.disconnect(); },
-    async () => { await rabbit.close(); },
-    async () => { relay.stop(); },
-    async () => { await consumer.disconnect(); },
+    async () => {
+      await prisma.$disconnect();
+    },
+    async () => {
+      await producer.disconnect();
+    },
+    async () => {
+      await rabbit.close();
+    },
+    async () => {
+      relay.stop();
+    },
+    async () => {
+      await consumer.disconnect();
+    },
     async () => {
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve()))

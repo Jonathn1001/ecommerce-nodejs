@@ -79,7 +79,8 @@ export async function drainOutbox(
     lane(rabbitRows, (r) => commands!.sender.sendCommand(queueOf(r)!, toEnvelope(r))),
   ]);
   for (const r of results) {
-    if (r.status === "rejected") log.error("outbox_lane_failed", { message: String(r.reason) });
+    if (r.status === "rejected")
+      log.error("outbox_lane_failed", { message: String(r.reason) });
   }
   return sent;
 }

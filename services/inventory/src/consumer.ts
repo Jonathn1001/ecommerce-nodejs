@@ -76,6 +76,13 @@ async function handleConfirmed(env: EventEnvelope): Promise<void> {
     consumeForConfirm(consumeTx(tx), { eventId: env.eventId, orderId: payload.orderId })
   );
   if (outcome === "NOOP")
-    log.warn("confirm_no_active_reservation", { orderId: payload.orderId, traceId: env.traceId });
-  log.info("order_confirmed_handled", { orderId: payload.orderId, outcome, traceId: env.traceId });
+    log.warn("confirm_no_active_reservation", {
+      orderId: payload.orderId,
+      traceId: env.traceId,
+    });
+  log.info("order_confirmed_handled", {
+    orderId: payload.orderId,
+    outcome,
+    traceId: env.traceId,
+  });
 }

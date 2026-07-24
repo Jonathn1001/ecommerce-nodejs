@@ -94,7 +94,13 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     await rabbit.assertWorkQueue(q);
     await rabbit.sendCommand(
       q,
-      makeEnvelope({ type: "cmd.confirm", version: 1, traceId: "t", producer: "test", payload: {} })
+      makeEnvelope({
+        type: "cmd.confirm",
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: {},
+      })
     );
     // If sendCommand resolved, the confirm-channel acked it; the message is enqueued.
     const got = await rabbit.consumeDlqOnce(q, 5_000); // read the work queue directly

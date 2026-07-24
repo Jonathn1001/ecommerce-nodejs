@@ -6,7 +6,9 @@ describe("order.confirmed contract", () => {
     expect(ORDER_CONFIRMED).toBe("order.confirmed");
   });
   it("validates { orderId } and rejects empty", () => {
-    expect(OrderConfirmedPayloadSchema.parse({ orderId: "o1" })).toEqual({ orderId: "o1" });
+    expect(OrderConfirmedPayloadSchema.parse({ orderId: "o1" })).toEqual({
+      orderId: "o1",
+    });
     expect(OrderConfirmedPayloadSchema.safeParse({ orderId: "" }).success).toBe(false);
     expect(OrderConfirmedPayloadSchema.safeParse({}).success).toBe(false);
   });
