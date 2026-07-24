@@ -224,43 +224,65 @@ export function createApp(
     const registry = deps.sseRegistry;
     if (!registry) return res.status(503).json({ error: "stream unavailable" });
     const id = req.params.id;
+    let unsubscribe: (() => void) | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-    // 404 before any SSE headers.
-    const exists = await prisma.order.findUnique({ where: { id }, select: { id: true } });
-    if (!exists) return res.status(404).json({ error: "not found" });
+    try {
+      // 404 before any SSE headers.
+      const exists = await prisma.order.findUnique({ where: { id }, select: { id: true } });
+      if (!exists) return res.status(404).json({ error: "not found" });
 
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
 
-    const sink: Sink = {
-      send: (f) => res.write(`event: status\ndata: ${JSON.stringify(f)}\n\n`),
-      end: () => res.end(),
-    };
-    // Register BEFORE reading current status so a transition landing during the
-    // read is still delivered (a rare initial==first-notify overlap is deduped
-    // client-side by status).
-    const unsubscribe = registry.subscribe(id, sink);
+      const sink: Sink = {
+        send: (f) => {
+          if (!res.writableEnded) res.write(`event: status\ndata: ${JSON.stringify(f)}\n\n`);
+        },
+        end: () => {
+          if (heartbeat) clearInterval(heartbeat);
+          if (!res.writableEnded) res.end();
+        },
+      };
+      // Register BEFORE reading current status so a transition landing during the
+      // read is still delivered (a rare initial==first-notify overlap is deduped
+      // client-side by status).
+      unsubscribe = registry.subscribe(id, sink);
 
-    const current = await prisma.order.findUnique({
-      where: { id },
-      select: { status: true },
-    });
-    if (!res.writableEnded && current) {
-      sink.send({ orderId: id, status: current.status });
-      if (current.status === "CONFIRMED" || current.status === "CANCELLED") {
-        unsubscribe();
-        return res.end();
+      const current = await prisma.order.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (!res.writableEnded) {
+        if (!current) {
+          // Order vanished between the existence check and this read — close cleanly.
+          unsubscribe();
+          return res.end();
+        }
+        sink.send({ orderId: id, status: current.status });
+        if (current.status === "CONFIRMED" || current.status === "CANCELLED") {
+          unsubscribe();
+          return res.end();
+        }
       }
-    }
 
-    const heartbeat = setInterval(() => res.write(":keepalive\n\n"), 15000);
-    req.on("close", () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-    });
+      heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(":keepalive\n\n");
+      }, 15000);
+      req.on("close", () => {
+        if (heartbeat) clearInterval(heartbeat);
+        if (unsubscribe) unsubscribe();
+      });
+    } catch {
+      log.error("order_stream_failed", { orderId: id, traceId: req.traceId });
+      if (unsubscribe) unsubscribe();
+      if (heartbeat) clearInterval(heartbeat);
+      if (!res.headersSent) return res.status(500).json({ error: "internal error" });
+      if (!res.writableEnded) res.end();
+    }
   });
 
   return app;
