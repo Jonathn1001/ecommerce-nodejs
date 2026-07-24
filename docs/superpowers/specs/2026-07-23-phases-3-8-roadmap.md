@@ -79,7 +79,7 @@ Effectively greenfield (legacy is a stub). The **RabbitMQ showcase** phase.
 
 **Slices**
 1. **5a — Dispatcher:** `order.events` → notification rows + `SendEmail` commands; idempotent on both legs (Kafka `eventId` ledger + unique `(orderId, type)` row).
-2. **5b — Worker + mailpit:** consume queue, render, send; retry/backoff reused from Phase 3; poison → `notifications.dlq`; replay script + runbook. **Harden `consumeCommands` FIRST** (before this second consumer inherits its gaps — surfaced by the Phase-3a whole-branch review): (a) **consumer reconnection** — after a real broker drop `checkHealth` flips unready but nothing re-establishes the consumer, so the command intake silently stalls; add reconnect (or document a liveness-restart contract); (b) **`ch.prefetch()`** back-pressure — no prefetch today means unbounded unacked in-flight (Payment survives via unique-`orderId`+retry, but a worker fleet wants bounded concurrency).
+2. **5b — Worker + mailpit:** consume queue, render, send; retry/backoff reused from Phase 3; poison → `notifications.dlq`; replay script + runbook. **Harden the rabbit adapter FIRST** (before this second consumer/producer inherits its gaps — surfaced by the Phase-3a and Phase-3b whole-branch reviews): (a) **consumer reconnection** — after a real broker drop `checkHealth` flips unready but nothing re-establishes the consumer, so the command intake silently stalls; add reconnect (or document a liveness-restart contract); (b) **`ch.prefetch()`** back-pressure — no prefetch today means unbounded unacked in-flight (Payment survives via unique-`orderId`+retry, but a worker fleet wants bounded concurrency); (c) **sender/command-lane recovery + boot-time retry** (3b review) — Order's `main.ts` does `await createRabbit()` before the HTTP server starts (a boot-time Rabbit outage prevents Order serving at all), and `createRabbit` has no reconnect, so a mid-life drop permanently wedges the command lane (`outbox_lane_failed` every tick, rows pile up) until restart. The "outbox buffers rabbit outages" property holds only for a live process; add boot-time retry (non-fatal, degrade to buffering) + command-lane re-establish so the relay recovers without a restart.
 
 **Hard dependency:** Phase 3 (`order.confirmed` exists; rabbit adapter + retry reused, not rebuilt — plus the 5b `consumeCommands` hardening above). Soft on Phase 4 (product names in emails — degrade gracefully).
 
@@ -149,7 +149,11 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | Item | Absorbed by |
 |---|---|
 | Rabbit retry layer + outbox→command adapter | **3** (3a / 3b) |
-| Rabbit consumer reconnection + `ch.prefetch()` back-pressure (from 3a review) | **5** (5b — harden `consumeCommands` before the SendEmail worker) |
+| Rabbit consumer reconnection + `ch.prefetch()` back-pressure (from 3a review) | **5** (5b — harden the rabbit adapter before the SendEmail worker) |
+| Rabbit sender/command-lane recovery + boot-time retry (from 3b review) | **5** (5b(c) — same rabbit-adapter hardening pass) |
+| Order status-guard `setStatus` compare-and-set — read-then-write w/o row lock; two distinct events for one order could both read `AWAITING_PAYMENT` and emit contradictory terminal events. Unreachable today (Payment emits exactly one deterministic result per order; single consumer group serial per partition) but 3b raised the stakes (from 3b review) | **7** (7c hardening — `updateMany({where:{id,status:current}})`, count 0 ⇒ NO_OP) |
+| Inventory `sweepOnce()` per-order isolation — one order's failure aborts the whole batch (same class Task 3 fixed for the relay tick); latent Phase-3a bug surfaced by the 3b regression gate on stale dev-DB rows | **7** (7c hardening — try-per-order / `Promise.allSettled`) |
+| 3b-review minor polish — `outbox.ts` `queueFor` compute-once; `kafka.ts` restore `eventId` key+log on the retry-exhausted DLQ path; `ORDER_CONFIRMED` const grouping; payment-leg e2e assert `payload.orderId` + tighten teardown race | opportunistic / **7** (7c hygiene) |
 | Kafka envelope-parse DLQ-bypass fix (`packages/shared/src/kafka.ts`) | **3** (3b) |
 | Trace propagation (AsyncLocalStorage, consumer-side traceId) | **7** (subsumed by OTel) |
 | `ProcessedEvent` retention | **7** (7c) |
