@@ -23,3 +23,12 @@ export const PaymentFailedPayloadSchema = z.object({
   reason: z.string().min(1),
 });
 export type PaymentFailedPayload = z.infer<typeof PaymentFailedPayloadSchema>;
+
+export const PAYMENT_REFUNDED = "payment.refunded" as const;
+
+export const PaymentRefundedPayloadSchema = z.object({
+  orderId: z.string().min(1),
+  paymentId: z.string().min(1),
+  amount: z.number().int().positive(),
+});
+export type PaymentRefundedPayload = z.infer<typeof PaymentRefundedPayloadSchema>;
