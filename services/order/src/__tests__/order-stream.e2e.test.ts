@@ -119,9 +119,11 @@ describe("order SSE stream e2e (needs compose up + migrated)", () => {
   async function place(total: number): Promise<string> {
     const userId = `u_${randomUUID()}`;
     const pid = `p_${randomUUID()}`;
-    await request(app)
-      .post("/admin/catalog")
-      .send({ productId: pid, name: "x", price: total });
+    await prisma.catalogReadModel.upsert({
+      where: { productId: pid },
+      create: { productId: pid, name: "x", price: total, version: 1 },
+      update: { name: "x", price: total, version: 1 },
+    });
     await request(app)
       .post("/cart/items")
       .set("x-user-id", userId)

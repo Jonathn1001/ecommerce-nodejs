@@ -6,7 +6,7 @@ import { prisma } from "../db";
 
 const app = createApp();
 
-describe("order cart + catalog admin (integration — needs docker compose up + migrated)", () => {
+describe("order cart (integration — needs docker compose up + migrated)", () => {
   afterAll(async () => {
     await prisma.$disconnect();
   });
@@ -75,19 +75,6 @@ describe("order cart + catalog admin (integration — needs docker compose up + 
       .set("x-user-id", "u")
       .send({ productId: "p", quantity: 0 });
     expect(res.status).toBe(400);
-  });
-
-  it("POST /admin/catalog upserts a price", async () => {
-    const pid = `p_${randomUUID()}`;
-    const a = await request(app)
-      .post("/admin/catalog")
-      .send({ productId: pid, name: "Widget", price: 500 });
-    expect(a.status).toBe(201);
-    expect(a.body).toEqual({ productId: pid, price: 500 });
-    const b = await request(app)
-      .post("/admin/catalog")
-      .send({ productId: pid, name: "Widget", price: 650 });
-    expect(b.body.price).toBe(650);
   });
 
   it("GET /readyz reports healthy", async () => {

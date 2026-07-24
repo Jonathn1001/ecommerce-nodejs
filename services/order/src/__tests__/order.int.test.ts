@@ -8,7 +8,11 @@ import { ORDER_PLACED } from "@ecom/contracts";
 const app = createApp();
 
 async function seedPrice(productId: string, price: number) {
-  await request(app).post("/admin/catalog").send({ productId, name: "x", price });
+  await prisma.catalogReadModel.upsert({
+    where: { productId },
+    create: { productId, name: "x", price, version: 1 },
+    update: { name: "x", price, version: 1 },
+  });
 }
 async function addToCart(userId: string, productId: string, quantity: number) {
   await request(app)

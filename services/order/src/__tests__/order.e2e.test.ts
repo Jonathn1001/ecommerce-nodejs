@@ -52,9 +52,11 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
   it("POST /orders -> OrderPlaced on order.events with matching items", async () => {
     const userId = `u_${randomUUID()}`;
     const pid = `p_${randomUUID()}`;
-    await request(app)
-      .post("/admin/catalog")
-      .send({ productId: pid, name: "x", price: 150 });
+    await prisma.catalogReadModel.upsert({
+      where: { productId: pid },
+      create: { productId: pid, name: "x", price: 150, version: 1 },
+      update: { name: "x", price: 150, version: 1 },
+    });
     await request(app)
       .post("/cart/items")
       .set("x-user-id", userId)

@@ -13,11 +13,6 @@ const AddItemSchema = z.object({
   quantity: z.number().int().positive(),
 });
 const SetQtySchema = z.object({ quantity: z.number().int().min(0) });
-const AdminCatalogSchema = z.object({
-  productId: z.string().min(1),
-  name: z.string().min(1),
-  price: z.number().int().positive(),
-});
 
 // Temporary auth stand-in: the caller's identity is the x-user-id header until
 // Gateway/Identity provide real JWT-over-cookie auth.
@@ -116,25 +111,6 @@ export function createApp(
       res.json({ userId, items });
     } catch {
       log.error("cart_get_failed", { traceId: req.traceId });
-      res.status(500).json({ error: "internal error" });
-    }
-  });
-
-  // Catalog price stand-in: upsert the local read-model row. Replaced by a
-  // Catalog PriceChanged projection later.
-  app.post("/admin/catalog", async (req, res) => {
-    const parsed = AdminCatalogSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "invalid catalog entry" });
-    const { productId, name, price } = parsed.data;
-    try {
-      const row = await prisma.catalogReadModel.upsert({
-        where: { productId },
-        create: { productId, name, price },
-        update: { name, price },
-      });
-      res.status(201).json({ productId: row.productId, price: row.price });
-    } catch {
-      log.error("catalog_upsert_failed", { productId, traceId: req.traceId });
       res.status(500).json({ error: "internal error" });
     }
   });
