@@ -13,6 +13,7 @@ import {
 function fakeTx(init: { status: string | null; totalPrice?: number }) {
   const processed = new Set<string>();
   const emitted: Array<{ type: string; orderId: string; payload: unknown }> = [];
+  const notified: Array<{ orderId: string; status: string }> = [];
   let status = init.status;
   const totalPrice = init.totalPrice ?? 500;
   const tx: TransitionTx = {
@@ -30,8 +31,11 @@ function fakeTx(init: { status: string | null; totalPrice?: number }) {
     async enqueue(type, orderId, payload) {
       emitted.push({ type, orderId, payload });
     },
+    async notify(orderId, status) {
+      notified.push({ orderId, status });
+    },
   };
-  return { tx, emitted, processed, statusNow: () => status };
+  return { tx, emitted, processed, notified, statusNow: () => status };
 }
 
 describe("nextStatus (widened table)", () => {
@@ -122,5 +126,15 @@ describe("applyResult", () => {
     expect(
       await applyResult(f.tx, { eventId: "e7", type: PAYMENT_SUCCEEDED, orderId: "o7" })
     ).toBe("NO_OP");
+  });
+  it("emits a NOTIFY with the new status on each transition", async () => {
+    const f = fakeTx({ status: "AWAITING_PAYMENT" });
+    await applyResult(f.tx, { eventId: "n1", type: PAYMENT_SUCCEEDED, orderId: "o9" });
+    expect(f.notified).toEqual([{ orderId: "o9", status: "CONFIRMED" }]);
+  });
+  it("does not NOTIFY on a guarded NO_OP", async () => {
+    const f = fakeTx({ status: "CONFIRMED" });
+    await applyResult(f.tx, { eventId: "n2", type: PAYMENT_SUCCEEDED, orderId: "o9" });
+    expect(f.notified).toEqual([]);
   });
 });

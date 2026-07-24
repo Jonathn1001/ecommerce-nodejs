@@ -30,6 +30,7 @@ export interface TransitionTx {
   markProcessed(eventId: string, type: string): Promise<boolean>;
   setStatus(orderId: string, status: OrderStatus): Promise<void>;
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
+  notify(orderId: string, status: OrderStatus): Promise<void>;
 }
 
 export type ApplyOutcome =
@@ -56,6 +57,7 @@ export async function applyResult(
   if (next === null) return "NO_OP";
 
   await tx.setStatus(p.orderId, next);
+  await tx.notify(p.orderId, next); // SSE: pg_notify on commit (Task 6/7 fan-out)
   if (next === "AWAITING_PAYMENT") {
     // Atomic command emission: the ChargePayment outbox row commits with the
     // status change; the relay routes it to RabbitMQ payment.charge.

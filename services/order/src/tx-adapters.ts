@@ -85,5 +85,13 @@ export function transitionTx(
         },
       });
     },
+    async notify(orderId, status) {
+      // Bound-param tagged template (never $executeRawUnsafe). NOTIFY inside this
+      // tx is delivered on COMMIT — as atomic as setStatus, dropped on rollback.
+      await tx.$executeRaw`SELECT pg_notify('order_status', ${JSON.stringify({
+        orderId,
+        status,
+      })})`;
+    },
   };
 }
