@@ -1,7 +1,9 @@
 import { PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_REFUNDED } from "@ecom/contracts";
 
 export interface ResolveTx {
-  loadPayment(orderId: string): Promise<{ paymentId: string; status: string; amount: number } | null>;
+  loadPayment(
+    orderId: string
+  ): Promise<{ paymentId: string; status: string; amount: number } | null>;
   // Conditional status write; returns rows changed (1 = we won, 0 = someone else did).
   casStatus(orderId: string, from: string, to: string): Promise<number>;
   createAttempt(paymentId: string, outcome: string): Promise<void>;

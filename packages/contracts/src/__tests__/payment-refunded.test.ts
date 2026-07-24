@@ -11,8 +11,11 @@ describe("payment.refunded contract", () => {
     ).toEqual({ orderId: "o1", paymentId: "p1", amount: 500 });
     expect(PaymentRefundedPayloadSchema.safeParse({ orderId: "o1" }).success).toBe(false);
     expect(
-      PaymentRefundedPayloadSchema.safeParse({ orderId: "o1", paymentId: "p1", amount: 0 })
-        .success
+      PaymentRefundedPayloadSchema.safeParse({
+        orderId: "o1",
+        paymentId: "p1",
+        amount: 0,
+      }).success
     ).toBe(false);
   });
 });

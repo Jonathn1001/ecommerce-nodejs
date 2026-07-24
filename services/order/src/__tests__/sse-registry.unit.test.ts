@@ -4,14 +4,20 @@ import { SubscriberRegistry, type Sink, type StatusFrame } from "../sse-listener
 function fakeSink() {
   const sent: StatusFrame[] = [];
   let ended = false;
-  const sink: Sink = { send: (f) => sent.push(f), end: () => { ended = true; } };
+  const sink: Sink = {
+    send: (f) => sent.push(f),
+    end: () => {
+      ended = true;
+    },
+  };
   return { sink, sent, ended: () => ended };
 }
 
 describe("SubscriberRegistry", () => {
   it("dispatches a frame only to that order's subscribers", () => {
     const r = new SubscriberRegistry();
-    const a = fakeSink(), b = fakeSink();
+    const a = fakeSink(),
+      b = fakeSink();
     r.subscribe("o1", a.sink);
     r.subscribe("o2", b.sink);
     r.dispatch({ orderId: "o1", status: "AWAITING_PAYMENT" });
@@ -20,7 +26,8 @@ describe("SubscriberRegistry", () => {
   });
   it("fans out to multiple subscribers of one order", () => {
     const r = new SubscriberRegistry();
-    const a = fakeSink(), b = fakeSink();
+    const a = fakeSink(),
+      b = fakeSink();
     r.subscribe("o1", a.sink);
     r.subscribe("o1", b.sink);
     r.dispatch({ orderId: "o1", status: "AWAITING_PAYMENT" });

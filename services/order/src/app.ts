@@ -26,7 +26,9 @@ function userIdOf(req: express.Request): string | null {
   return raw && raw.length > 0 ? raw : null;
 }
 
-export function createApp(deps: { sseRegistry?: SubscriberRegistry } = {}): express.Application {
+export function createApp(
+  deps: { sseRegistry?: SubscriberRegistry } = {}
+): express.Application {
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
@@ -242,7 +244,10 @@ export function createApp(deps: { sseRegistry?: SubscriberRegistry } = {}): expr
     // client-side by status).
     const unsubscribe = registry.subscribe(id, sink);
 
-    const current = await prisma.order.findUnique({ where: { id }, select: { status: true } });
+    const current = await prisma.order.findUnique({
+      where: { id },
+      select: { status: true },
+    });
     if (!res.writableEnded && current) {
       sink.send({ orderId: id, status: current.status });
       if (current.status === "CONFIRMED" || current.status === "CANCELLED") {

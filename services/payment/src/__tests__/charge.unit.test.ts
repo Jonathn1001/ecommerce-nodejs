@@ -112,7 +112,11 @@ describe("chargeOrder", () => {
 describe("chargeOrder — PROCESSING branch", () => {
   it("records PROCESSING (payment + attempt) and emits NO event", async () => {
     const f = fakeTx();
-    const outcome = await chargeOrder(f.tx, { eventId: "e5", orderId: "o5", amount: 599 });
+    const outcome = await chargeOrder(f.tx, {
+      eventId: "e5",
+      orderId: "o5",
+      amount: 599,
+    });
     expect(outcome).toBe("PROCESSING");
     expect(f.attempts).toEqual(["PROCESSING"]);
     expect(f.emitted).toEqual([]); // nothing published until the webhook resolves it
