@@ -158,5 +158,24 @@ services:
       timeout: 5s
       retries: 10
 
+  catalog:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: services/catalog/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/catalog
+      KAFKA_BROKERS: kafka:19092
+      PORT: 3004
+    ports: ["3004:3004"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3004/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
