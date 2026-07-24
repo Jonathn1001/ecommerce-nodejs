@@ -1,11 +1,22 @@
 export interface DiscountRule {
-  kind: "PERCENT" | "FIXED"; value: number; minOrder: number; maxUses: number; maxPerUser: number; expiresAt: Date;
+  kind: "PERCENT" | "FIXED";
+  value: number;
+  minOrder: number;
+  maxUses: number;
+  maxPerUser: number;
+  expiresAt: Date;
 }
-export interface DiscountCtx { orderTotal: number; totalUses: number; userUses: number; now: Date; }
+export interface DiscountCtx {
+  orderTotal: number;
+  totalUses: number;
+  userUses: number;
+  now: Date;
+}
 
 // Pure. Order of checks is stable (expiry -> minOrder -> maxUses -> maxPerUser).
 export function getDiscountAmount(
-  d: DiscountRule, c: DiscountCtx
+  d: DiscountRule,
+  c: DiscountCtx
 ): { amount: number } | { ineligible: string } {
   if (c.now >= d.expiresAt) return { ineligible: "expired" };
   if (c.orderTotal < d.minOrder) return { ineligible: "min_order" };

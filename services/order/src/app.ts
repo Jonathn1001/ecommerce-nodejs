@@ -205,7 +205,10 @@ export function createApp(
 
     try {
       // 404 before any SSE headers.
-      const exists = await prisma.order.findUnique({ where: { id }, select: { id: true } });
+      const exists = await prisma.order.findUnique({
+        where: { id },
+        select: { id: true },
+      });
       if (!exists) return res.status(404).json({ error: "not found" });
 
       res.writeHead(200, {
@@ -216,7 +219,8 @@ export function createApp(
 
       const sink: Sink = {
         send: (f) => {
-          if (!res.writableEnded) res.write(`event: status\ndata: ${JSON.stringify(f)}\n\n`);
+          if (!res.writableEnded)
+            res.write(`event: status\ndata: ${JSON.stringify(f)}\n\n`);
         },
         end: () => {
           if (heartbeat) clearInterval(heartbeat);

@@ -1,5 +1,13 @@
-export interface CommentRow { id: string; parentId: string | null; body: string; }
-export interface CommentNode { id: string; body: string; children: CommentNode[]; }
+export interface CommentRow {
+  id: string;
+  parentId: string | null;
+  body: string;
+}
+export interface CommentNode {
+  id: string;
+  body: string;
+  children: CommentNode[];
+}
 
 // Build the forest from a flat product-scoped fetch. O(n): one pass to index, one to link.
 export function assembleTree(rows: CommentRow[]): CommentNode[] {

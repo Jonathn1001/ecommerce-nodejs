@@ -8,69 +8,136 @@ import { assembleTree } from "./comments";
 import { getDiscountAmount } from "./discount";
 
 const log = createLogger("catalog");
-const CreateSchema = z.object({ type: z.string().min(1), name: z.string().min(1), price: z.number().int().positive(), attributes: z.record(z.unknown()) });
-const PatchSchema = z.object({ name: z.string().min(1).optional(), price: z.number().int().positive().optional(), attributes: z.record(z.unknown()).optional() });
-const CommentSchema = z.object({ body: z.string().min(1), parentId: z.string().optional() });
-const DiscountSchema = z.object({
-  code: z.string().min(1), kind: z.enum(["PERCENT", "FIXED"]), value: z.number().int().positive(),
-  minOrder: z.number().int().nonnegative().default(0), maxUses: z.number().int().positive(),
-  maxPerUser: z.number().int().positive(), expiresAt: z.string().datetime(),
+const CreateSchema = z.object({
+  type: z.string().min(1),
+  name: z.string().min(1),
+  price: z.number().int().positive(),
+  attributes: z.record(z.unknown()),
 });
-const ApplySchema = z.object({ userId: z.string().min(1), orderTotal: z.number().int().positive() });
+const PatchSchema = z.object({
+  name: z.string().min(1).optional(),
+  price: z.number().int().positive().optional(),
+  attributes: z.record(z.unknown()).optional(),
+});
+const CommentSchema = z.object({
+  body: z.string().min(1),
+  parentId: z.string().optional(),
+});
+const DiscountSchema = z.object({
+  code: z.string().min(1),
+  kind: z.enum(["PERCENT", "FIXED"]),
+  value: z.number().int().positive(),
+  minOrder: z.number().int().nonnegative().default(0),
+  maxUses: z.number().int().positive(),
+  maxPerUser: z.number().int().positive(),
+  expiresAt: z.string().datetime(),
+});
+const ApplySchema = z.object({
+  userId: z.string().min(1),
+  orderTotal: z.number().int().positive(),
+});
 
 export function createApp(): express.Application {
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
-  app.use(createHealthRouter({ db: async () => void (await prisma.$queryRaw`SELECT 1`) }));
+  app.use(
+    createHealthRouter({ db: async () => void (await prisma.$queryRaw`SELECT 1`) })
+  );
 
   app.post("/products", async (req, res) => {
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid product" });
     try {
-      const r = await prisma.$transaction((tx) => applyCreate(productTx(tx, req.traceId), parsed.data));
+      const r = await prisma.$transaction((tx) =>
+        applyCreate(productTx(tx, req.traceId), parsed.data)
+      );
       if (!r.ok) return res.status(400).json({ error: r.error });
       log.info("product_created", { productId: r.productId, traceId: req.traceId });
       return res.status(201).json({ productId: r.productId });
-    } catch { log.error("product_create_failed", { traceId: req.traceId }); res.status(500).json({ error: "internal error" }); }
+    } catch {
+      log.error("product_create_failed", { traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   app.patch("/products/:id", async (req, res) => {
     const parsed = PatchSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid patch" });
     try {
-      const r = await prisma.$transaction((tx) => applyUpdate(productTx(tx, req.traceId), { id: req.params.id, ...parsed.data }));
-      if (!r.ok) return res.status(r.error === "not_found" ? 404 : 400).json({ error: r.error });
+      const r = await prisma.$transaction((tx) =>
+        applyUpdate(productTx(tx, req.traceId), { id: req.params.id, ...parsed.data })
+      );
+      if (!r.ok)
+        return res.status(r.error === "not_found" ? 404 : 400).json({ error: r.error });
       log.info("product_updated", { productId: req.params.id, traceId: req.traceId });
       return res.status(200).json({ productId: req.params.id });
-    } catch { log.error("product_update_failed", { productId: req.params.id, traceId: req.traceId }); res.status(500).json({ error: "internal error" }); }
+    } catch {
+      log.error("product_update_failed", {
+        productId: req.params.id,
+        traceId: req.traceId,
+      });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   app.get("/products/:id", async (req, res) => {
     const p = await prisma.product.findUnique({ where: { id: req.params.id } });
     if (!p) return res.status(404).json({ error: "not found" });
-    res.json({ id: p.id, type: p.type, name: p.name, price: p.price, version: p.version, attributes: p.attributes });
+    res.json({
+      id: p.id,
+      type: p.type,
+      name: p.name,
+      price: p.price,
+      version: p.version,
+      attributes: p.attributes,
+    });
   });
   app.get("/products", async (_req, res) => {
     const rows = await prisma.product.findMany({ orderBy: { createdAt: "asc" } });
-    res.json(rows.map((p) => ({ id: p.id, type: p.type, name: p.name, price: p.price, version: p.version })));
+    res.json(
+      rows.map((p) => ({
+        id: p.id,
+        type: p.type,
+        name: p.name,
+        price: p.price,
+        version: p.version,
+      }))
+    );
   });
 
   app.post("/products/:id/comments", async (req, res) => {
     const parsed = CommentSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid comment" });
-    const product = await prisma.product.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const product = await prisma.product.findUnique({
+      where: { id: req.params.id },
+      select: { id: true },
+    });
     if (!product) return res.status(404).json({ error: "not found" });
     if (parsed.data.parentId) {
-      const parent = await prisma.comment.findUnique({ where: { id: parsed.data.parentId }, select: { productId: true } });
-      if (!parent || parent.productId !== req.params.id) return res.status(400).json({ error: "bad parent" });
+      const parent = await prisma.comment.findUnique({
+        where: { id: parsed.data.parentId },
+        select: { productId: true },
+      });
+      if (!parent || parent.productId !== req.params.id)
+        return res.status(400).json({ error: "bad parent" });
     }
-    const c = await prisma.comment.create({ data: { productId: req.params.id, parentId: parsed.data.parentId ?? null, body: parsed.data.body } });
+    const c = await prisma.comment.create({
+      data: {
+        productId: req.params.id,
+        parentId: parsed.data.parentId ?? null,
+        body: parsed.data.body,
+      },
+    });
     res.status(201).json({ id: c.id });
   });
 
   app.get("/products/:id/comments", async (req, res) => {
-    const rows = await prisma.comment.findMany({ where: { productId: req.params.id }, orderBy: { createdAt: "asc" }, select: { id: true, parentId: true, body: true } });
+    const rows = await prisma.comment.findMany({
+      where: { productId: req.params.id },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, parentId: true, body: true },
+    });
     res.json(assembleTree(rows));
   });
 
@@ -84,15 +151,27 @@ export function createApp(): express.Application {
     const parsed = DiscountSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid discount" });
     try {
-      const d = await prisma.discount.create({ data: { ...parsed.data, expiresAt: new Date(parsed.data.expiresAt) } });
+      const d = await prisma.discount.create({
+        data: { ...parsed.data, expiresAt: new Date(parsed.data.expiresAt) },
+      });
       res.status(201).json({ code: d.code });
-    } catch { res.status(409).json({ error: "duplicate code" }); }
+    } catch {
+      res.status(409).json({ error: "duplicate code" });
+    }
   });
 
   app.get("/discounts/:code", async (req, res) => {
     const d = await prisma.discount.findUnique({ where: { code: req.params.code } });
     if (!d) return res.status(404).json({ error: "not found" });
-    res.json({ code: d.code, kind: d.kind, value: d.value, minOrder: d.minOrder, maxUses: d.maxUses, maxPerUser: d.maxPerUser, expiresAt: d.expiresAt.toISOString() });
+    res.json({
+      code: d.code,
+      kind: d.kind,
+      value: d.value,
+      minOrder: d.minOrder,
+      maxUses: d.maxUses,
+      maxPerUser: d.maxPerUser,
+      expiresAt: d.expiresAt.toISOString(),
+    });
   });
 
   // Row-locked apply: SELECT ... FOR UPDATE serializes concurrent applies for one code
@@ -103,26 +182,55 @@ export function createApp(): express.Application {
     const { userId, orderTotal } = parsed.data;
     try {
       const result = await prisma.$transaction(async (tx) => {
-        const locked = await tx.$queryRaw<Array<{ id: string; kind: string; value: number; minOrder: number; maxUses: number; maxPerUser: number; expiresAt: Date }>>`
+        const locked = await tx.$queryRaw<
+          Array<{
+            id: string;
+            kind: string;
+            value: number;
+            minOrder: number;
+            maxUses: number;
+            maxPerUser: number;
+            expiresAt: Date;
+          }>
+        >`
           SELECT id, kind, value, "minOrder", "maxUses", "maxPerUser", "expiresAt"
           FROM "Discount" WHERE code = ${req.params.code} FOR UPDATE`;
         if (locked.length === 0) return { status: 404 as const };
         const d = locked[0];
-        const totalUses = await tx.discountRedemption.count({ where: { discountId: d.id } });
-        const userUses = await tx.discountRedemption.count({ where: { discountId: d.id, userId } });
+        const totalUses = await tx.discountRedemption.count({
+          where: { discountId: d.id },
+        });
+        const userUses = await tx.discountRedemption.count({
+          where: { discountId: d.id, userId },
+        });
         const outcome = getDiscountAmount(
-          { kind: d.kind as "PERCENT" | "FIXED", value: d.value, minOrder: d.minOrder, maxUses: d.maxUses, maxPerUser: d.maxPerUser, expiresAt: d.expiresAt },
+          {
+            kind: d.kind as "PERCENT" | "FIXED",
+            value: d.value,
+            minOrder: d.minOrder,
+            maxUses: d.maxUses,
+            maxPerUser: d.maxPerUser,
+            expiresAt: d.expiresAt,
+          },
           { orderTotal, totalUses, userUses, now: new Date() }
         );
-        if ("ineligible" in outcome) return { status: 409 as const, reason: outcome.ineligible };
+        if ("ineligible" in outcome)
+          return { status: 409 as const, reason: outcome.ineligible };
         await tx.discountRedemption.create({ data: { discountId: d.id, userId } });
         return { status: 200 as const, amount: outcome.amount };
       });
       if (result.status === 404) return res.status(404).json({ error: "not found" });
       if (result.status === 409) return res.status(409).json({ error: result.reason });
-      log.info("discount_applied", { code: req.params.code, userId, traceId: req.traceId });
+      log.info("discount_applied", {
+        code: req.params.code,
+        userId,
+        traceId: req.traceId,
+      });
       return res.status(200).json({ amount: result.amount });
-    } catch { log.error("discount_apply_failed", { code: req.params.code, traceId: req.traceId }); res.status(500).json({ error: "internal error" }); }
+    } catch {
+      log.error("discount_apply_failed", { code: req.params.code, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   return app;
