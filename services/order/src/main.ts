@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { handleEvent } from "./consumer";
+import { createOrderListener } from "./sse-listener";
 import { prisma } from "./db";
 import {
   createKafka,
@@ -25,6 +26,9 @@ async function main() {
   const rabbit = await createRabbit();
   await rabbit.assertWorkQueue(CHARGE_QUEUE); // producer-side, idempotent (Order may boot before Payment)
 
+  const listener = createOrderListener(config.DATABASE_URL);
+  await listener.start();
+
   // Relay drains the outbox; ChargePayment rows go to RabbitMQ, order.* to Kafka.
   const relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, {
     intervalMs: 500,
@@ -39,18 +43,21 @@ async function main() {
   await consumer.connect();
   await consumer.run(["inventory.events", "payment.events"], handleEvent);
 
-  const app = createApp();
+  const app = createApp({ sseRegistry: listener.registry });
   const server = app.listen(config.PORT, () =>
     log.info("order_listening", { port: config.PORT })
   );
 
   // Reverse teardown. Effective order:
   //   server.close -> consumer.disconnect -> relay.stop -> rabbit.close
-  //   -> producer.disconnect -> prisma.$disconnect
+  //   -> producer.disconnect -> listener.close -> prisma.$disconnect
   // The relay must stop before its Rabbit send channel closes.
   gracefulShutdown([
     async () => {
       await prisma.$disconnect();
+    },
+    async () => {
+      await listener.close();
     },
     async () => {
       await producer.disconnect();

@@ -4,6 +4,7 @@ import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared"
 import { prisma } from "./db";
 import { placeOrder } from "./place-order";
 import { placeOrderTx } from "./tx-adapters";
+import { SubscriberRegistry, type Sink } from "./sse-listener";
 
 const log = createLogger("order");
 
@@ -25,7 +26,7 @@ function userIdOf(req: express.Request): string | null {
   return raw && raw.length > 0 ? raw : null;
 }
 
-export function createApp(): express.Application {
+export function createApp(deps: { sseRegistry?: SubscriberRegistry } = {}): express.Application {
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
@@ -214,6 +215,47 @@ export function createApp(): express.Application {
       log.error("order_get_failed", { orderId: req.params.id, traceId: req.traceId });
       res.status(500).json({ error: "internal error" });
     }
+  });
+
+  // Live order-status stream (SSE). One frame per transition; closes on terminal.
+  app.get("/orders/:id/stream", async (req, res) => {
+    const registry = deps.sseRegistry;
+    if (!registry) return res.status(503).json({ error: "stream unavailable" });
+    const id = req.params.id;
+
+    // 404 before any SSE headers.
+    const exists = await prisma.order.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return res.status(404).json({ error: "not found" });
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    const sink: Sink = {
+      send: (f) => res.write(`event: status\ndata: ${JSON.stringify(f)}\n\n`),
+      end: () => res.end(),
+    };
+    // Register BEFORE reading current status so a transition landing during the
+    // read is still delivered (a rare initial==first-notify overlap is deduped
+    // client-side by status).
+    const unsubscribe = registry.subscribe(id, sink);
+
+    const current = await prisma.order.findUnique({ where: { id }, select: { status: true } });
+    if (!res.writableEnded && current) {
+      sink.send({ orderId: id, status: current.status });
+      if (current.status === "CONFIRMED" || current.status === "CANCELLED") {
+        unsubscribe();
+        return res.end();
+      }
+    }
+
+    const heartbeat = setInterval(() => res.write(":keepalive\n\n"), 15000);
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
   });
 
   return app;
