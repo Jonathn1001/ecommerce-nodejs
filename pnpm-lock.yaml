@@ -92,6 +92,40 @@ importers:
         specifier: ^7.0.0
         version: 7.2.2
 
+  services/catalog:
+    dependencies:
+      '@ecom/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@ecom/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@prisma/client':
+        specifier: ^6.1.0
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      express:
+        specifier: ^4.21.0
+        version: 4.22.2
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/supertest':
+        specifier: ^6.0.2
+        version: 6.0.3
+      prisma:
+        specifier: ^6.1.0
+        version: 6.19.3(typescript@5.9.3)
+      supertest:
+        specifier: ^7.0.0
+        version: 7.2.2
+
   services/hello:
     dependencies:
       '@ecom/contracts':
