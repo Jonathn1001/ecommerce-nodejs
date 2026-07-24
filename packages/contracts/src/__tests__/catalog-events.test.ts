@@ -38,6 +38,9 @@ describe("catalog contracts", () => {
         version: 0,
       }).success
     ).toBe(false);
+    expect(
+      ProductCreatedPayloadSchema.safeParse({ name: "x", price: 500, version: 1 }).success
+    ).toBe(false); // missing productId
   });
   it("price_changed payload validates {productId,price,version}", () => {
     expect(

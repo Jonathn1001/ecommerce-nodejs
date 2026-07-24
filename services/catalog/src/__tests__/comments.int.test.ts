@@ -65,4 +65,15 @@ describe("catalog comments (integration)", () => {
       (await request(app).post(`/products/ghost/comments`).send({ body: "x" })).status
     ).toBe(404);
   });
+
+  it("empty parentId -> 400 (does not crash the process)", async () => {
+    const pid = await seedProduct();
+    expect(
+      (
+        await request(app)
+          .post(`/products/${pid}/comments`)
+          .send({ body: "x", parentId: "" })
+      ).status
+    ).toBe(400);
+  });
 });

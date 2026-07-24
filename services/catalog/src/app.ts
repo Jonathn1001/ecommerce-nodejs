@@ -21,7 +21,7 @@ const PatchSchema = z.object({
 });
 const CommentSchema = z.object({
   body: z.string().min(1),
-  parentId: z.string().optional(),
+  parentId: z.string().min(1).optional(),
 });
 const DiscountSchema = z.object({
   code: z.string().min(1),
@@ -82,69 +82,94 @@ export function createApp(): express.Application {
   });
 
   app.get("/products/:id", async (req, res) => {
-    const p = await prisma.product.findUnique({ where: { id: req.params.id } });
-    if (!p) return res.status(404).json({ error: "not found" });
-    res.json({
-      id: p.id,
-      type: p.type,
-      name: p.name,
-      price: p.price,
-      version: p.version,
-      attributes: p.attributes,
-    });
-  });
-  app.get("/products", async (_req, res) => {
-    const rows = await prisma.product.findMany({ orderBy: { createdAt: "asc" } });
-    res.json(
-      rows.map((p) => ({
+    try {
+      const p = await prisma.product.findUnique({ where: { id: req.params.id } });
+      if (!p) return res.status(404).json({ error: "not found" });
+      res.json({
         id: p.id,
         type: p.type,
         name: p.name,
         price: p.price,
         version: p.version,
-      }))
-    );
+        attributes: p.attributes,
+      });
+    } catch {
+      log.error("product_get_failed", { productId: req.params.id, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+  app.get("/products", async (req, res) => {
+    try {
+      const rows = await prisma.product.findMany({ orderBy: { createdAt: "asc" } });
+      res.json(
+        rows.map((p) => ({
+          id: p.id,
+          type: p.type,
+          name: p.name,
+          price: p.price,
+          version: p.version,
+        }))
+      );
+    } catch {
+      log.error("product_list_failed", { traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   app.post("/products/:id/comments", async (req, res) => {
     const parsed = CommentSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid comment" });
-    const product = await prisma.product.findUnique({
-      where: { id: req.params.id },
-      select: { id: true },
-    });
-    if (!product) return res.status(404).json({ error: "not found" });
-    if (parsed.data.parentId) {
-      const parent = await prisma.comment.findUnique({
-        where: { id: parsed.data.parentId },
-        select: { productId: true },
+    try {
+      const product = await prisma.product.findUnique({
+        where: { id: req.params.id },
+        select: { id: true },
       });
-      if (!parent || parent.productId !== req.params.id)
-        return res.status(400).json({ error: "bad parent" });
+      if (!product) return res.status(404).json({ error: "not found" });
+      if (parsed.data.parentId) {
+        const parent = await prisma.comment.findUnique({
+          where: { id: parsed.data.parentId },
+          select: { productId: true },
+        });
+        if (!parent || parent.productId !== req.params.id)
+          return res.status(400).json({ error: "bad parent" });
+      }
+      const c = await prisma.comment.create({
+        data: {
+          productId: req.params.id,
+          parentId: parsed.data.parentId ?? null,
+          body: parsed.data.body,
+        },
+      });
+      res.status(201).json({ id: c.id });
+    } catch {
+      log.error("comment_create_failed", { productId: req.params.id, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
     }
-    const c = await prisma.comment.create({
-      data: {
-        productId: req.params.id,
-        parentId: parsed.data.parentId ?? null,
-        body: parsed.data.body,
-      },
-    });
-    res.status(201).json({ id: c.id });
   });
 
   app.get("/products/:id/comments", async (req, res) => {
-    const rows = await prisma.comment.findMany({
-      where: { productId: req.params.id },
-      orderBy: { createdAt: "asc" },
-      select: { id: true, parentId: true, body: true },
-    });
-    res.json(assembleTree(rows));
+    try {
+      const rows = await prisma.comment.findMany({
+        where: { productId: req.params.id },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, parentId: true, body: true },
+      });
+      res.json(assembleTree(rows));
+    } catch {
+      log.error("comment_list_failed", { productId: req.params.id, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   app.delete("/comments/:id", async (req, res) => {
-    const r = await prisma.comment.deleteMany({ where: { id: req.params.id } }); // cascade removes the subtree
-    if (r.count === 0) return res.status(404).json({ error: "not found" });
-    res.status(200).json({ id: req.params.id });
+    try {
+      const r = await prisma.comment.deleteMany({ where: { id: req.params.id } }); // cascade removes the subtree
+      if (r.count === 0) return res.status(404).json({ error: "not found" });
+      res.status(200).json({ id: req.params.id });
+    } catch {
+      log.error("comment_delete_failed", { id: req.params.id, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   app.post("/discounts", async (req, res) => {
@@ -161,17 +186,22 @@ export function createApp(): express.Application {
   });
 
   app.get("/discounts/:code", async (req, res) => {
-    const d = await prisma.discount.findUnique({ where: { code: req.params.code } });
-    if (!d) return res.status(404).json({ error: "not found" });
-    res.json({
-      code: d.code,
-      kind: d.kind,
-      value: d.value,
-      minOrder: d.minOrder,
-      maxUses: d.maxUses,
-      maxPerUser: d.maxPerUser,
-      expiresAt: d.expiresAt.toISOString(),
-    });
+    try {
+      const d = await prisma.discount.findUnique({ where: { code: req.params.code } });
+      if (!d) return res.status(404).json({ error: "not found" });
+      res.json({
+        code: d.code,
+        kind: d.kind,
+        value: d.value,
+        minOrder: d.minOrder,
+        maxUses: d.maxUses,
+        maxPerUser: d.maxPerUser,
+        expiresAt: d.expiresAt.toISOString(),
+      });
+    } catch {
+      log.error("discount_get_failed", { code: req.params.code, traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
   });
 
   // Row-locked apply: SELECT ... FOR UPDATE serializes concurrent applies for one code
