@@ -1,10 +1,13 @@
 import { CHARGE_PAYMENT, PAYMENT_SUCCEEDED, PAYMENT_FAILED } from "@ecom/contracts";
 
-// Deterministic simulated gateway (no real money). Magic amounts: a minor-units
-// total ending in 01 declines; 99 is reserved for TIMEOUT (wired in 3c) so it
-// currently succeeds; everything else succeeds.
-export function simulateCharge(amount: number): "SUCCEEDED" | "FAILED" {
-  return amount % 100 === 1 ? "FAILED" : "SUCCEEDED";
+// Deterministic simulated gateway (no real money). Magic minor-units totals:
+//   %100==1  -> FAILED (declined)
+//   %100==99 -> PROCESSING (async — resolved later by POST /webhooks/payment)
+//   else     -> SUCCEEDED
+export function simulateCharge(amount: number): "SUCCEEDED" | "FAILED" | "PROCESSING" {
+  if (amount % 100 === 1) return "FAILED";
+  if (amount % 100 === 99) return "PROCESSING";
+  return "SUCCEEDED";
 }
 
 export interface ChargeTx {
@@ -15,7 +18,8 @@ export interface ChargeTx {
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
 }
 
-export type ChargeOutcome = "DUPLICATE" | "ALREADY_CHARGED" | "SUCCEEDED" | "FAILED";
+export type ChargeOutcome =
+  "DUPLICATE" | "ALREADY_CHARGED" | "SUCCEEDED" | "FAILED" | "PROCESSING";
 
 // Domain core over a tx-bound port (mirrors inventory/reserve.ts). markProcessed
 // first (the command CREATES the payment — no pre-existing aggregate to load);
@@ -39,11 +43,13 @@ export async function chargeOrder(
       paymentId,
       amount: p.amount,
     });
-  } else {
+  } else if (outcome === "FAILED") {
     await tx.enqueue(PAYMENT_FAILED, p.orderId, {
       orderId: p.orderId,
       reason: "CARD_DECLINED",
     });
   }
+  // PROCESSING: recorded (payment + attempt) but emits nothing — the inbound
+  // webhook finalizes it later (Task 3).
   return outcome;
 }

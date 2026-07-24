@@ -6,6 +6,7 @@ function fakeTx(seed: { existingOrders?: string[] } = {}) {
   const processed = new Set<string>();
   const payments = new Set<string>(seed.existingOrders ?? []);
   const emitted: Array<{ type: string; orderId: string; payload: unknown }> = [];
+  const attempts: string[] = [];
   let seq = 0;
   const tx: ChargeTx = {
     async markProcessed(eventId) {
@@ -20,12 +21,14 @@ function fakeTx(seed: { existingOrders?: string[] } = {}) {
       payments.add(orderId);
       return `pay_${++seq}`;
     },
-    async createAttempt() {},
+    async createAttempt(_paymentId, outcome) {
+      attempts.push(outcome);
+    },
     async enqueue(type, orderId, payload) {
       emitted.push({ type, orderId, payload });
     },
   };
-  return { tx, emitted, payments, processed };
+  return { tx, emitted, payments, processed, attempts };
 }
 
 describe("simulateCharge (magic amounts)", () => {
@@ -33,9 +36,17 @@ describe("simulateCharge (magic amounts)", () => {
     expect(simulateCharge(100)).toBe("SUCCEEDED");
     expect(simulateCharge(101)).toBe("FAILED");
     expect(simulateCharge(2501)).toBe("FAILED");
-    expect(simulateCharge(199)).toBe("SUCCEEDED");
+    expect(simulateCharge(199)).toBe("PROCESSING"); // 3c: ...99 now resolves async
     expect(simulateCharge(1)).toBe("FAILED");
-    expect(simulateCharge(99)).toBe("SUCCEEDED"); // 99 reserved for 3c TIMEOUT, succeeds now
+    expect(simulateCharge(99)).toBe("PROCESSING"); // 3c: 99 now resolves async via webhook
+  });
+});
+
+describe("simulateCharge — PROCESSING (async timeout)", () => {
+  it("routes %100==99 to PROCESSING, %100==1 to FAILED, else SUCCEEDED", () => {
+    expect(simulateCharge(599)).toBe("PROCESSING");
+    expect(simulateCharge(501)).toBe("FAILED");
+    expect(simulateCharge(500)).toBe("SUCCEEDED");
   });
 });
 
@@ -95,5 +106,15 @@ describe("chargeOrder", () => {
     });
     expect(outcome).toBe("ALREADY_CHARGED");
     expect(f.emitted).toEqual([]);
+  });
+});
+
+describe("chargeOrder — PROCESSING branch", () => {
+  it("records PROCESSING (payment + attempt) and emits NO event", async () => {
+    const f = fakeTx();
+    const outcome = await chargeOrder(f.tx, { eventId: "e5", orderId: "o5", amount: 599 });
+    expect(outcome).toBe("PROCESSING");
+    expect(f.attempts).toEqual(["PROCESSING"]);
+    expect(f.emitted).toEqual([]); // nothing published until the webhook resolves it
   });
 });

@@ -8,8 +8,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// One payment per order. orderId is the provider idempotency key: a retried
-// ChargePayment cannot double-charge. status in {SUCCEEDED, FAILED} (sync in 3a).
+// status in {PROCESSING, SUCCEEDED, FAILED, REFUNDED}. orderId is the provider
+// idempotency key; a retried ChargePayment cannot double-charge.
 model Payment {
   id        String           @id @default(uuid())
   orderId   String           @unique
@@ -20,7 +20,7 @@ model Payment {
   updatedAt DateTime         @updatedAt
 }
 
-// One row per gateway call. 3a writes exactly one; 3c's retry/webhook appends.
+// One row per gateway call/resolution. outcome in {PROCESSING, SUCCEEDED, FAILED, REFUNDED}.
 model PaymentAttempt {
   id        String   @id @default(uuid())
   paymentId String
