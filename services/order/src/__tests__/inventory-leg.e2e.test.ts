@@ -15,7 +15,7 @@ import {
 const INVENTORY_TOPIC = "inventory.events";
 const app = createApp();
 
-async function placeOrder(): Promise<string> {
+async function placeOrder(): Promise<{ orderId: string; userId: string }> {
   const userId = `u_${randomUUID()}`;
   const pid = `p_${randomUUID()}`;
   await prisma.catalogReadModel.upsert({
@@ -28,16 +28,21 @@ async function placeOrder(): Promise<string> {
     .set("x-user-id", userId)
     .send({ productId: pid, quantity: 2 });
   const res = await request(app).post("/orders").set("x-user-id", userId);
-  return res.body.orderId as string;
+  return { orderId: res.body.orderId as string, userId };
 }
-async function waitForStatus(orderId: string, want: string): Promise<string> {
+async function waitForStatus(
+  orderId: string,
+  want: string,
+  userId: string
+): Promise<string> {
   const deadline = Date.now() + 25_000;
+  const read = () => request(app).get(`/orders/${orderId}`).set("x-user-id", userId);
   while (Date.now() < deadline) {
-    const got = await request(app).get(`/orders/${orderId}`);
+    const got = await read();
     if (got.body.status === want) return got.body.status;
     await new Promise((r) => setTimeout(r, 400));
   }
-  return (await request(app).get(`/orders/${orderId}`)).body.status;
+  return (await read()).body.status;
 }
 
 describe("order inventory-leg slice e2e (needs docker compose up + migrated)", () => {
@@ -66,7 +71,7 @@ describe("order inventory-leg slice e2e (needs docker compose up + migrated)", (
   });
 
   it("InventoryReserved on the wire drives PENDING -> AWAITING_PAYMENT", async () => {
-    const orderId = await placeOrder();
+    const { orderId, userId } = await placeOrder();
     await producer.publish(
       INVENTORY_TOPIC,
       makeEnvelope({
@@ -77,11 +82,13 @@ describe("order inventory-leg slice e2e (needs docker compose up + migrated)", (
         payload: { orderId, items: [{ productId: "p1", quantity: 2 }] },
       })
     );
-    expect(await waitForStatus(orderId, "AWAITING_PAYMENT")).toBe("AWAITING_PAYMENT");
+    expect(await waitForStatus(orderId, "AWAITING_PAYMENT", userId)).toBe(
+      "AWAITING_PAYMENT"
+    );
   }, 30000);
 
   it("InventoryReservationFailed drives -> CANCELLED and emits OrderCancelled", async () => {
-    const orderId = await placeOrder();
+    const { orderId, userId } = await placeOrder();
     await producer.publish(
       INVENTORY_TOPIC,
       makeEnvelope({
@@ -92,7 +99,7 @@ describe("order inventory-leg slice e2e (needs docker compose up + migrated)", (
         payload: { orderId, reason: "INSUFFICIENT_STOCK" },
       })
     );
-    expect(await waitForStatus(orderId, "CANCELLED")).toBe("CANCELLED");
+    expect(await waitForStatus(orderId, "CANCELLED", userId)).toBe("CANCELLED");
     expect(
       await prisma.outbox.count({
         where: { aggregateId: orderId, type: ORDER_CANCELLED },

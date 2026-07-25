@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { randomUUID } from "crypto";
 import { createApp } from "../app";
-import { outboxPort } from "../outbox-adapter";
+import { scopedOutboxPort } from "./scoped-outbox";
 import { prisma } from "../db";
 import {
   createKafka,
@@ -14,6 +14,7 @@ import { ORDER_PLACED, type EventEnvelope } from "@ecom/contracts";
 
 const ORDER_TOPIC = "order.events";
 const app = createApp();
+const ownOrders = new Set<string>();
 
 describe("order slice e2e (needs docker compose up + migrated)", () => {
   const kafka = createKafka("order-e2e");
@@ -32,9 +33,14 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
     await admin.disconnect();
 
     await producer.connect();
-    relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, {
-      intervalMs: 300,
-    });
+    relay = startOutboxRelay(
+      scopedOutboxPort((id) => ownOrders.has(id)),
+      producer,
+      (t) => `${t}.events`,
+      {
+        intervalMs: 300,
+      }
+    );
 
     await orderConsumer.connect();
     await orderConsumer.run([ORDER_TOPIC], async (env) => {
@@ -63,6 +69,7 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
       .send({ productId: pid, quantity: 4 });
 
     const res = await request(app).post("/orders").set("x-user-id", userId);
+    ownOrders.add(res.body.orderId as string);
     expect(res.status).toBe(201);
     const orderId = res.body.orderId as string;
 

@@ -81,12 +81,16 @@ describe("order checkout (integration — needs docker compose up + migrated)", 
     await seedPrice(pid, 300);
     await addToCart(userId, pid, 2);
     const placed = await request(app).post("/orders").set("x-user-id", userId);
-    const got = await request(app).get(`/orders/${placed.body.orderId}`);
+    const got = await request(app)
+      .get(`/orders/${placed.body.orderId}`)
+      .set("x-user-id", userId);
     expect(got.status).toBe(200);
     expect(got.body.totalPrice).toBe(600);
     expect(got.body.items).toHaveLength(1);
 
-    const missing = await request(app).get(`/orders/order_${randomUUID()}`);
+    const missing = await request(app)
+      .get(`/orders/order_${randomUUID()}`)
+      .set("x-user-id", userId);
     expect(missing.status).toBe(404);
   });
 });

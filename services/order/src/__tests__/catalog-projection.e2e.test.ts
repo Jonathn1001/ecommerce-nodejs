@@ -52,14 +52,17 @@ describe("cross-service catalog projection e2e (needs compose up + migrated)", (
   }
 
   // Adds pid to a fresh user's cart and places the order; returns the orderId.
-  async function placeForProduct(pid: string, quantity: number): Promise<string> {
+  async function placeForProduct(
+    pid: string,
+    quantity: number
+  ): Promise<{ orderId: string; userId: string }> {
     const userId = `u_${randomUUID()}`;
     await request(app)
       .post("/cart/items")
       .set("x-user-id", userId)
       .send({ productId: pid, quantity });
     const res = await request(app).post("/orders").set("x-user-id", userId);
-    return res.body.orderId as string;
+    return { orderId: res.body.orderId as string, userId };
   }
 
   it("projected product prices a real order (no admin seed)", async () => {
@@ -81,8 +84,9 @@ describe("cross-service catalog projection e2e (needs compose up + migrated)", (
     );
 
     // place() adds pid to cart + posts /orders; the order totals from the projected price
-    const orderId = await placeForProduct(pid, 1);
-    const order = (await request(app).get(`/orders/${orderId}`)).body;
+    const { orderId, userId } = await placeForProduct(pid, 1);
+    const order = (await request(app).get(`/orders/${orderId}`).set("x-user-id", userId))
+      .body;
     expect(order.totalPrice).toBe(750);
   }, 30000);
 
@@ -120,8 +124,9 @@ describe("cross-service catalog projection e2e (needs compose up + migrated)", (
           ?.price === 900
     );
 
-    const orderId = await placeForProduct(pid, 1);
-    const order = (await request(app).get(`/orders/${orderId}`)).body;
+    const { orderId, userId } = await placeForProduct(pid, 1);
+    const order = (await request(app).get(`/orders/${orderId}`).set("x-user-id", userId))
+      .body;
     expect(order.totalPrice).toBe(900);
   }, 30000);
 });

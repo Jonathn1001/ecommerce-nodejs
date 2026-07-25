@@ -119,3 +119,15 @@ jobs:
         run: |
           pnpm --filter @ecom/notification exec prisma migrate deploy
           pnpm vitest run services/notification
+      # Identity signs with a throwaway keypair generated per run; the gateway suite makes
+      # its own, so it needs no key from the environment and no database at all.
+      - name: Identity service (migrate + seed + int)
+        env:
+          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/identity
+          KAFKA_BROKERS: localhost:9092
+        run: |
+          pnpm --filter @ecom/identity exec prisma migrate deploy
+          pnpm --filter @ecom/identity seed
+          pnpm vitest run services/identity
+      - name: Gateway service (stub-backed int)
+        run: pnpm vitest run services/gateway

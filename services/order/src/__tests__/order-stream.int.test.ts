@@ -13,10 +13,14 @@ const app = createApp({ sseRegistry: listener.registry });
 let server: http.Server;
 let baseUrl: string;
 
-async function seedOrder(status: string, totalPrice = 500): Promise<string> {
+async function seedOrder(
+  status: string,
+  totalPrice = 500,
+  userId = `u_${randomUUID()}`
+): Promise<{ id: string; userId: string }> {
   const o = await prisma.order.create({
     data: {
-      userId: `u_${randomUUID()}`,
+      userId,
       status,
       totalPrice,
       items: {
@@ -24,43 +28,49 @@ async function seedOrder(status: string, totalPrice = 500): Promise<string> {
       },
     },
   });
-  return o.id;
+  return { id: o.id, userId };
 }
 
 // Collect SSE data frames until `until` matches or a deadline; then destroy.
 function streamFrames(
   path: string,
   until: (s: string) => boolean,
+  userId: string,
   ms = 8000
 ): Promise<any[]> {
   return new Promise((resolve, reject) => {
-    const req = http.get(`${baseUrl}${path}`, (res) => {
-      const frames: any[] = [];
-      let buf = "";
-      const timer = setTimeout(() => {
-        req.destroy();
-        resolve(frames);
-      }, ms);
-      res.on("data", (chunk) => {
-        buf += chunk.toString();
-        let i;
-        while ((i = buf.indexOf("\n\n")) >= 0) {
-          const block = buf.slice(0, i);
-          buf = buf.slice(i + 2);
-          const line = block.split("\n").find((l) => l.startsWith("data: "));
-          if (line) {
-            const frame = JSON.parse(line.slice(6));
-            frames.push(frame);
-            if (until(frame.status)) {
-              clearTimeout(timer);
-              req.destroy();
-              resolve(frames);
+    // The gateway injects this header in production; here the test plays that role.
+    const req = http.get(
+      `${baseUrl}${path}`,
+      { headers: { "x-user-id": userId } },
+      (res) => {
+        const frames: any[] = [];
+        let buf = "";
+        const timer = setTimeout(() => {
+          req.destroy();
+          resolve(frames);
+        }, ms);
+        res.on("data", (chunk) => {
+          buf += chunk.toString();
+          let i;
+          while ((i = buf.indexOf("\n\n")) >= 0) {
+            const block = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            const line = block.split("\n").find((l) => l.startsWith("data: "));
+            if (line) {
+              const frame = JSON.parse(line.slice(6));
+              frames.push(frame);
+              if (until(frame.status)) {
+                clearTimeout(timer);
+                req.destroy();
+                resolve(frames);
+              }
             }
           }
-        }
-      });
-      res.on("error", () => {});
-    });
+        });
+        res.on("error", () => {});
+      }
+    );
     req.on("error", reject);
   });
 }
@@ -80,8 +90,12 @@ describe("order SSE stream (integration — needs compose up + migrated)", () =>
   });
 
   it("streams the initial status then a live transition, and closes on terminal", async () => {
-    const id = await seedOrder("AWAITING_PAYMENT");
-    const framesP = streamFrames(`/orders/${id}/stream`, (s) => s === "CONFIRMED");
+    const { id, userId } = await seedOrder("AWAITING_PAYMENT");
+    const framesP = streamFrames(
+      `/orders/${id}/stream`,
+      (s) => s === "CONFIRMED",
+      userId
+    );
     await new Promise((r) => setTimeout(r, 300)); // let the stream subscribe
     await handleEvent(
       makeEnvelope({
@@ -100,10 +114,14 @@ describe("order SSE stream (integration — needs compose up + migrated)", () =>
 
   it("404 for an unknown order", async () => {
     const status = await new Promise<number>((resolve) => {
-      http.get(`${baseUrl}/orders/o_${randomUUID()}/stream`, (res) => {
-        resolve(res.statusCode ?? 0);
-        res.destroy();
-      });
+      http.get(
+        `${baseUrl}/orders/o_${randomUUID()}/stream`,
+        { headers: { "x-user-id": `u_${randomUUID()}` } },
+        (res) => {
+          resolve(res.statusCode ?? 0);
+          res.destroy();
+        }
+      );
     });
     expect(status).toBe(404);
   });

@@ -1,0 +1,41 @@
+# Prod-shaped overlay: closes every service port except the gateway's.
+#
+#   cp docker-compose.example.yml docker-compose.yml
+#   cp docker-compose.prod.example.yml docker-compose.prod.yml
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile app up -d
+#
+# This overlay is what makes the Phase-6 trust model real. Services accept `x-user-id` from
+# anyone who can reach them; the gateway is trustworthy only because it is the ONLY reachable
+# entry point. With ports published (the default dev file) a local caller can still bypass it.
+services:
+  # Datastores and brokers are internal-only too: in this shape nothing but the gateway is
+  # reachable from the host, so a bypass has to come from inside the compose network.
+  postgres:
+    ports: !reset []
+  kafka:
+    ports: !reset []
+  rabbitmq:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  mailpit:
+    ports: !reset []
+
+  hello:
+    ports: !reset []
+  inventory:
+    ports: !reset []
+  order:
+    ports: !reset []
+  payment:
+    ports: !reset []
+  catalog:
+    ports: !reset []
+  notification:
+    ports: !reset []
+  identity:
+    ports: !reset []
+  gateway:
+    environment:
+      COOKIE_SECURE: "true" # cookies only over https once a TLS terminator is in front
+    ports: ["8000:8000"]

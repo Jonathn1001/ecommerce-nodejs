@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { randomUUID } from "crypto";
 import { createApp } from "../app";
-import { outboxPort } from "../outbox-adapter";
+import { scopedOutboxPort } from "./scoped-outbox";
 import { handleEvent } from "../consumer";
 import { prisma } from "../db";
 import {
@@ -22,6 +22,7 @@ import {
 } from "@ecom/contracts";
 
 const CHARGE_QUEUE = `payment.charge.e2e.${Date.now()}`;
+const ownOrders = new Set<string>();
 const app = createApp();
 
 describe("order payment-leg e2e (needs compose up + migrated)", () => {
@@ -45,13 +46,25 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
     rabbit = await createRabbit();
     await rabbit.assertWorkQueue(CHARGE_QUEUE);
     // relay routes Order's ChargePayment rows to the isolated e2e queue
-    relay = startOutboxRelay(outboxPort, producer, (t) => `${t}.events`, {
-      intervalMs: 300,
-      commands: {
-        sender: rabbit,
-        queueFor: (r) => (r.type === CHARGE_PAYMENT ? CHARGE_QUEUE : null),
-      },
-    });
+    relay = startOutboxRelay(
+      scopedOutboxPort((id) => ownOrders.has(id)),
+      producer,
+      (t) => `${t}.events`,
+      {
+        intervalMs: 300,
+        commands: {
+          sender: rabbit,
+          // Scoped to THIS suite's orders: a bare type filter also grabs the sibling e2e
+          // file's ChargePayment rows when vitest runs them in parallel, and whichever relay
+          // polls first wins — the other test then waits forever for a command that was
+          // delivered to someone else's queue.
+          queueFor: (r) =>
+            r.type === CHARGE_PAYMENT && ownOrders.has(r.aggregateId)
+              ? CHARGE_QUEUE
+              : null,
+        },
+      }
+    );
     await consumer.connect();
     await consumer.run(["inventory.events", "payment.events"], handleEvent);
   });
@@ -63,7 +76,7 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
     await prisma.$disconnect();
   });
 
-  async function place(total: number): Promise<string> {
+  async function place(total: number): Promise<{ orderId: string; userId: string }> {
     const userId = `u_${randomUUID()}`;
     const pid = `p_${randomUUID()}`;
     await prisma.catalogReadModel.upsert({
@@ -76,16 +89,19 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
       .set("x-user-id", userId)
       .send({ productId: pid, quantity: 1 });
     const res = await request(app).post("/orders").set("x-user-id", userId);
-    return res.body.orderId as string;
+    ownOrders.add(res.body.orderId as string);
+    return { orderId: res.body.orderId as string, userId };
   }
-  async function waitStatus(id: string, want: string): Promise<string> {
+  async function waitStatus(id: string, want: string, userId: string): Promise<string> {
     const deadline = Date.now() + 25_000;
+    const read = async () =>
+      (await request(app).get(`/orders/${id}`).set("x-user-id", userId)).body.status;
     while (Date.now() < deadline) {
-      const s = (await request(app).get(`/orders/${id}`)).body.status;
+      const s = await read();
       if (s === want) return s;
       await new Promise((r) => setTimeout(r, 400));
     }
-    return (await request(app).get(`/orders/${id}`)).body.status;
+    return read();
   }
   const reserved = (id: string): EventEnvelope =>
     makeEnvelope({
@@ -97,9 +113,9 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
     });
 
   it("confirm leg: reserved -> ChargePayment enqueued -> PaymentSucceeded -> CONFIRMED", async () => {
-    const id = await place(500);
+    const { orderId: id, userId } = await place(500);
     await producer.publish("inventory.events", reserved(id));
-    expect(await waitStatus(id, "AWAITING_PAYMENT")).toBe("AWAITING_PAYMENT");
+    expect(await waitStatus(id, "AWAITING_PAYMENT", userId)).toBe("AWAITING_PAYMENT");
     // the ChargePayment was routed to the isolated queue (real Rabbit round-trip)
     const cmd = await rabbit.consumeDlqOnce(CHARGE_QUEUE, 10_000);
     expect(cmd?.type).toBe(CHARGE_PAYMENT);
@@ -114,13 +130,13 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
         payload: { orderId: id, paymentId: "pay_1", amount: 500 },
       })
     );
-    expect(await waitStatus(id, "CONFIRMED")).toBe("CONFIRMED");
+    expect(await waitStatus(id, "CONFIRMED", userId)).toBe("CONFIRMED");
   }, 30000);
 
   it("compensation leg: reserved -> PaymentFailed -> CANCELLED", async () => {
-    const id = await place(600);
+    const { orderId: id, userId } = await place(600);
     await producer.publish("inventory.events", reserved(id));
-    expect(await waitStatus(id, "AWAITING_PAYMENT")).toBe("AWAITING_PAYMENT");
+    expect(await waitStatus(id, "AWAITING_PAYMENT", userId)).toBe("AWAITING_PAYMENT");
     await producer.publish(
       "payment.events",
       makeEnvelope({
@@ -131,6 +147,6 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
         payload: { orderId: id, reason: "CARD_DECLINED" },
       })
     );
-    expect(await waitStatus(id, "CANCELLED")).toBe("CANCELLED");
+    expect(await waitStatus(id, "CANCELLED", userId)).toBe("CANCELLED");
   }, 30000);
 });

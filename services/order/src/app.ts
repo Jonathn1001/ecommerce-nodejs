@@ -14,8 +14,9 @@ const AddItemSchema = z.object({
 });
 const SetQtySchema = z.object({ quantity: z.number().int().min(0) });
 
-// Temporary auth stand-in: the caller's identity is the x-user-id header until
-// Gateway/Identity provide real JWT-over-cookie auth.
+// The caller's identity is the x-user-id header, which ONLY the gateway may set: it strips
+// any client-supplied copy before injecting the value it verified from the JWT (Phase 6).
+// Direct access to this port is closed in the prod compose profile.
 function userIdOf(req: express.Request): string | null {
   const raw = req.header("x-user-id");
   return raw && raw.length > 0 ? raw : null;
@@ -171,12 +172,17 @@ export function createApp(
   });
 
   app.get("/orders/:id", async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(400).json({ error: "missing x-user-id" });
     try {
       const order = await prisma.order.findUnique({
         where: { id: req.params.id },
         include: { items: true },
       });
-      if (!order) return res.status(404).json({ error: "not found" });
+      // Someone else's order is reported as absent, not forbidden — a 403 would confirm the
+      // id exists and make order ids enumerable.
+      if (!order || order.userId !== userId)
+        return res.status(404).json({ error: "not found" });
       res.json({
         id: order.id,
         userId: order.userId,
@@ -200,16 +206,20 @@ export function createApp(
     const registry = deps.sseRegistry;
     if (!registry) return res.status(503).json({ error: "stream unavailable" });
     const id = req.params.id;
+    const userId = userIdOf(req);
+    if (!userId) return res.status(400).json({ error: "missing x-user-id" });
     let unsubscribe: (() => void) | null = null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
 
     try {
-      // 404 before any SSE headers.
+      // 404 before any SSE headers — and someone else's order is 404 too, so a stream
+      // cannot be used to probe for ids the caller does not own.
       const exists = await prisma.order.findUnique({
         where: { id },
-        select: { id: true },
+        select: { id: true, userId: true },
       });
-      if (!exists) return res.status(404).json({ error: "not found" });
+      if (!exists || exists.userId !== userId)
+        return res.status(404).json({ error: "not found" });
 
       res.writeHead(200, {
         "Content-Type": "text/event-stream",

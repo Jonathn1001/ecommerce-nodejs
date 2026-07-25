@@ -217,5 +217,60 @@ services:
       timeout: 5s
       retries: 10
 
+  identity:
+    profiles: ["app"]
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/identity
+      KAFKA_BROKERS: kafka:19092
+      # Generate the pair with services/identity/scripts/gen-jwt-keypair.sh; both values are
+      # read from the gitignored compose environment file at the repo root.
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      ACCESS_TTL: 15m
+      REFRESH_TTL_DAYS: 7
+      PORT: 3006
+    ports: ["3006:3006"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3006/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # The only service a browser should reach. In the `prod` profile it is also the only one
+  # publishing a port — that network isolation is what makes the gateway's injected
+  # x-user-id header trustworthy.
+  gateway:
+    profiles: ["app"]
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    environment:
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      IDENTITY_URL: http://identity:3006
+      ORDER_URL: http://order:3002
+      CATALOG_URL: http://catalog:3004
+      PAYMENT_URL: http://payment:3003
+      GRANTS_TTL_MS: 60000
+      COOKIE_SECURE: "false"
+      PORT: 8000
+    ports: ["8000:8000"]
+    depends_on:
+      identity: { condition: service_healthy }
+      order: { condition: service_healthy }
+      catalog: { condition: service_healthy }
+      payment: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
