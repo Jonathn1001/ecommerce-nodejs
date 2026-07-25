@@ -30,8 +30,10 @@
   cookie set/refresh, double-submit CSRF, `express-rate-limit`, `helmet`, RBAC
   enforcement from a grants snapshot, SSE pass-through.
 - Contracts: `IDENTITY_USER_REGISTERED` + payload schema.
-- Retrofit: Catalog admin mutations require an injected admin role; Order continues to
-  read `x-user-id` but only the gateway may set it. Prod compose profile publishes the
+- Retrofit: Catalog admin mutations require an injected admin role; Order continues to read
+  `x-user-id` but only the gateway may set it; **Order gains ownership scoping on
+  `GET /orders/:id` and `/orders/:id/stream`** (§C — closing a latent IDOR that
+  authentication would otherwise expose). Prod compose profile publishes the
   gateway port only.
 
 **Out:** OAuth/social login; api_keys port (legacy `apiKey.model` stays unported); admin
@@ -48,7 +50,8 @@ UI; email verification / OTP; password reset; a Notification consumer for
   No shared secret exists anywhere, so a gateway compromise cannot mint tokens.
 - **Keys:** PEM strings in env — `JWT_PRIVATE_KEY` (identity only), `JWT_PUBLIC_KEY`
   (gateway). Generated once by a committed script
-  (`scripts/gen-jwt-keypair.sh`, openssl RSA 2048) writing to the gitignored per-service
+  (`services/identity/scripts/gen-jwt-keypair.sh`, openssl RSA 2048 — the repo has no
+  root-level `scripts/`; Notification set the precedent with a per-service `scripts/`) writing to the gitignored per-service
   env files; `docs/infra.md` documents the step. **No JWKS endpoint** — rotation is a
   Phase-7 concern, and a fetch+cache path is runtime surface the MVP does not need.
 - **Refresh token:** NOT a JWT. 32 random bytes, base64url. Stored **hashed**
@@ -65,7 +68,7 @@ UI; email verification / OTP; password reset; a Notification consumer for
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  password  String                  // bcrypt hash, cost 10
+  password  String                  // bcryptjs hash, cost 10
   name      String
   roleId    String
   role      Role     @relation(fields: [roleId], references: [id])
@@ -138,12 +141,16 @@ against a fake tx, matching `transition.ts` / `applyDispatch`.
 
 | route | body | result |
 |---|---|---|
-| `POST /auth/register` | email, password, name | 201 + user row + `identity.user_registered` outbox row, same tx. Duplicate email → 409. |
+| `POST /auth/register` | email, password, name | 201 + user row + `identity.user_registered` outbox row, same tx. Duplicate email → 409. Password `z.string().min(8)`, email `z.string().email()`. |
 | `POST /auth/login` | email, password | 200 + `{ accessToken, refreshToken, user }`. Bad credentials → 401 (identical message for unknown-email and bad-password). |
 | `POST /auth/refresh` | refreshToken | 200 + new pair, or 401 per the table above. |
 | `POST /auth/logout` | refreshToken | 204; revokes that session only. |
 | `GET /internal/grants` | — | Snapshot `{ role: { resource: [actions] } }` for the gateway (see §C). |
 | `GET/POST/PATCH/DELETE /admin/roles\|resources\|grants` | — | Grants admin CRUD. |
+
+> **Hashing library:** `bcryptjs` (pure JS), not `bcrypt`. Every service image is plain
+> `node:22-alpine` with no `python3/make/g++`, so a native `bcrypt` build would fail at
+> image-build time. `bcryptjs` is API-compatible and needs no toolchain.
 
 Identity is reachable only via the gateway in the prod profile; `/internal/*` is
 additionally never proxied (the gateway refuses to route it — it is a server-to-server
@@ -155,11 +162,18 @@ route the gateway itself calls).
   `{role: {resource: [actions]}}` map fetched from `GET /internal/grants` at boot and
   refreshed every `GRANTS_TTL_MS` (default 60s).
 - A **route→permission table** in the gateway names the required `(resource, action)`
-  per protected route, e.g. `POST /catalog/products → (catalog.product, create)`,
-  `POST /payments/:orderId/refund → (payment.refund, create)`. Unlisted routes need
-  authentication only; `/auth/*` needs neither.
-- **Ownership** checks stay in the owning service (Order already scopes cart and orders
-  by the caller's id) — the gateway does role/permission, not row-level ownership.
+  per protected route, e.g. `POST /products → (catalog.product, create)`,
+  `PATCH /products/:id → (catalog.product, update)`,
+  `POST /admin/payments/:orderId/refund → (payment.refund, create)`. Unlisted routes need
+  authentication only; `/auth/*` and `/webhooks/payment` need neither.
+- **Ownership** checks stay in the owning service — the gateway does role/permission, not
+  row-level ownership. **Order does not currently have them and this phase must add them:**
+  `GET /orders/:id` (`services/order/src/app.ts:173`) and `GET /orders/:id/stream` look an
+  order up by id with no `userId` filter and return the owner's id in the body. That is
+  invisible today (there is no identity) but becomes an IDOR the moment callers are
+  authenticated — any logged-in user could read and live-stream anyone's order. Both routes
+  gain an ownership check scoped to the injected `x-user-id`, answering **404** (not 403) so
+  order ids stay unenumerable. Cart routes already scope correctly.
 - Boot behavior: if the snapshot cannot be fetched at boot, the gateway **fails fast**
   (exits) rather than serving with an empty matrix that would 403 everything or, worse,
   allow everything. Refresh failures mid-life keep the last good snapshot and log.
@@ -189,9 +203,20 @@ route the gateway itself calls).
 
 ## E. Gateway edge behavior
 
-- **Proxy:** `http-proxy-middleware`, one route group per upstream
-  (`/orders`, `/cart` → order; `/catalog`, `/comments`, `/discounts` → catalog;
-  `/payments` → payment; `/auth` → identity). `changeOrigin: false`, `xfwd: true`.
+- **Proxy:** `http-proxy-middleware`, one route group per upstream. Services are mounted at
+  their **real** paths — verified against the code, no rewriting:
+  `/cart`, `/orders` → order (`services/order/src/app.ts`);
+  `/products`, `/comments`, `/discounts` → catalog (`services/catalog/src/app.ts:48-215`,
+  which serves `/products`, `/products/:id/comments`, `/comments/:id`, `/discounts` — there
+  is no `/catalog` prefix to rewrite to);
+  `/payments`, `/admin/payments`, `/webhooks/payment` → payment
+  (`services/payment/src/app.ts:24,52,71`);
+  `/auth` → identity. `changeOrigin: false`, `xfwd: true`.
+- **`POST /webhooks/payment` is proxied but exempt from auth AND CSRF.** It is a provider
+  callback with no browser session and no cookie; the prod profile closes payment's port, so
+  routing it through the gateway is the only way it stays reachable. It keeps the general
+  rate-limit bucket. (Signature verification is a Phase-7 item — the endpoint is
+  unauthenticated today.)
 - **Timeouts + breaker:** every non-SSE upstream call is wrapped in an `opossum` breaker
   (`timeout` 5s, `errorThresholdPercentage` 50, `resetTimeout` 10s), one breaker
   **per upstream** so a sick catalog cannot open the order circuit. Breaker open → 503,
@@ -200,6 +225,12 @@ route the gateway itself calls).
   `opossum` timeout would guillotine a *healthy* long-lived stream — and sets
   `Cache-Control: no-cache`, `X-Accel-Buffering: no`, compression off. This is the
   phase's named risk and gets a dedicated streaming test.
+- **Refresh translation (the cookie↔body seam):** the browser never sends a refresh token in
+  a body. On `POST /auth/refresh` the gateway reads the `refresh_token` **cookie**, calls
+  identity with it in the body, and on 200 re-sets both cookies plus a fresh `XSRF-TOKEN`.
+  On identity's 401 (unknown / reused / expired) the gateway **clears all three cookies** and
+  returns 401, so a reuse-detected client lands back at login instead of retrying a dead
+  token. A missing cookie is a 401 without calling identity.
 - **Cookies:** on login/refresh the gateway sets `access_token` and `refresh_token` as
   **httpOnly, SameSite=Lax**, `Secure` only when `COOKIE_SECURE=true` (prod profile),
   plus a **readable** `XSRF-TOKEN` cookie.
@@ -210,6 +241,9 @@ route the gateway itself calls).
   credential-stuffing surface) and a general bucket elsewhere (300/min/IP).
 - **helmet** with defaults; **traceId** minted here and forwarded as `x-trace-id`
   (`traceMiddleware` already reads it downstream).
+- **`/readyz` means "the grants snapshot is loaded"** — nothing more. Upstream reachability
+  is deliberately NOT probed: one sick service must not take the whole edge out of rotation,
+  which is exactly what the per-route breaker exists to handle.
 - The gateway keeps **no** database and **no** business rules. If a decision needs domain
   data, it belongs in a service.
 
@@ -223,8 +257,10 @@ export const UserRegisteredPayloadSchema = z.object({
 });
 ```
 
-Emitted via the outbox in the same tx as the `User` insert; relay publishes to
-`identity.events` (`aggregateType: "identity"`). **No consumer this phase** (user
+Lives in `packages/contracts/src/events/identity.ts` and **must be added to
+`packages/contracts/src/index.ts`**, which exports each event module explicitly. Emitted via
+the outbox in the same tx as the `User` insert; relay publishes to `identity.events`
+(`aggregateType: "identity"`). **No consumer this phase** (user
 decision) — Notification's welcome email is a named backlog item, not silent scope.
 
 > PII note: the payload carries an email because a future welcome-email consumer needs
@@ -273,7 +309,9 @@ PII in logs.
 1. **Grant edits are up to `GRANTS_TTL_MS` stale** at the gateway (§C).
 2. **No key rotation** — one keypair, no JWKS, no `kid` claim. Phase 7.
 3. **Access tokens are not revocable** before their 15m expiry; logout revokes the
-   refresh session only. The standard trade-off for stateless verification.
+   refresh session only. The standard trade-off for stateless verification. **Role changes
+   are stale the same way** — a demoted user keeps their old `role` claim until the token
+   expires, independently of `GRANTS_TTL_MS`.
 4. **No email verification, password reset, or account lockout.** Rate limiting is the
    only brute-force defence.
 5. **Services still trust a header** — safe only behind the gateway. Recorded in §D with
@@ -292,11 +330,14 @@ PII in logs.
   Covers header stripping (a forged `x-user-id` never reaches the upstream), injection,
   401 vs 403, the CSRF matrix, rate-limit, timeout → 504, breaker open → 503, and an
   **SSE pass-through test that asserts frames arrive incrementally**, not buffered.
+- **Order ownership (int):** a second user's `GET /orders/:id` and `/orders/:id/stream` both
+  404 while the owner's succeed — the regression test for the IDOR closed in §C.
 - **e2e / demo:** `docs/runbooks/phase-6-auth-demo.md` against compose.
 
 ## Definition of Done
 
 Register → login → cookie set → browse, cart and checkout through the gateway only;
+another user's order returns 404 on both `GET /orders/:id` and its stream;
 the order stream is live over the proxied SSE route; an unauthorized admin mutation is
 rejected by RBAC; a forged `x-user-id` is stripped; the prod profile exposes only the
 gateway port; identity + gateway suites green and the existing service suites unbroken.
