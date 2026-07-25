@@ -39,9 +39,22 @@ Prereq: `cp docker-compose.example.yml docker-compose.yml`, per-service env, ima
    `notifications`; the worker sends it, the email appears in mailpit, the row flips SENT.
    Re-running the script is safe — an already-SENT row is skipped by the status CAS.
 
-5. **Liveness-restart contract.** `docker compose kill rabbitmq` → the notification
-   container's `/readyz` goes unready and, on a boot against a dead broker, `createRabbit`
-   fails fast; `restart: unless-stopped` re-boots it and the boot-retry rides out the
-   broker warming back up (`docker compose start rabbitmq`).
+5. **Liveness-restart contract.** `docker compose kill rabbitmq` → each rabbit-dependent
+   container logs `rabbit_connection_lost` and **exits** (an unhealthy healthcheck alone
+   would not restart anything — only an exit triggers `restart: unless-stopped`). Compose
+   re-boots them; while the broker is still down the boot-retry burns ~15s and the process
+   exits again, until `docker compose start rabbitmq` lets a boot succeed. Watch it with
+   `docker compose ps` / `docker compose logs -f notification`.
 
 6. `docker compose --profile app down`.
+
+## Notes
+
+- **First boot replays history.** The dispatcher's Kafka group starts `fromBeginning`, so a
+  demo stack whose broker has been up since an earlier phase will re-emit mails for old
+  orders, and any pre-`userId` events (Phase ≤4) fail to parse and land in `order.events.dlq`.
+  A fresh `docker compose down -v` gives the clean first-run story.
+- **Duplicate email is possible, a lost one is not.** The send happens outside the DB
+  transaction, so a crash between send and CAS — or two concurrent deliveries of the same
+  command — can send twice. The row is never wedged: it stays PENDING until some send
+  succeeds.

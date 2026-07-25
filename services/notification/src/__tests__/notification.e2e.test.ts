@@ -19,6 +19,10 @@ const ORDER_TOPIC = "order.events";
 // Isolated queue per run so a leftover DLQ/backlog from another suite can't bleed in.
 const QUEUE = `notifications.e2e.${Date.now()}`;
 const MAILPIT_API = process.env.MAILPIT_API ?? "http://localhost:8025";
+// Only rows this suite created may be routed to its queue — a bare `type === SEND_EMAIL`
+// filter would also grab dispatcher.int.test.ts's row and flip it SENT, flaking its
+// PENDING assertion when the files run in parallel.
+const ownOrders = new Set<string>();
 
 async function waitFor(
   cond: () => Promise<boolean>,
@@ -55,7 +59,8 @@ describe("notification e2e (needs compose up + migrated + mailpit)", () => {
       intervalMs: 300,
       commands: {
         sender: rabbit,
-        queueFor: (r) => (r.type === SEND_EMAIL ? QUEUE : null),
+        queueFor: (r) =>
+          r.type === SEND_EMAIL && ownOrders.has(r.aggregateId) ? QUEUE : null,
       },
     });
 
@@ -80,6 +85,7 @@ describe("notification e2e (needs compose up + migrated + mailpit)", () => {
   it("order.confirmed -> Notification SENT -> email in mailpit", async () => {
     const orderId = `o_${randomUUID()}`;
     const userId = `u_${randomUUID()}`;
+    ownOrders.add(orderId);
     await producer.publish(
       ORDER_TOPIC,
       makeEnvelope({

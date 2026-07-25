@@ -1,18 +1,58 @@
 import amqp, { type ConfirmChannel, type ChannelModel } from "amqplib";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
+import { createLogger } from "./logger";
+
+const log = createLogger("rabbit");
+
+// Connection-liveness state machine, split out so the restart decision is unit-testable
+// without a broker. Docker restart policies fire on process EXIT, never on an unhealthy
+// healthcheck — so an unexpected close has to end the process for `restart: unless-stopped`
+// to mean anything. A close we initiated (graceful shutdown) must not self-kill.
+export function makeRabbitLifecycle(onLost: () => void) {
+  let healthy = true;
+  let closing = false;
+  let lost = false;
+  return {
+    markClosing() {
+      closing = true;
+    },
+    onClose() {
+      healthy = false;
+      if (closing || lost) return;
+      lost = true;
+      onLost();
+    },
+    onError() {
+      healthy = false;
+    },
+    isHealthy: () => healthy,
+  };
+}
 
 // DEDUP GUIDANCE (Phase 5): default to the Postgres `ProcessedEvent` ledger (same-tx with
 // a DB write — as Order/Inventory/Payment/Notification do). Use the Redis `markProcessed`
 // helper (./redis.ts) ONLY for stateless / high-volume dedup with no DB write to bind to.
 // It is currently unused; prefer the transactional ledger unless you have that specific need.
-export async function createRabbit(opts: { prefetch?: number } = {}) {
-  const { prefetch = 10 } = opts;
+export async function createRabbit(
+  opts: { prefetch?: number; onConnectionLost?: () => void } = {}
+) {
+  const {
+    prefetch = 10,
+    // Default is deliberately fatal: no in-process reconnect (Phase 7), so a dropped
+    // connection means every consumer on it is deaf and the relay's command lane is
+    // dead. Exiting hands recovery to the compose `restart:` policy.
+    onConnectionLost = () => {
+      log.error("rabbit_connection_lost", { action: "exit_for_restart" });
+      process.exit(1);
+    },
+  } = opts;
   const url = process.env.RABBITMQ_URL ?? "amqp://ecom:ecom@localhost:5672";
   // Boot-retry absorbs the broker-warming race; on exhaustion this throws (fail-fast) —
   // the caller/process exits and the compose `restart:` policy re-boots it. No degraded
-  // state, no in-process reconnect (Phase 7). Mid-life drops flip `healthy=false` -> /readyz
-  // unready -> restart.
+  // state, no in-process reconnect (Phase 7). A mid-life drop marks the adapter unhealthy
+  // (/readyz fails) AND exits the process via onConnectionLost — a healthcheck alone never
+  // restarts a container, only an exit does.
   const conn: ChannelModel = await withRetry(() => amqp.connect(url), {
     retries: 5,
     baseMs: 500,
@@ -21,13 +61,9 @@ export async function createRabbit(opts: { prefetch?: number } = {}) {
   const ch: ConfirmChannel = await conn.createConfirmChannel();
   await ch.prefetch(prefetch); // bounded unacked in-flight on every consumer
 
-  let healthy = true;
-  conn.on("close", () => {
-    healthy = false;
-  });
-  conn.on("error", () => {
-    healthy = false;
-  });
+  const lifecycle = makeRabbitLifecycle(onConnectionLost);
+  conn.on("close", () => lifecycle.onClose());
+  conn.on("error", () => lifecycle.onError());
 
   async function assertWorkQueue(queue: string): Promise<void> {
     const dlx = `${queue}.dlx`;
@@ -90,11 +126,30 @@ export async function createRabbit(opts: { prefetch?: number } = {}) {
     return null;
   }
 
+  // Acked move: the DLQ copy is only released AFTER the broker confirms the re-publish.
+  // consumeDlqOnce's noAck get would drop the envelope for good if the send (or the
+  // process) died in between, and a dispatcher ledger + unique key means it can never be
+  // regenerated. Returns false when the DLQ is empty.
+  async function moveDlqOnce(dlq: string, target: string): Promise<boolean> {
+    const msg = await ch.get(dlq, { noAck: false });
+    if (!msg) return false;
+    try {
+      const env = EventEnvelopeSchema.parse(JSON.parse(msg.content.toString()));
+      await sendCommand(target, env);
+      ch.ack(msg);
+      return true;
+    } catch (e) {
+      ch.nack(msg, false, true); // put it back — a re-publish failure must not lose it
+      throw e;
+    }
+  }
+
   async function checkHealth(): Promise<void> {
-    if (!healthy) throw new Error("rabbit connection is down");
+    if (!lifecycle.isHealthy()) throw new Error("rabbit connection is down");
   }
 
   async function close(): Promise<void> {
+    lifecycle.markClosing(); // graceful teardown must not trip the restart handler
     await ch.close();
     await conn.close();
   }
@@ -104,6 +159,7 @@ export async function createRabbit(opts: { prefetch?: number } = {}) {
     sendCommand,
     consumeCommands,
     consumeDlqOnce,
+    moveDlqOnce,
     checkHealth,
     close,
   };

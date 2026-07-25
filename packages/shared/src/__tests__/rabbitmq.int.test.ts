@@ -136,6 +136,44 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     expect(inFlight).toHaveLength(1); // unbounded prefetch would deliver all 3
   }, 15_000);
 
+  it("moveDlqOnce re-queues a dead-lettered command and reports dry", async () => {
+    const q = `test.move.${uuidv4()}`;
+    const rabbit = await createRabbit();
+    await rabbit.assertWorkQueue(q);
+    await rabbit.sendCommand(
+      `${q}.dlq`,
+      makeEnvelope({
+        type: "cmd.move",
+        version: 1,
+        traceId: "t",
+        producer: "test",
+        payload: {},
+      })
+    );
+
+    expect(await rabbit.moveDlqOnce(`${q}.dlq`, q)).toBe(true);
+    expect(await rabbit.moveDlqOnce(`${q}.dlq`, q)).toBe(false); // dlq drained
+    const requeued = await rabbit.consumeDlqOnce(q, 5_000); // read the work queue directly
+    await rabbit.close();
+    expect(requeued?.type).toBe("cmd.move");
+  }, 15_000);
+
+  it("moveDlqOnce leaves a malformed envelope ON the dlq (never a destructive read)", async () => {
+    const q = `test.move.bad.${uuidv4()}`;
+    const rabbit = await createRabbit();
+    await rabbit.assertWorkQueue(q);
+    // publish raw junk straight to the dlq — sendCommand would reject a non-envelope
+    await rabbit.sendCommand(`${q}.dlq`, {
+      eventId: "not-an-envelope",
+    } as unknown as Parameters<typeof rabbit.sendCommand>[1]);
+
+    await expect(rabbit.moveDlqOnce(`${q}.dlq`, q)).rejects.toBeTruthy();
+    await new Promise((r) => setTimeout(r, 300)); // let the requeue land
+    const stillThere = await rabbit.consumeDlqOnce(`${q}.dlq`, 3_000).catch(() => "junk");
+    await rabbit.close();
+    expect(stillThere).toBeTruthy(); // message survived the failed move
+  }, 15_000);
+
   it("createRabbit boot-retries, then throws (fail-fast) when the broker is unreachable", async () => {
     // boot-retry exhausts against a dead port, then throws — no degraded adapter
     const prev = process.env.RABBITMQ_URL;

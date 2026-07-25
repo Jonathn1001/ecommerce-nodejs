@@ -47,7 +47,11 @@ async function main() {
     log.info("notification_listening", { port: config.PORT })
   );
 
-  // Reverse teardown: server.close -> consumer -> rabbit -> relay -> producer -> prisma
+  // Reverse teardown. Effective order:
+  //   server.close -> consumer.disconnect -> relay.stop -> rabbit.close
+  //   -> producer.disconnect -> prisma.$disconnect
+  // The relay must stop before its Rabbit send channel closes (this relay has a
+  // commands lane — unlike payment's, which is Kafka-only).
   gracefulShutdown([
     async () => {
       await prisma.$disconnect();
@@ -56,10 +60,10 @@ async function main() {
       await producer.disconnect();
     },
     async () => {
-      relay.stop();
+      await rabbit.close();
     },
     async () => {
-      await rabbit.close();
+      relay.stop();
     },
     async () => {
       await consumer.disconnect();

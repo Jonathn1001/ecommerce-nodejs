@@ -53,13 +53,17 @@ Current `createRabbit` (verified): one `amqp.connect`; on `conn` close/error set
   prevented in the run path; the boot-retry only absorbs the brief broker-warming race.
   **No degraded-adapter state; Order/Payment boot behavior is unchanged** (they still get a
   fully-connected adapter or a crash-then-restart).
-- **Liveness-restart contract (mid-life drops):** a real drop flips `healthy=false` →
-  `/readyz` unready → the **`restart:` policy** re-execs the process → a fresh
-  `createRabbit` re-establishes everything. **`docker-compose.example.yml` app services
+- **Liveness-restart contract (mid-life drops):** a real drop flips `healthy=false`
+  (→ `/readyz` unready) **and exits the process** via `createRabbit`'s `onConnectionLost`
+  (default: log + `process.exit(1)`), so the **`restart:` policy** re-execs it and a fresh
+  `createRabbit` re-establishes everything. The exit is load-bearing: a Docker `restart:`
+  policy fires on process exit only — an unhealthy healthcheck alone never restarts a
+  container (it only gates `depends_on`). A close initiated by our own `close()` is
+  exempt, so graceful shutdown does not self-kill. **`docker-compose.example.yml` app services
   gain `restart: unless-stopped`** (none have it today — verified). One recovery mechanism
   (restart) covers both boot-failure and mid-life drops. In-process reconnect (recover
   without a restart) → Phase 7.
-- **Signature/back-compat:** `createRabbit(opts?: { prefetch?: number })`; existing callers
+- **Signature/back-compat:** `createRabbit(opts?: { prefetch?: number; onConnectionLost?: () => void })`; existing callers
   (Order, Payment) pass nothing → default 10, behavior otherwise unchanged (still throws on
   a connect failure). `sendCommand`/`consumeCommands`/`assertWorkQueue`/`consumeDlqOnce`/
   `checkHealth`/`close` keep their signatures. **Regression gate: Order + Payment suites
@@ -145,7 +149,10 @@ analogous. No product names (degrade — soft dep on Phase 4).
   handleSendEmail, { maxRetries: 3 })`. `prefetch` (from the hardening) bounds it.
 - **Idempotency caveat (documented):** the send is an external side-effect outside the DB
   tx; a crash after `mailer.send` but before the CAS → a redelivery re-sends (rare dup).
-  At-least-once + best-effort sent-marker (roadmap-accepted).
+  Same class, wider window: amqplib does not await the consume callback, so two *concurrent*
+  deliveries of the same SendEmail (relay crash before `markSent`, or two relays running)
+  can both read `PENDING` before either CAS → two emails, one CAS winner. No lost email and
+  no wedged row either way. At-least-once + best-effort sent-marker (roadmap-accepted).
 
 ## E. DLQ replay (the headline lesson)
 
