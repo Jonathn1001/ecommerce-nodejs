@@ -142,7 +142,10 @@ export function createApp(): express.Application {
       });
       res.status(201).json({ id: c.id });
     } catch {
-      log.error("comment_create_failed", { productId: req.params.id, traceId: req.traceId });
+      log.error("comment_create_failed", {
+        productId: req.params.id,
+        traceId: req.traceId,
+      });
       res.status(500).json({ error: "internal error" });
     }
   });
@@ -156,7 +159,10 @@ export function createApp(): express.Application {
       });
       res.json(assembleTree(rows));
     } catch {
-      log.error("comment_list_failed", { productId: req.params.id, traceId: req.traceId });
+      log.error("comment_list_failed", {
+        productId: req.params.id,
+        traceId: req.traceId,
+      });
       res.status(500).json({ error: "internal error" });
     }
   });
