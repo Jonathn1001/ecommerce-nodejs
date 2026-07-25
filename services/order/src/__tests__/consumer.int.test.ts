@@ -36,6 +36,11 @@ const statusOf = async (id: string) =>
   (await prisma.order.findUnique({ where: { id } }))?.status;
 const outbox = (id: string, type: string) =>
   prisma.outbox.count({ where: { aggregateId: id, type } });
+const outboxPayload = async (id: string, type: string) =>
+  (await prisma.outbox.findFirst({ where: { aggregateId: id, type } }))?.payload as
+    Record<string, unknown> | undefined;
+const userIdOf = async (id: string) =>
+  (await prisma.order.findUnique({ where: { id } }))?.userId;
 
 describe("order payment-leg consumer (integration — needs compose up + migrated)", () => {
   afterAll(async () => {
@@ -65,6 +70,11 @@ describe("order payment-leg consumer (integration — needs compose up + migrate
     );
     expect(await statusOf(id)).toBe("CONFIRMED");
     expect(await outbox(id, ORDER_CONFIRMED)).toBe(1);
+    // Notification addresses the customer off this field — it must ride the event.
+    expect(await outboxPayload(id, ORDER_CONFIRMED)).toEqual({
+      orderId: id,
+      userId: await userIdOf(id),
+    });
   });
 
   it("PaymentFailed -> CANCELLED + one OrderCancelled outbox", async () => {
@@ -72,6 +82,10 @@ describe("order payment-leg consumer (integration — needs compose up + migrate
     await handleEvent(env(PAYMENT_FAILED, id, { orderId: id, reason: "CARD_DECLINED" }));
     expect(await statusOf(id)).toBe("CANCELLED");
     expect(await outbox(id, ORDER_CANCELLED)).toBe(1);
+    expect(await outboxPayload(id, ORDER_CANCELLED)).toEqual({
+      orderId: id,
+      userId: await userIdOf(id),
+    });
   });
 
   it("dedupes a redelivered PaymentSucceeded", async () => {

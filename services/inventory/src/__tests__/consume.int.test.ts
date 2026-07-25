@@ -21,7 +21,7 @@ const confirm = (orderId: string): EventEnvelope =>
     version: 1,
     traceId: "t",
     producer: "test",
-    payload: { orderId },
+    payload: { orderId, userId: "u1" },
   });
 const statusOf = async (orderId: string) =>
   (await prisma.reservation.findFirst({ where: { orderId } }))?.status;

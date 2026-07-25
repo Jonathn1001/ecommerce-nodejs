@@ -9,14 +9,18 @@ export const OrderLineSchema = z.object({
 });
 export type OrderLine = z.infer<typeof OrderLineSchema>;
 
+// userId travels on every order event so downstream consumers (Notification)
+// can address the customer without a call back into Order.
 export const OrderPlacedPayloadSchema = z.object({
   orderId: z.string().min(1),
+  userId: z.string().min(1),
   items: z.array(OrderLineSchema).min(1),
 });
 export type OrderPlacedPayload = z.infer<typeof OrderPlacedPayloadSchema>;
 
 export const OrderCancelledPayloadSchema = z.object({
   orderId: z.string().min(1),
+  userId: z.string().min(1),
 });
 export type OrderCancelledPayload = z.infer<typeof OrderCancelledPayloadSchema>;
 
@@ -24,5 +28,6 @@ export const ORDER_CONFIRMED = "order.confirmed" as const;
 
 export const OrderConfirmedPayloadSchema = z.object({
   orderId: z.string().min(1),
+  userId: z.string().min(1),
 });
 export type OrderConfirmedPayload = z.infer<typeof OrderConfirmedPayloadSchema>;

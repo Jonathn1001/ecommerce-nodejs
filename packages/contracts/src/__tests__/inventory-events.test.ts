@@ -13,15 +13,19 @@ import {
 
 describe("order + inventory event contracts", () => {
   it("OrderPlaced requires a non-empty item list with positive int quantities", () => {
-    expect(() => OrderPlacedPayloadSchema.parse({ orderId: "o1", items: [] })).toThrow();
+    expect(() =>
+      OrderPlacedPayloadSchema.parse({ orderId: "o1", userId: "u1", items: [] })
+    ).toThrow();
     expect(() =>
       OrderPlacedPayloadSchema.parse({
         orderId: "o1",
+        userId: "u1",
         items: [{ productId: "p1", quantity: 0 }],
       })
     ).toThrow();
     const ok = OrderPlacedPayloadSchema.parse({
       orderId: "o1",
+      userId: "u1",
       items: [{ productId: "p1", quantity: 2 }],
     });
     expect(ok.items[0].quantity).toBe(2);
@@ -29,7 +33,9 @@ describe("order + inventory event contracts", () => {
 
   it("OrderCancelled requires an orderId", () => {
     expect(() => OrderCancelledPayloadSchema.parse({})).toThrow();
-    expect(OrderCancelledPayloadSchema.parse({ orderId: "o1" }).orderId).toBe("o1");
+    expect(
+      OrderCancelledPayloadSchema.parse({ orderId: "o1", userId: "u1" }).orderId
+    ).toBe("o1");
   });
 
   it("InventoryReservationFailed requires a reason", () => {

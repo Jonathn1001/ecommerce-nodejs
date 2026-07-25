@@ -26,7 +26,9 @@ export function nextStatus(
 }
 
 export interface TransitionTx {
-  loadOrder(orderId: string): Promise<{ status: string; totalPrice: number } | null>;
+  loadOrder(
+    orderId: string
+  ): Promise<{ status: string; totalPrice: number; userId: string } | null>;
   markProcessed(eventId: string, type: string): Promise<boolean>;
   setStatus(orderId: string, status: OrderStatus): Promise<void>;
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
@@ -66,9 +68,15 @@ export async function applyResult(
       amount: order.totalPrice,
     });
   } else if (next === "CONFIRMED") {
-    await tx.enqueue(ORDER_CONFIRMED, p.orderId, { orderId: p.orderId });
+    await tx.enqueue(ORDER_CONFIRMED, p.orderId, {
+      orderId: p.orderId,
+      userId: order.userId,
+    });
   } else if (next === "CANCELLED") {
-    await tx.enqueue(ORDER_CANCELLED, p.orderId, { orderId: p.orderId });
+    await tx.enqueue(ORDER_CANCELLED, p.orderId, {
+      orderId: p.orderId,
+      userId: order.userId,
+    });
   }
   return next;
 }

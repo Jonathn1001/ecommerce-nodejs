@@ -81,7 +81,7 @@ describe("inventory slice e2e (needs docker compose up + migrated)", () => {
         version: 1,
         traceId: "e2e-1",
         producer: "test",
-        payload: { orderId, items: [{ productId, quantity: 4 }] },
+        payload: { orderId, userId: "u1", items: [{ productId, quantity: 4 }] },
       })
     );
 

@@ -28,7 +28,7 @@ function placed(orderId: string, items: Array<{ productId: string; quantity: num
     version: 1,
     traceId: "t",
     producer: "test",
-    payload: { orderId, items },
+    payload: { orderId, userId: "u1", items },
   });
 }
 
@@ -104,7 +104,7 @@ describe("inventory consumer (integration — needs docker compose up + migrated
         version: 1,
         traceId: "t",
         producer: "test",
-        payload: { orderId },
+        payload: { orderId, userId: "u1" },
       })
     );
     expect(await availableOf(p1)).toBe(5);

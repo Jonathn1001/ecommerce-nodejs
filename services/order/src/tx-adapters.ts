@@ -59,9 +59,11 @@ export function transitionTx(
     async loadOrder(orderId) {
       const row = await tx.order.findUnique({
         where: { id: orderId },
-        select: { status: true, totalPrice: true },
+        select: { status: true, totalPrice: true, userId: true },
       });
-      return row ? { status: row.status, totalPrice: row.totalPrice } : null;
+      return row
+        ? { status: row.status, totalPrice: row.totalPrice, userId: row.userId }
+        : null;
     },
     async markProcessed(eventId, type) {
       const r = await tx.processedEvent.createMany({

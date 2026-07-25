@@ -40,6 +40,7 @@ export async function placeOrder(
   await tx.clearCart(p.userId);
   await tx.enqueue(ORDER_PLACED, orderId, {
     orderId,
+    userId: p.userId,
     items: p.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
   });
   return { outcome: "PLACED", orderId };

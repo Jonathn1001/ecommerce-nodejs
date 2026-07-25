@@ -10,15 +10,16 @@ import {
   PAYMENT_FAILED,
 } from "@ecom/contracts";
 
-function fakeTx(init: { status: string | null; totalPrice?: number }) {
+function fakeTx(init: { status: string | null; totalPrice?: number; userId?: string }) {
   const processed = new Set<string>();
   const emitted: Array<{ type: string; orderId: string; payload: unknown }> = [];
   const notified: Array<{ orderId: string; status: string }> = [];
   let status = init.status;
   const totalPrice = init.totalPrice ?? 500;
+  const userId = init.userId ?? "u1";
   const tx: TransitionTx = {
     async loadOrder() {
-      return status === null ? null : { status, totalPrice };
+      return status === null ? null : { status, totalPrice, userId };
     },
     async markProcessed(eventId) {
       if (processed.has(eventId)) return false;
@@ -80,7 +81,7 @@ describe("applyResult", () => {
     });
     expect(outcome).toBe("CANCELLED");
     expect(f.emitted).toEqual([
-      { type: ORDER_CANCELLED, orderId: "o2", payload: { orderId: "o2" } },
+      { type: ORDER_CANCELLED, orderId: "o2", payload: { orderId: "o2", userId: "u1" } },
     ]);
   });
   it("payment-succeeded -> CONFIRMED + OrderConfirmed", async () => {
@@ -92,7 +93,7 @@ describe("applyResult", () => {
     });
     expect(outcome).toBe("CONFIRMED");
     expect(f.emitted).toEqual([
-      { type: ORDER_CONFIRMED, orderId: "o3", payload: { orderId: "o3" } },
+      { type: ORDER_CONFIRMED, orderId: "o3", payload: { orderId: "o3", userId: "u1" } },
     ]);
   });
   it("payment-failed -> CANCELLED + OrderCancelled", async () => {
@@ -104,7 +105,7 @@ describe("applyResult", () => {
     });
     expect(outcome).toBe("CANCELLED");
     expect(f.emitted).toEqual([
-      { type: ORDER_CANCELLED, orderId: "o4", payload: { orderId: "o4" } },
+      { type: ORDER_CANCELLED, orderId: "o4", payload: { orderId: "o4", userId: "u1" } },
     ]);
   });
   it("unknown order -> UNKNOWN_ORDER without ledgering", async () => {

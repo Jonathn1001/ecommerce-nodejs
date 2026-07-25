@@ -47,6 +47,7 @@ describe("placeOrder", () => {
         orderId: "order_1",
         payload: {
           orderId: "order_1",
+          userId: "u1",
           items: [
             { productId: "p1", quantity: 2 },
             { productId: "p2", quantity: 1 },
