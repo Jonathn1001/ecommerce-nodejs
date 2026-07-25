@@ -60,6 +60,15 @@ services:
       timeout: 10s
       retries: 10
 
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]   # 1025 = SMTP, 8025 = web UI
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/livez"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -73,6 +82,7 @@ services:
   # brings up only infra by default:  docker compose --profile app up -d hello
   hello:
     profiles: ["app"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/hello/Dockerfile
@@ -94,6 +104,7 @@ services:
 
   inventory:
     profiles: ["app"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/inventory/Dockerfile
@@ -117,6 +128,7 @@ services:
 
   order:
     profiles: ["app"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/order/Dockerfile
@@ -139,6 +151,7 @@ services:
 
   payment:
     profiles: ["app"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/payment/Dockerfile
@@ -160,6 +173,7 @@ services:
 
   catalog:
     profiles: ["app"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/catalog/Dockerfile
@@ -173,6 +187,32 @@ services:
       kafka: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3004/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  notification:
+    profiles: ["app"]
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: services/notification/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/notification
+      KAFKA_BROKERS: kafka:19092
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-ecom}:${RABBITMQ_PASSWORD:-ecom}@rabbitmq:5672
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      NOTIFY_EMAIL_DOMAIN: example.test
+      PORT: 3005
+    ports: ["3005:3005"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      mailpit: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3005/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

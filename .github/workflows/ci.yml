@@ -43,7 +43,7 @@ jobs:
           cp docker-compose.example.yml docker-compose.yml
           printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
           docker compose up -d
-          timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 4 ]; do sleep 3; done'
+          timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 5 ]; do sleep 3; done'
       # A "healthy" KRaft broker answers kafka-topics --list before it has
       # elected a leader for freshly-created topics, so the first test to create
       # a topic can hit LEADER_NOT_AVAILABLE. Warm up leader election with a
@@ -108,3 +108,14 @@ jobs:
         run: |
           pnpm --filter @ecom/catalog exec prisma migrate deploy
           pnpm vitest run services/catalog
+      # mailpit (SMTP 1025 / API 8025) comes up with the compose infra set.
+      - name: Notification service (migrate + int/e2e)
+        env:
+          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/notification
+          RABBITMQ_URL: amqp://ecom:ecom@localhost:5672
+          KAFKA_BROKERS: localhost:9092
+          SMTP_HOST: localhost
+          SMTP_PORT: 1025
+        run: |
+          pnpm --filter @ecom/notification exec prisma migrate deploy
+          pnpm vitest run services/notification
