@@ -2,11 +2,24 @@ import amqp, { type ConfirmChannel, type ChannelModel } from "amqplib";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 
-export async function createRabbit() {
-  const conn: ChannelModel = await amqp.connect(
-    process.env.RABBITMQ_URL ?? "amqp://ecom:ecom@localhost:5672"
-  );
+// DEDUP GUIDANCE (Phase 5): default to the Postgres `ProcessedEvent` ledger (same-tx with
+// a DB write — as Order/Inventory/Payment/Notification do). Use the Redis `markProcessed`
+// helper (./redis.ts) ONLY for stateless / high-volume dedup with no DB write to bind to.
+// It is currently unused; prefer the transactional ledger unless you have that specific need.
+export async function createRabbit(opts: { prefetch?: number } = {}) {
+  const { prefetch = 10 } = opts;
+  const url = process.env.RABBITMQ_URL ?? "amqp://ecom:ecom@localhost:5672";
+  // Boot-retry absorbs the broker-warming race; on exhaustion this throws (fail-fast) —
+  // the caller/process exits and the compose `restart:` policy re-boots it. No degraded
+  // state, no in-process reconnect (Phase 7). Mid-life drops flip `healthy=false` -> /readyz
+  // unready -> restart.
+  const conn: ChannelModel = await withRetry(() => amqp.connect(url), {
+    retries: 5,
+    baseMs: 500,
+    label: "rabbit-connect",
+  });
   const ch: ConfirmChannel = await conn.createConfirmChannel();
+  await ch.prefetch(prefetch); // bounded unacked in-flight on every consumer
 
   let healthy = true;
   conn.on("close", () => {

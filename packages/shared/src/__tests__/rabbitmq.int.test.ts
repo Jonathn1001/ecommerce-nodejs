@@ -107,4 +107,46 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     await rabbit.close();
     expect(got?.type).toBe("cmd.confirm");
   });
+
+  it("applies prefetch: unacked deliveries are bounded by it", async () => {
+    const q = `test.prefetch.${uuidv4()}`;
+    const rabbit = await createRabbit({ prefetch: 1 });
+    await rabbit.assertWorkQueue(q);
+
+    // Handler never settles -> deliveries stay unacked; prefetch(1) caps in-flight at 1.
+    const inFlight: string[] = [];
+    await rabbit.consumeCommands(q, async (env) => {
+      inFlight.push(env.eventId);
+      await new Promise<void>(() => {}); // never resolves
+    });
+    for (const n of [1, 2, 3]) {
+      await rabbit.sendCommand(
+        q,
+        makeEnvelope({
+          type: `cmd.pf.${n}`,
+          version: 1,
+          traceId: "t",
+          producer: "test",
+          payload: {},
+        })
+      );
+    }
+    await new Promise((r) => setTimeout(r, 2_000)); // let the broker push whatever it will
+    await rabbit.close();
+    expect(inFlight).toHaveLength(1); // unbounded prefetch would deliver all 3
+  }, 15_000);
+
+  it("createRabbit boot-retries, then throws (fail-fast) when the broker is unreachable", async () => {
+    // boot-retry exhausts against a dead port, then throws — no degraded adapter
+    const prev = process.env.RABBITMQ_URL;
+    process.env.RABBITMQ_URL = "amqp://ecom:ecom@localhost:5673"; // 5673 = no broker
+    const started = Date.now();
+    try {
+      await expect(createRabbit({ prefetch: 5 })).rejects.toBeTruthy();
+    } finally {
+      process.env.RABBITMQ_URL = prev;
+    }
+    // A bare connect rejects in ms; only a retry budget takes seconds.
+    expect(Date.now() - started).toBeGreaterThan(1_000);
+  }, 30_000);
 });
