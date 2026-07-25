@@ -39,7 +39,7 @@ actually be evaluated):
   unscheduled — a feature, not debt.
 - **Discount projection into Order's read model**: named backlog, unscheduled.
 
-**Out (and why):**
+**Out — everything else:**
 - **In-process reconnect** for the Rabbit adapter and the SSE `pg` LISTEN client. Decided
   **closed, not deferred again** (§E decision 3): the fail-fast + `restart: unless-stopped`
   contract works, is tested, and reconnect would rebuild consumers, channels and the relay
@@ -47,7 +47,6 @@ actually be evaluated):
 - Metrics, tracing, k6, chaos, the orchestrated-saga variant and the schema-evolution event —
   later 7 slices.
 - Debezium/logical-decoding outbox (umbrella stretch), cloud anything.
-- Discount projection into Order's read model (named backlog, unscheduled).
 
 ---
 
@@ -63,7 +62,8 @@ stale dev-database rows poison the batch and the suite's own valid rows are neve
 
 Fix: wrap each order in try/catch, log `{ orderId, message }` (ids only), continue, and return
 the number of **reservations released by the orders that succeeded** — the unit `sweepOnce`
-already returns — not the number of orders attempted. Same lane-isolation shape as the outbox relay tick.
+already returns — not the number of orders attempted. Same lane-isolation shape as the
+outbox relay tick.
 
 > A poisoned reservation stays `ACTIVE` forever and is retried every sweep. That is correct —
 > silently releasing stock against a missing inventory row would be worse — but it means the
@@ -108,7 +108,8 @@ startLedgerPruner(port: LedgerPrunerPort, opts: { retentionDays?: number; interv
 
 `LedgerPrunerPort.deleteOlderThan(cutoff: Date): Promise<number>` — each service supplies a
 one-line Prisma adapter, keeping the shared module free of any client. Defaults:
-`LEDGER_RETENTION_DAYS` 30, `LEDGER_PRUNE_INTERVAL_MS` 3 600 000 (hourly). Adopted from each `main.ts`; the timer is `unref`'d and stopped in `gracefulShutdown`.
+`LEDGER_RETENTION_DAYS` 30, `LEDGER_PRUNE_INTERVAL_MS` 3 600 000 (hourly). Adopted from each
+`main.ts`; the timer is `unref`'d and stopped in `gracefulShutdown`.
 
 **Retention window rationale:** the ledger only needs to outlive the longest possible
 redelivery. Kafka's retention is the bound, so 30 days is generous by an order of magnitude
