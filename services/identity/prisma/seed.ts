@@ -4,12 +4,20 @@ import { PrismaClient } from "../src/generated/prisma";
 // anything (no ADMIN grants). Run explicitly — `pnpm --filter @ecom/identity seed`.
 const prisma = new PrismaClient();
 
-const RESOURCES = ["catalog.product", "catalog.discount", "payment.refund"];
+const RESOURCES = [
+  "catalog.product",
+  "catalog.comment",
+  "catalog.discount",
+  "payment.refund",
+];
 const ADMIN_GRANTS: Array<[string, string]> = [
   ["catalog.product", "create"],
   ["catalog.product", "update"],
   ["catalog.product", "delete"],
   ["catalog.discount", "create"],
+  // The gateway protects DELETE /comments/:id with (catalog.comment, delete); without this
+  // grant nobody — not even ADMIN — can ever delete a comment.
+  ["catalog.comment", "delete"],
   ["payment.refund", "create"],
 ];
 

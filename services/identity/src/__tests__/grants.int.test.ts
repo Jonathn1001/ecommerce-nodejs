@@ -56,6 +56,25 @@ describe("identity grants (integration — needs compose up + migrated)", () => 
     expect(snapshot[roleName][resourceName].sort()).toEqual(["create", "update"]);
   });
 
+  // Guards the seed against the gateway's rules table drifting away from it. The gateway
+  // suite verifies enforcement against a FAKE snapshot, so a permission the gateway demands
+  // but the seed never creates fails only in a real deployment (403 forever, silently).
+  // Requires the seed to have run — CI seeds before this suite.
+  it("the seed grants ADMIN every permission the gateway enforces", async () => {
+    const res = await request(app).get("/internal/grants").expect(200);
+    const admin = (res.body as Record<string, Record<string, string[]>>).ADMIN ?? {};
+    // Mirrors RULES in services/gateway/src/authz.ts — change both together.
+    const required: Array<[string, string]> = [
+      ["catalog.product", "create"],
+      ["catalog.product", "update"],
+      ["catalog.discount", "create"],
+      ["catalog.comment", "delete"],
+      ["payment.refund", "create"],
+    ];
+    for (const [resource, action] of required)
+      expect(admin[resource] ?? []).toContain(action);
+  });
+
   it("deleting a grant removes it from the snapshot", async () => {
     const list = await request(app).get("/admin/grants").expect(200);
     const mine = (

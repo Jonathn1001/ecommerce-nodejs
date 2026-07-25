@@ -142,7 +142,7 @@ against a fake tx, matching `transition.ts` / `applyDispatch`.
 | route | body | result |
 |---|---|---|
 | `POST /auth/register` | email, password, name | 201 + user row + `identity.user_registered` outbox row, same tx. Duplicate email → 409. Password `z.string().min(8)`, email `z.string().email()`. |
-| `POST /auth/login` | email, password | 200 + `{ accessToken, refreshToken, user }`. Bad credentials → 401 (identical message for unknown-email and bad-password). |
+| `POST /auth/login` | email, password | 200 + `{ accessToken, refreshToken }`. Bad credentials → 401 (identical message for unknown-email and bad-password). |
 | `POST /auth/refresh` | refreshToken | 200 + new pair, or 401 per the table above. |
 | `POST /auth/logout` | refreshToken | 204; revokes that session only. |
 | `GET /internal/grants` | — | Snapshot `{ role: { resource: [actions] } }` for the gateway (see §C). |
@@ -151,6 +151,12 @@ against a fake tx, matching `transition.ts` / `applyDispatch`.
 > **Hashing library:** `bcryptjs` (pure JS), not `bcrypt`. Every service image is plain
 > `node:22-alpine` with no `python3/make/g++`, so a native `bcrypt` build would fail at
 > image-build time. `bcryptjs` is API-compatible and needs no toolchain.
+
+**`/admin/*` is operator surface, not a product API.** The gateway proxies only `/auth/*` to
+identity, so grants CRUD is reachable on the compose network and, under the port-closing
+overlay, only via `docker compose exec`. Deliberate for this phase — proxying it would need
+its own `identity.grants` resource and rules. Promoting it to a real admin API is a Phase-7
+item.
 
 Identity is reachable only via the gateway in the prod profile; `/internal/*` is
 additionally never proxied (the gateway refuses to route it — it is a server-to-server
@@ -164,8 +170,13 @@ route the gateway itself calls).
 - A **route→permission table** in the gateway names the required `(resource, action)`
   per protected route, e.g. `POST /products → (catalog.product, create)`,
   `PATCH /products/:id → (catalog.product, update)`,
-  `POST /admin/payments/:orderId/refund → (payment.refund, create)`. Unlisted routes need
-  authentication only; `/auth/*` and `/webhooks/payment` need neither.
+  `POST /admin/payments/:orderId/refund → (payment.refund, create)`,
+  `DELETE /comments/:id → (catalog.comment, delete)`. Unlisted routes need authentication
+  only; `/auth/*` and `/webhooks/payment` need neither.
+  **Every resource/action named here must exist in the seed** — a rule the seed does not
+  grant fails closed and silently (403 forever, for every role). The gateway suite tests
+  enforcement against a *fake* snapshot, so an identity int test asserts the seeded ADMIN
+  grants cover the whole rules table.
 - **Ownership** checks stay in the owning service — the gateway does role/permission, not
   row-level ownership. **Order does not currently have them and this phase must add them:**
   `GET /orders/:id` (`services/order/src/app.ts:173`) and `GET /orders/:id/stream` look an
@@ -176,13 +187,15 @@ route the gateway itself calls).
   order ids stay unenumerable. Cart routes already scope correctly.
 - Boot behavior: if the snapshot cannot be fetched at boot, the gateway **fails fast**
   (exits) rather than serving with an empty matrix that would 403 everything or, worse,
-  allow everything. Refresh failures mid-life keep the last good snapshot and log.
+  allow everything. The boot fetch is bounded (5s) so a *hung* identity cannot hang boot
+  forever. Refresh failures mid-life keep the last good snapshot and log.
 - **Accepted trade-off:** a grant edit takes up to one TTL to take effect. The
   alternative — a synchronous authz call per request — puts identity on the hot path of
   every proxied request, which the breaker would then have to protect.
 - Seeding: a committed seed (`prisma/seed.ts`, run explicitly) creates roles `USER` /
-  `ADMIN`, the resources above, and the admin grants. Without it no one can administer
-  anything.
+  `ADMIN`, the resources `catalog.product`, `catalog.comment`, `catalog.discount`,
+  `payment.refund`, and the ADMIN grants over them. Without it nobody can register (no `USER`
+  role) and nobody can administer anything.
 
 ## D. Identity propagation (decided: gateway injects a trusted header)
 
@@ -192,7 +205,10 @@ route the gateway itself calls).
   guessing header names.
 - Services keep reading `x-user-id` (Order's `app.ts` already does), so **the retrofit is
   header hygiene at the edge plus network isolation**, not a rewrite of every service.
-  Existing int/e2e tests that set the header keep working unchanged.
+  **Cost correction (measured during implementation):** this is not free. Order's read routes
+  gained a hard `x-user-id` requirement as part of the ownership fix, so six Order test files
+  had to thread an owner id through their helpers. The decision still stands — the
+  alternatives cost far more — but "existing tests keep working unchanged" was optimistic.
 - **Network isolation is what makes this safe.** A new `prod` compose profile publishes
   **only** the gateway's port; service `ports:` mappings live in the default `app`
   profile for local development. Documented explicitly as the trust boundary.
@@ -212,6 +228,10 @@ route the gateway itself calls).
   `/admin/payments`, `/webhooks/payment` → payment (`services/payment/src/app.ts:52,71`);
   **not** `GET /payments/:orderId` — see Known limitations;
   `/auth` → identity. `changeOrigin: false`, `xfwd: true`.
+  **`req.url` is restored to `req.originalUrl` before forwarding.** Express trims it to the
+  mount-relative remainder inside `app.use()`, and http-proxy-middleware v3 dropped the
+  legacy patch that put it back — without this every mounted route reaches its service with
+  the prefix missing. A test asserts the exact path each upstream receives.
 - **`POST /webhooks/payment` is proxied but exempt from auth AND CSRF.** It is a provider
   callback with no browser session and no cookie; the prod profile closes payment's port, so
   routing it through the gateway is the only way it stays reachable. It keeps the general
@@ -238,7 +258,19 @@ route the gateway itself calls).
   `/auth/login|register|refresh` must echo the `XSRF-TOKEN` value in an `X-CSRF-Token`
   header; mismatch → 403. Safe methods and the SSE stream are exempt.
 - **Rate limit:** `express-rate-limit` — a strict bucket on `/auth/*` (10/min/IP, the
-  credential-stuffing surface) and a general bucket elsewhere (300/min/IP).
+  credential-stuffing surface) and a general bucket elsewhere (300/min/IP). `trust proxy` is
+  set so clients behind a TLS terminator do not share one bucket.
+- **Path normalisation is a security control, not tidiness.** The gateway sets
+  `case sensitive routing` and rejects any path containing `..` or `%2e` with 400, and every
+  rule in the permission table matches case-insensitively. Express matches mounts
+  case-insensitively and so do the services, so without this `POST /Products` matches no
+  rule, skips authentication on an optional-auth mount, and still reaches catalog. Removing
+  either half re-opens that bypass.
+- **Mount auth split:** only `/products` is optional-auth (browsing is public). `/comments`
+  and `/discounts` require authentication because they carry mutations —
+  `DELETE /comments/:id` cascades a subtree and `POST /discounts/:code/apply` takes a
+  `userId` — so "unlisted route" there must still mean authenticated. `/cart`, `/orders` and
+  `/admin/payments` require authentication outright.
 - **helmet** with defaults; **traceId** minted here and forwarded as `x-trace-id`
   (`traceMiddleware` already reads it downstream).
 - **`/readyz` means "the grants snapshot is loaded"** — nothing more. Upstream reachability
@@ -270,8 +302,12 @@ decision) — Notification's welcome email is a named backlog item, not silent s
 ## G. Wiring / infra
 
 - Compose: `identity` (:3006) and `gateway` (:8000) under the `app` profile with
-  `restart: unless-stopped`; gateway `depends_on` the services it proxies. A `prod`
-  profile variant publishes only `8000`. `kafka-ui` already owns 8080, hence 8000.
+  `restart: unless-stopped`; gateway `depends_on` the services it proxies. `kafka-ui`
+  already owns 8080, hence 8000.
+- Port isolation is an **overlay file**, not a profile: `docker-compose.prod.example.yml`,
+  applied with a second `-f`, clears every other service's ports with `!reset` (compose
+  *merges* port lists, so a bare `[]` would silently do nothing) and leaves only `8000`
+  published.
 - CI: an Identity step (migrate deploy + `pnpm vitest run services/identity`) and a
   Gateway step (no DB, stub-backed).
 - `docs/runbooks/phase-6-auth-demo.md`: keypair generation, seed, register → login →
@@ -283,7 +319,8 @@ decision) — Notification's welcome email is a named backlog item, not silent s
 Identity: `DATABASE_URL`, `KAFKA_BROKERS`, `JWT_PRIVATE_KEY`, `ACCESS_TTL` (15m),
 `REFRESH_TTL_DAYS` (7), `BCRYPT_COST` (10), `PORT` (3006), `LOG_LEVEL`.
 Gateway: `JWT_PUBLIC_KEY`, `IDENTITY_URL`, `ORDER_URL`, `CATALOG_URL`, `PAYMENT_URL`,
-`GRANTS_TTL_MS` (60000), `COOKIE_SECURE` (false), `PORT` (8000), `LOG_LEVEL`.
+`GRANTS_TTL_MS` (60000), `BREAKER_TIMEOUT_MS` (5000), `BREAKER_RESET_MS` (10000),
+`COOKIE_SECURE` (false), `PORT` (8000), `LOG_LEVEL`.
 
 Inherited per-service DoD: health router (`/healthz`, `/readyz`), structured logging with
 traceId, graceful shutdown, migrations CLI-only, per-service env gitignored, no secrets or
@@ -343,6 +380,9 @@ PII in logs.
   Covers header stripping (a forged `x-user-id` never reaches the upstream), injection,
   401 vs 403, the CSRF matrix, rate-limit, timeout → 504, breaker open → 503, and an
   **SSE pass-through test that asserts frames arrive incrementally**, not buffered.
+- **Seed ↔ rules guard (identity int):** the seeded ADMIN grants must cover every
+  `(resource, action)` in the gateway's rules table — the gateway's fake snapshot cannot
+  catch a permission the seed forgets.
 - **Order ownership (int):** a second user's `GET /orders/:id` and `/orders/:id/stream` both
   404 while the owner's succeed — the regression test for the IDOR closed in §C.
 - **e2e / demo:** `docs/runbooks/phase-6-auth-demo.md` against compose.

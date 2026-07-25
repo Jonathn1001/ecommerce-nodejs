@@ -346,6 +346,28 @@ describe("gateway (integration — stub upstream)", () => {
     });
   });
 
+  describe("rate limiting", () => {
+    it("throttles the auth surface (credential stuffing) at 10/min", async () => {
+      // Its own app instance: the limiter is keyed by IP, so sharing one with the other
+      // tests would make this depend on how many auth calls they happened to make first.
+      const local = build();
+      const statuses: number[] = [];
+      for (let i = 0; i < 12; i++) {
+        const res = await request(local)
+          .post("/auth/login")
+          .send({ email: "a@b.test", password: "x" });
+        statuses.push(res.status);
+      }
+      expect(statuses.filter((s) => s === 429).length).toBeGreaterThan(0);
+      expect(statuses.slice(0, 10).every((s) => s !== 429)).toBe(true);
+    }, 20_000);
+
+    it("does not throttle ordinary browsing at the auth rate", async () => {
+      const local = build();
+      for (let i = 0; i < 12; i++) await request(local).get("/products").expect(200);
+    }, 20_000);
+  });
+
   describe("resilience", () => {
     it("times out a hanging upstream with 504, then opens the breaker (503)", async () => {
       const local = build({ breaker: { timeoutMs: 150, resetMs: 10_000 } });
