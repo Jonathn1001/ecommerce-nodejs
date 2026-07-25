@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String         @id @default(uuid())
+  email     String         @unique
+  password  String // bcryptjs hash
+  name      String
+  roleId    String
+  role      Role           @relation(fields: [roleId], references: [id])
+  status    String         @default("ACTIVE") // ACTIVE | BLOCKED
+  createdAt DateTime       @default(now())
+  sessions  RefreshToken[]
+
+  @@index([roleId])
+}
+
+// One row per session (device), NOT one per user: a phone login must not evict a laptop.
+// `familyId` groups a rotation chain, so reuse-detection revokes exactly that chain.
+// Only the sha256 of the opaque token is stored — a DB leak must not resume sessions.
+model RefreshToken {
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId   String
+  revokedAt  DateTime?
+  replacedBy String?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model Role {
+  id     String  @id @default(uuid())
+  name   String  @unique // USER | ADMIN
+  grants Grant[]
+  users  User[]
+}
+
+model Resource {
+  id     String  @id @default(uuid())
+  name   String  @unique // catalog.product | payment.refund | ...
+  grants Grant[]
+}
+
+model Grant {
+  id         String   @id @default(uuid())
+  roleId     String
+  resourceId String
+  action     String // read | create | update | delete
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, resourceId, action])
+  @@index([resourceId])
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+model Outbox {
+  id            String    @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  type          String
+  version       Int       @default(1)
+  traceId       String
+  producer      String
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([sentAt])
+}
