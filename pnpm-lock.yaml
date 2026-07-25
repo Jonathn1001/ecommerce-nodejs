@@ -194,6 +194,46 @@ importers:
         specifier: ^7.0.0
         version: 7.2.2
 
+  services/notification:
+    dependencies:
+      '@ecom/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@ecom/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@prisma/client':
+        specifier: ^6.1.0
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      express:
+        specifier: ^4.21.0
+        version: 4.22.2
+      nodemailer:
+        specifier: ^6.9.15
+        version: 6.10.1
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/nodemailer':
+        specifier: ^6.4.16
+        version: 6.4.24
+      '@types/supertest':
+        specifier: ^6.0.2
+        version: 6.0.3
+      prisma:
+        specifier: ^6.1.0
+        version: 6.19.3(typescript@5.9.3)
+      supertest:
+        specifier: ^7.0.0
+        version: 7.2.2
+
   services/order:
     dependencies:
       '@ecom/contracts':
@@ -864,6 +904,9 @@ packages:
 
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
+
+  '@types/nodemailer@6.4.24':
+    resolution: {integrity: sha512-Ww4u0rT9wQNXh4JiQaIwx3QWdcOFXzOjQA2zc+jtFYNmQiT4mIUqcDin51bDFdkzKubFnQCZNK7FIHlPKQ/q9w==}
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
@@ -1620,6 +1663,10 @@ packages:
 
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
+
+  nodemailer@6.10.1:
+    resolution: {integrity: sha512-Z+iLaBGVaSjbIzQ4pX6XV41HrooLsQ10ZWPUehGmuantvzWoDVBnmsdUcOIDM1t+yPor5pDhVlDESgOMEGxhHA==}
+    engines: {node: '>=6.0.0'}
 
   nypm@0.6.8:
     resolution: {integrity: sha512-Q9K4Diu6l5u6xJQogeFSs/zKtyMSgFKFtRQV+tHP4kL7KPm2grpBU0dFIwFaXwNxN0MtfKWc43VpCugAa+LPsw==}
@@ -2524,6 +2571,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/nodemailer@6.4.24':
+    dependencies:
+      '@types/node': 22.20.1
+
   '@types/pg@8.20.0':
     dependencies:
       '@types/node': 22.20.1
@@ -3364,6 +3415,8 @@ snapshots:
   negotiator@0.6.3: {}
 
   node-fetch-native@1.6.7: {}
+
+  nodemailer@6.10.1: {}
 
   nypm@0.6.8:
     dependencies:

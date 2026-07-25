@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One row per (order, event type) — the unique pair is the dispatcher's dedup key,
+// so a redelivered order event cannot queue a second email. status in {PENDING, SENT};
+// the worker flips it with a compare-and-set after the mail is accepted.
+model Notification {
+  id        String    @id @default(uuid())
+  orderId   String
+  userId    String
+  type      String
+  to        String
+  subject   String
+  status    String    @default("PENDING")
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@unique([orderId, type])
+}
+
+model ProcessedEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+model Outbox {
+  id            String    @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  type          String
+  version       Int       @default(1)
+  traceId       String
+  producer      String
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([sentAt])
+}
