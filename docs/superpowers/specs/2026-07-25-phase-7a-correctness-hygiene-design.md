@@ -24,7 +24,20 @@ group is one plan task with its own tests. Groups are ordered by risk, not by co
 ## Scope
 
 **In:** the four groups below (§A–§D), covering every row of the roadmap's backlog-absorption
-map assigned to Phase 7 plus the deferrals opened by the Phase 5 and Phase 6 reviews.
+map assigned to Phase 7, plus the correctness and security deferrals opened by the Phase 5 and
+Phase 6 reviews — **except the five listed immediately below**, which stay out by decision.
+
+**Out — tracked items deliberately NOT in this slice** (listed so the Definition of Done can
+actually be evaluated):
+- **Notification's write-only `subject` column** (Phase 5 review): the worker re-renders from
+  `type` + `orderId` and ignores the stored value. Cosmetic; no failure mode.
+- **Concurrent duplicate email** (Phase 5, accepted): at-least-once with a best-effort sent
+  marker. Never loses or wedges a notification.
+- **Catalog comment author-ownership**: `Comment` records no author at all, so deletion is a
+  moderation action and stays ADMIN-only — **decided, not deferred** (§E decision 11).
+- **Notification consumer for `identity.user_registered`** (welcome email): named backlog,
+  unscheduled — a feature, not debt.
+- **Discount projection into Order's read model**: named backlog, unscheduled.
 
 **Out (and why):**
 - **In-process reconnect** for the Rabbit adapter and the SSE `pg` LISTEN client. Decided
@@ -48,8 +61,9 @@ throw is reachable today: a reservation whose `Inventory` row no longer exists m
 `tx.inventory.update` raise Prisma `P2025`, which is exactly what fails the 2 sweeper tests —
 stale dev-database rows poison the batch and the suite's own valid rows are never swept.
 
-Fix: wrap each order in try/catch, log `{ orderId, message }` (ids only), continue, and count
-only the orders that succeeded. Same lane-isolation shape as the outbox relay tick.
+Fix: wrap each order in try/catch, log `{ orderId, message }` (ids only), continue, and return
+the number of **reservations released by the orders that succeeded** — the unit `sweepOnce`
+already returns — not the number of orders attempted. Same lane-isolation shape as the outbox relay tick.
 
 > A poisoned reservation stays `ACTIVE` forever and is retried every sweep. That is correct —
 > silently releasing stock against a missing inventory row would be worse — but it means the
@@ -67,6 +81,11 @@ serial per partition), but Phase 3b raised the stakes and the guard is small.
   `count > 0`.
 - `applyResult` passes the status it read and returns **`NO_OP`** when the CAS loses, before
   emitting any event or notifying SSE. Losing the CAS must not emit a command.
+- **The `ProcessedEvent` row stays.** `markProcessed` runs at `transition.ts:55`, before
+  `setStatus` at :61, so a lost CAS commits the ledger row and returns `NO_OP`. That is
+  deliberate: the CAS can only lose because another event legitimately advanced the order, so
+  redelivering this one can never succeed. Do **not** "fix" it by rolling the transaction
+  back — that would redeliver the event forever.
 
 ### A3. Catalog `loadForUpdate` → a real row lock
 
@@ -88,8 +107,8 @@ startLedgerPruner(port: LedgerPrunerPort, opts: { retentionDays?: number; interv
 ```
 
 `LedgerPrunerPort.deleteOlderThan(cutoff: Date): Promise<number>` — each service supplies a
-one-line Prisma adapter, keeping the shared module free of any client. Defaults: 30 days,
-hourly. Adopted from each `main.ts`; the timer is `unref`'d and stopped in `gracefulShutdown`.
+one-line Prisma adapter, keeping the shared module free of any client. Defaults:
+`LEDGER_RETENTION_DAYS` 30, `LEDGER_PRUNE_INTERVAL_MS` 3 600 000 (hourly). Adopted from each `main.ts`; the timer is `unref`'d and stopped in `gracefulShutdown`.
 
 **Retention window rationale:** the ledger only needs to outlive the longest possible
 redelivery. Kafka's retention is the bound, so 30 days is generous by an order of magnitude
@@ -101,10 +120,12 @@ Same shape, in identity: delete rows past `expiresAt`, and revoked rows older th
 `retentionDays`. Revoked rows cannot be pruned immediately — reuse-detection needs to find a
 revoked row to recognise a replay (§C3's grace window depends on it too).
 
-### B3. Drop catalog's dead `ProcessedEvent` table
+### B3. Drop the dead `ProcessedEvent` tables (catalog **and** identity)
 
-`services/catalog/prisma/schema.prisma:74` was scaffold copy-paste; catalog consumes no
-events. Remove the model, generate the migration through the CLI, leave the folder untouched.
+Both are scaffold copy-paste from a consuming service, and neither consumes anything:
+`services/catalog/prisma/schema.prisma:74` and `services/identity/prisma/schema.prisma` (added
+in Phase 6 by cloning payment's scaffold). Remove both models, generate one migration per
+service through the CLI, leave the folders untouched.
 
 ## C. Security debt
 
@@ -116,8 +137,11 @@ anyone who can reach the edge can finalize any `PROCESSING` payment.
 
 - Header `x-webhook-signature: sha256=<hex>`, HMAC-SHA256 of the **raw** body with
   `PAYMENT_WEBHOOK_SECRET`, compared with `crypto.timingSafeEqual`.
-- Requires the raw body: mount `express.json({ verify })` capturing `req.rawBody` for that
-  route, since re-serialising `req.body` would not reproduce the provider's bytes.
+- Requires the raw body. `services/payment/src/app.ts:14` mounts `express.json()` **globally**,
+  so adding a second route-scoped parser would run after the body was already consumed and
+  leave `req.rawBody` undefined — every signature would fail closed. The global mount is
+  replaced by `express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } })`.
+  Re-serialising `req.body` is not an option: it would not reproduce the provider's bytes.
 - Missing or bad signature → **401**, logged as `webhook_signature_rejected` with `orderId`
   only. Verification happens **before** the payload is parsed or the order is looked up.
 - A `verifyWebhook(raw, header, secret): boolean` helper is pure and unit-tested; the route
@@ -136,7 +160,8 @@ own commit:
 1. `ChargePaymentPayloadSchema` gains `userId: z.string().min(1)` (required, matching how
    `order.events` were widened in Phase 5).
 2. Order's `applyResult` passes `order.userId` (already loaded by `loadOrder`).
-3. `Payment.userId` column, written by the charge consumer.
+3. `Payment.userId` column — **nullable**, so the migration applies to a table that already
+   has rows — written by the charge consumer whenever the command carries it.
 4. `GET /payments/:orderId` scopes by the injected `x-user-id` and answers **404** for a
    non-owner — 404, not 403, exactly as Order's ownership fix does.
 5. The gateway re-mounts `/payments` with `authRequired`.
@@ -176,6 +201,9 @@ anything above it.
 - `GET /.well-known/jwks.json` publishes the public halves as a JWKS (`kty: RSA`, `alg:
   RS256`, `use: sig`, per-key `kid`, `n`/`e` derived with Node's `createPublicKey().export({
   format: "jwk" })`).
+- **Gateway config changes shape:** `JWT_PUBLIC_KEY` becomes optional and `JWKS_URL` is added,
+  with a boot assertion that **at least one** is present — otherwise a misconfigured gateway
+  boots healthy and 401s every request.
 - The gateway replaces its static `JWT_PUBLIC_KEY` with a **JWKS cache** — the same
   fail-fast-at-boot / keep-last-good-on-refresh shape as the grants snapshot, keyed by `kid`.
   An unknown `kid` triggers one refresh, then 401. `JWT_PUBLIC_KEY` remains supported as a
@@ -196,9 +224,13 @@ anything above it.
 - **`hello` stays, deliberately.** It is the cheapest end-to-end proof that the platform
   primitives (DB + outbox + Kafka + health + graceful shutdown) still work, and it fails
   before any real service does when a shared package regresses. Documented as an intentional
-  canary in `services/hello/README.md` and in the roadmap's absorption map, so it is not
-  mistaken for leftover scaffolding.
-- **Polish** (each one line to a few): split `SubscriberRegistry` out of `sse-listener.ts`
+  canary in the roadmap's absorption map and in a header comment in `services/hello/src/main.ts`.
+  **No per-service README** — no other service has one, and inventing the convention for a
+  single decision is worse than putting it where a reader of that service will actually see it.
+- **Polish**, split into two commits by blast radius — the `packages/shared` edits
+  (`outbox.ts` `queueFor` compute-once; `kafka.ts` restoring `eventId` as the message key and a
+  logged field on the retry-exhausted DLQ path) touch every service and land separately from
+  the service-local ones: split `SubscriberRegistry` out of `sse-listener.ts`
   into its own file so a unit test stops pulling `pg` in transitively; guard the SSE 404 test
   against error/timeout; compute `queueFor` once per row in `outbox.ts`; restore `eventId` as
   the message key and a logged field on `kafka.ts`'s retry-exhausted DLQ path (today the
@@ -229,6 +261,8 @@ a service that cannot verify its webhook should refuse to boot.
 | 8 | JWKS minimal: `kid` + two-key overlap, manual rotation | Automatic rotation is a phase on its own; `kid` + a cache is what makes rotation *possible*. |
 | 9 | CI matrix over per-service steps | 7 near-identical steps is where copy-paste drift starts; 7b/7c add more services. |
 | 10 | JWKS ordered last | The largest item; droppable without touching anything above it. |
+| 11 | Comment deletion stays ADMIN-only | `Comment` records no author, so "delete your own" does not exist. Deletion is moderation; adding authorship is a feature, and this slice is debt. |
+| 12 | Five tracked items explicitly out (§Scope) | A DoD claiming "the backlog reaches zero" is only checkable if the exclusions are named. |
 
 ## F. Known limitations (intentional)
 
@@ -275,7 +309,7 @@ payment; `GET /payments/:orderId` is scoped and re-proxied through the gateway; 
 and `RefreshToken` are bounded; catalog's dead table is gone; a concurrent refresh no longer
 logs a user out; the gateway verifies tokens by `kid` from identity's JWKS; the CI integration
 job is one matrix step; the roadmap's backlog-absorption map has no unclaimed Phase-7 rows
-left except those explicitly assigned to 7b/7c/7d.
+left except those explicitly assigned to 7b/7c/7d **and the five named in §Scope-out**.
 
 ## Open questions
 
