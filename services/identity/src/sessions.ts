@@ -11,7 +11,9 @@ export type SessionRow = {
 export interface SessionTx {
   findByHash(tokenHash: string): Promise<SessionRow | null>;
   revokeFamily(familyId: string, at: Date): Promise<void>;
-  revokeOne(id: string, at: Date): Promise<void>;
+  // Returns the number of rows it actually revoked. 0 means someone else revoked this row
+  // first — the caller must treat that as a lost race, not as success.
+  revokeOne(id: string, at: Date): Promise<number>;
   mintInFamily(n: {
     tokenHash: string;
     userId: string;
@@ -21,7 +23,7 @@ export interface SessionTx {
   linkReplacement(oldId: string, newId: string): Promise<void>;
 }
 
-export type RotateOutcome = "ROTATED" | "UNKNOWN" | "REUSE" | "EXPIRED";
+export type RotateOutcome = "ROTATED" | "UNKNOWN" | "REUSE" | "EXPIRED" | "RACE";
 
 export type RotateResult = {
   outcome: RotateOutcome;
@@ -53,6 +55,14 @@ export async function rotateRefresh(
     return { outcome: "EXPIRED", userId: row.userId };
   }
 
+  // Claim the row FIRST. Under READ COMMITTED two concurrent rotations of the same token
+  // both read revokedAt === null; whichever revoke commits second matches zero rows. Without
+  // this check both would mint, leaving two live tokens in one family — and a thief racing
+  // the honest client would never trip reuse-detection, which is the whole point of the
+  // mechanism. The loser rolls back (the caller throws) and gets a 401.
+  const claimed = await tx.revokeOne(row.id, now);
+  if (claimed === 0) return { outcome: "RACE", userId: row.userId };
+
   const tokenHash = mintHash();
   const newId = await tx.mintInFamily({
     tokenHash,
@@ -60,7 +70,6 @@ export async function rotateRefresh(
     familyId: row.familyId,
     expiresAt: new Date(now.getTime() + ttlMs),
   });
-  await tx.revokeOne(row.id, now);
   await tx.linkReplacement(row.id, newId);
   return { outcome: "ROTATED", tokenHash, userId: row.userId };
 }

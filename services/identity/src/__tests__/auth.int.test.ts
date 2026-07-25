@@ -156,6 +156,27 @@ describe("identity auth (integration — needs compose up + migrated + seeded)",
       .expect(200);
   });
 
+  it("two concurrent refreshes of the same token never leave two live tokens in a family", async () => {
+    const s = await registerAndLogin();
+    const both = await Promise.all([
+      request(app).post("/auth/refresh").send({ refreshToken: s.refreshToken }),
+      request(app).post("/auth/refresh").send({ refreshToken: s.refreshToken }),
+    ]);
+    const ok = both.filter((r) => r.status === 200);
+    expect(ok).toHaveLength(1); // the loser is rejected, never silently given a second chain
+
+    // The security property: a thief racing the honest client cannot end up with a parallel
+    // session. Depending on which interleaving happens, the loser either loses the row claim
+    // (RACE -> 401, family intact) or reads the winner's committed revoke and treats it as
+    // reuse (-> the family is revoked and BOTH clients must log in again). Either way the
+    // count of live tokens is never 2 — see "Known limitations" in the spec.
+    const userId = (jwt.decode(s.accessToken) as jwt.JwtPayload).sub as string;
+    const live = await prisma.refreshToken.count({
+      where: { userId, revokedAt: null },
+    });
+    expect(live).toBeLessThanOrEqual(1);
+  });
+
   it("an unknown refresh token is 401 and revokes nothing", async () => {
     const s = await registerAndLogin();
     await request(app).post("/auth/refresh").send({ refreshToken: "nope" }).expect(401);

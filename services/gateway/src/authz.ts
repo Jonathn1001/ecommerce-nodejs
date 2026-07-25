@@ -11,26 +11,37 @@ export type Rule = { method: string; pattern: RegExp; permission: Permission };
 // else needs authentication only, and ownership stays in the owning service (the gateway has
 // no domain data to check rows against). Paths are the services' REAL paths — the proxy does
 // not rewrite prefixes.
+//
+// Every pattern is case-INSENSITIVE on purpose. Express matches mounts case-insensitively
+// and reports req.baseUrl as the caller typed it, and the upstream services match the same
+// way — so a case-sensitive table would let `POST /Products` past both this check and
+// authentication while still reaching catalog. The gateway also refuses case variants
+// outright (app.ts sets "case sensitive routing"); this is the second layer.
 export const RULES: Rule[] = [
   {
     method: "POST",
-    pattern: /^\/products\/?$/,
+    pattern: /^\/products\/?$/i,
     permission: { resource: "catalog.product", action: "create" },
   },
   {
     method: "PATCH",
-    pattern: /^\/products\/[^/]+\/?$/,
+    pattern: /^\/products\/[^/]+\/?$/i,
     permission: { resource: "catalog.product", action: "update" },
   },
   {
     method: "POST",
-    pattern: /^\/discounts\/?$/,
+    pattern: /^\/discounts\/?$/i,
     permission: { resource: "catalog.discount", action: "create" },
   },
   {
     method: "POST",
-    pattern: /^\/admin\/payments\/[^/]+\/refund\/?$/,
+    pattern: /^\/admin\/payments\/[^/]+\/refund\/?$/i,
     permission: { resource: "payment.refund", action: "create" },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/comments\/[^/]+\/?$/i,
+    permission: { resource: "catalog.comment", action: "delete" },
   },
 ];
 

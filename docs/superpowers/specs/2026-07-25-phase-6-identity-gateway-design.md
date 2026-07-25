@@ -209,8 +209,8 @@ route the gateway itself calls).
   `/products`, `/comments`, `/discounts` → catalog (`services/catalog/src/app.ts:48-215`,
   which serves `/products`, `/products/:id/comments`, `/comments/:id`, `/discounts` — there
   is no `/catalog` prefix to rewrite to);
-  `/payments`, `/admin/payments`, `/webhooks/payment` → payment
-  (`services/payment/src/app.ts:24,52,71`);
+  `/admin/payments`, `/webhooks/payment` → payment (`services/payment/src/app.ts:52,71`);
+  **not** `GET /payments/:orderId` — see Known limitations;
   `/auth` → identity. `changeOrigin: false`, `xfwd: true`.
 - **`POST /webhooks/payment` is proxied but exempt from auth AND CSRF.** It is a provider
   callback with no browser session and no cookie; the prod profile closes payment's port, so
@@ -317,6 +317,19 @@ PII in logs.
 5. **Services still trust a header** — safe only behind the gateway. Recorded in §D with
    the two hardening options.
 6. **No `/metrics`** anywhere (pre-existing platform gap, Phase 7).
+7. **A concurrent double-refresh logs the family out.** Rotation claims the row before
+   minting (`revokeOne` returns its affected count; 0 = lost race → 401), so two live tokens
+   can never coexist in a family. But if the loser's read lands after the winner commits, it
+   sees a revoked row and cannot distinguish an honest double-submit from a thief's replay —
+   it revokes the family and both clients must log in again. Strict by choice; a grace window
+   that tells the two apart is a Phase-7 option.
+8. **`GET /payments/:orderId` is not proxied.** `Payment` has no `userId`, so it cannot scope
+   by caller; exposing it through the gateway would re-open, for payments, exactly the IDOR
+   this phase closed on Order. Phase 7 carries `userId` onto `ChargePayment` and restores the
+   route.
+9. **The CSRF token is unbound to the session** — textbook stateless double-submit, so an
+   attacker who can write cookies (a hostile subdomain, or plain-http MITM) can forge one.
+10. **No expiry sweeper for `RefreshToken`** — revoked and expired rows accumulate.
 
 ## Testing (TDD)
 

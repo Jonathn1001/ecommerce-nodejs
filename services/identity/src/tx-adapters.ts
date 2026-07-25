@@ -24,10 +24,11 @@ export function sessionTx(tx: Prisma.TransactionClient): SessionTx {
       });
     },
     async revokeOne(id, at) {
-      await tx.refreshToken.updateMany({
+      const r = await tx.refreshToken.updateMany({
         where: { id, revokedAt: null },
         data: { revokedAt: at },
       });
+      return r.count; // 0 = another transaction claimed this token first
     },
     async mintInFamily(n) {
       const row = await tx.refreshToken.create({ data: n });

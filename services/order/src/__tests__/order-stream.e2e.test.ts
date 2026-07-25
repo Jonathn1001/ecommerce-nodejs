@@ -98,7 +98,7 @@ describe("order SSE stream e2e (needs compose up + migrated)", () => {
     await rabbit.assertWorkQueue(CHARGE_QUEUE);
     // relay routes Order's ChargePayment rows to the isolated e2e queue
     relay = startOutboxRelay(
-      scopedOutboxPort((id) => ownOrders.has(id)),
+      scopedOutboxPort(() => [...ownOrders]),
       producer,
       (t) => `${t}.events`,
       {

@@ -1,4 +1,5 @@
-import type { OutboxPort } from "@ecom/shared";
+import type { OutboxPort, OutboxRow } from "@ecom/shared";
+import { prisma } from "../db";
 import { outboxPort } from "../outbox-adapter";
 
 // Vitest runs test FILES in parallel, and every e2e file that starts a relay drains the same
@@ -9,11 +10,20 @@ import { outboxPort } from "../outbox-adapter";
 //
 // Scoping the FETCH (not just the routing) makes each file's relay handle only its own
 // aggregates, so parallel e2e files stop stealing each other's work.
-export function scopedOutboxPort(owns: (aggregateId: string) => boolean): OutboxPort {
+// The scope goes into the QUERY, not a filter after it. fetchUnsent is
+// `take: limit ORDER BY occurredAt ASC`, so filtering afterwards would starve a suite once
+// enough foreign unsent rows (left by aborted runs) sit at the head of that window.
+export function scopedOutboxPort(ownIds: () => string[]): OutboxPort {
   return {
     async fetchUnsent(limit) {
-      const rows = await outboxPort.fetchUnsent(limit);
-      return rows.filter((r) => owns(r.aggregateId));
+      const aggregateIds = ownIds();
+      if (aggregateIds.length === 0) return [];
+      const rows = await prisma.outbox.findMany({
+        where: { sentAt: null, aggregateId: { in: aggregateIds } },
+        orderBy: { occurredAt: "asc" },
+        take: limit,
+      });
+      return rows as unknown as OutboxRow[];
     },
     markSent: (id) => outboxPort.markSent(id),
   };

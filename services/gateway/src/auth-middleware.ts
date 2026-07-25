@@ -31,9 +31,11 @@ export function authenticate(publicKey: string, opts: { required: boolean }) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const fromCookie = (req.cookies as Record<string, string> | undefined)?.access_token;
     const header = req.header("authorization");
-    const token = fromCookie ?? (header?.startsWith("Bearer ") ? header.slice(7) : null);
+    const fromHeader = header?.startsWith("Bearer ") ? header.slice(7) : null;
+    // Try both, cookie first: a stale cookie must not make a valid Bearer unusable.
+    const candidates = [fromCookie, fromHeader].filter((t): t is string => !!t);
 
-    if (!token) {
+    if (candidates.length === 0) {
       if (opts.required) {
         res.status(401).json({ error: "unauthenticated" });
         return;
@@ -42,22 +44,22 @@ export function authenticate(publicKey: string, opts: { required: boolean }) {
       return;
     }
 
-    try {
-      const claims = jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as {
-        sub?: string;
-        role?: string;
-      };
-      if (!claims.sub || !claims.role) {
-        res.status(401).json({ error: "unauthenticated" });
+    for (const token of candidates) {
+      try {
+        const claims = jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as {
+          sub?: string;
+          role?: string;
+        };
+        if (!claims.sub || !claims.role) continue;
+        req.caller = { userId: claims.sub, role: claims.role };
+        req.headers[USER_HEADER] = claims.sub;
+        req.headers[ROLE_HEADER] = claims.role;
+        next();
         return;
+      } catch {
+        // Expired or forged — try the next candidate, then fail identically either way.
       }
-      req.caller = { userId: claims.sub, role: claims.role };
-      req.headers[USER_HEADER] = claims.sub;
-      req.headers[ROLE_HEADER] = claims.role;
-      next();
-    } catch {
-      // Expired or forged — identical answer either way.
-      res.status(401).json({ error: "unauthenticated" });
     }
+    res.status(401).json({ error: "unauthenticated" });
   };
 }

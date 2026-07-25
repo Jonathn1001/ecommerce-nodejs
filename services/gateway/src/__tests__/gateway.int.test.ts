@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createServer, type Server } from "http";
+import { createServer, request as httpRequest, type Server } from "http";
 import { generateKeyPairSync } from "crypto";
 import { AddressInfo } from "net";
 import request from "supertest";
@@ -25,7 +25,7 @@ function startStub(): Promise<{ server: Server; url: string; seen: string[] }> {
     const url = req.url ?? "";
     seen.push(`${req.method} ${url}`);
 
-    if (url.startsWith("/slow")) return; // never answers -> exercises the timeout
+    if (url.includes("/slow")) return; // never answers -> exercises the timeout
 
     if (url.includes("/stream")) {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -45,6 +45,7 @@ function startStub(): Promise<{ server: Server; url: string; seen: string[] }> {
           path: url,
           userId: req.headers["x-user-id"] ?? null,
           role: req.headers["x-user-role"] ?? null,
+          trace: req.headers["x-trace-id"] ?? null,
           body: body || null,
         })
       );
@@ -81,7 +82,11 @@ describe("gateway (integration — stub upstream)", () => {
         payment: stub.url,
       },
       grants: fakeGrants({
-        ADMIN: { "catalog.product": ["create", "update"], "payment.refund": ["create"] },
+        ADMIN: {
+          "catalog.product": ["create", "update"],
+          "payment.refund": ["create"],
+          "catalog.comment": ["delete"],
+        },
         USER: {},
       }),
       cookieSecure: false,
@@ -217,6 +222,127 @@ describe("gateway (integration — stub upstream)", () => {
 
     it("does not challenge safe methods", async () => {
       await request(app).get("/products").expect(200);
+    });
+  });
+
+  describe("path fidelity (regression: the mount prefix was being dropped)", () => {
+    // Express trims req.url inside app.use(), and http-proxy-middleware v3 no longer
+    // restores it — so every proxied route reached the upstream stripped ("/abc" for
+    // "/orders/abc") and 404ed in real life while the suite stayed green, because nothing
+    // asserted the path the upstream actually received.
+    it("forwards the FULL path, not the mount-relative remainder", async () => {
+      const auth = `Bearer ${sign("u1", "USER")}`;
+      const get = async (path: string) =>
+        (await request(app).get(path).set("Authorization", auth)).body.path;
+      expect(await get("/orders/o1")).toBe("/orders/o1");
+      expect(await get("/cart")).toBe("/cart");
+      expect(await get("/products/p1")).toBe("/products/p1");
+
+      const posted = await request(app)
+        .post("/cart/items")
+        .set("Authorization", auth)
+        .set("Cookie", ["XSRF-TOKEN=t"])
+        .set("X-CSRF-Token", "t")
+        .send({ productId: "p1", quantity: 1 });
+      expect(posted.body.path).toBe("/cart/items");
+
+      const webhook = await request(app).post("/webhooks/payment").send({});
+      expect(webhook.body.path).toBe("/webhooks/payment");
+
+      const refund = await request(app)
+        .post("/admin/payments/o1/refund")
+        .set("Authorization", `Bearer ${sign("admin", "ADMIN")}`)
+        .set("Cookie", ["XSRF-TOKEN=t"])
+        .set("X-CSRF-Token", "t")
+        .send({});
+      expect(refund.body.path).toBe("/admin/payments/o1/refund");
+    });
+
+    it("preserves the query string", async () => {
+      const res = await request(app).get("/products?limit=2");
+      expect(res.body.path).toBe("/products?limit=2");
+    });
+
+    it("forwards the trace id so one request keeps one trace across hops", async () => {
+      const res = await request(app).get("/products").set("x-trace-id", "trace-abc");
+      expect(res.body.trace).toBe("trace-abc");
+    });
+  });
+
+  describe("path normalisation (regression: case variants bypassed authz)", () => {
+    // Express matches mounts case-insensitively and the RBAC table was case-SENSITIVE, so
+    // `POST /Products` matched no rule, skipped authentication entirely on the optional-auth
+    // mount, and still reached catalog — which also matches case-insensitively.
+    it("refuses a case-varied protected route instead of forwarding it", async () => {
+      const res = await request(app)
+        .post("/Products")
+        .set("Cookie", ["XSRF-TOKEN=t"])
+        .set("X-CSRF-Token", "t")
+        .send({});
+      expect(res.status).not.toBe(200);
+      expect(res.body.path).toBeUndefined(); // never reached the upstream
+    });
+
+    it("does not let a case-varied refund through as a plain USER", async () => {
+      const res = await request(app)
+        .post("/Admin/payments/o1/refund")
+        .set("Authorization", `Bearer ${sign("u1", "USER")}`)
+        .set("Cookie", ["XSRF-TOKEN=t"])
+        .set("X-CSRF-Token", "t")
+        .send({});
+      expect(res.status).not.toBe(200);
+    });
+
+    it("rejects traversal attempts outright", async () => {
+      // Raw socket, not supertest: superagent normalises "/a/../b" to "/b" client-side, so
+      // the guard would never see the path an attacker actually sends.
+      const server = build().listen(0);
+      const { port } = server.address() as AddressInfo;
+      const rawGet = (path: string) =>
+        new Promise<number>((resolve, reject) => {
+          const req = httpRequest(
+            { host: "127.0.0.1", port, path, method: "GET" },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode ?? 0);
+            }
+          );
+          req.on("error", reject);
+          req.end();
+        });
+      expect(await rawGet("/products/../products")).toBe(400);
+      expect(await rawGet("/products/%2e%2e/products")).toBe(400);
+      server.close();
+    });
+  });
+
+  describe("mutating catalog surfaces require authentication", () => {
+    it("an anonymous caller cannot delete a comment", async () => {
+      const res = await request(app)
+        .delete("/comments/c1")
+        .set("Cookie", ["XSRF-TOKEN=t"])
+        .set("X-CSRF-Token", "t");
+      expect(res.status).toBe(401);
+    });
+
+    it("a USER cannot delete a comment; an ADMIN can", async () => {
+      const send = (role: string) =>
+        request(app)
+          .delete("/comments/c1")
+          .set("Authorization", `Bearer ${sign("u1", role)}`)
+          .set("Cookie", ["XSRF-TOKEN=t"])
+          .set("X-CSRF-Token", "t");
+      expect((await send("USER")).status).toBe(403);
+      expect((await send("ADMIN")).status).toBe(200);
+    });
+
+    it("an anonymous caller cannot apply a discount", async () => {
+      const res = await request(app)
+        .post("/discounts/code/apply")
+        .set("Cookie", ["XSRF-TOKEN=t"])
+        .set("X-CSRF-Token", "t")
+        .send({ userId: "someone-else" });
+      expect(res.status).toBe(401);
     });
   });
 

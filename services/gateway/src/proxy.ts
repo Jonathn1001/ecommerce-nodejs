@@ -79,6 +79,11 @@ export function guardWithBreaker(
   breaker.on("close", () => log.info("breaker_closed", { upstream: name }));
 
   return (req: Request, res: Response, _next: NextFunction) => {
+    // Express trims req.url to the mount-relative remainder inside app.use("/orders", …),
+    // and http-proxy-middleware v3 no longer restores it — so the upstream would receive
+    // "/abc" for "/orders/abc" and 404 the entire proxied surface. Put the original path
+    // back before forwarding.
+    req.url = req.originalUrl ?? req.url;
     breaker.fire(req, res).catch((e: Error & { code?: string }) => {
       if (res.headersSent) {
         res.end();
@@ -87,6 +92,15 @@ export function guardWithBreaker(
       // Open circuit -> 503 (we never touched the upstream). Timeout -> 504.
       if (e.code === "EOPENBREAKER" || breaker.opened) {
         res.status(503).json({ error: "upstream unavailable", upstream: name });
+        return;
+      }
+      // A refused/reset connection is not a timeout — report it honestly.
+      if (
+        e.code === "ECONNREFUSED" ||
+        e.code === "ECONNRESET" ||
+        e.code === "EHOSTUNREACH"
+      ) {
+        res.status(502).json({ error: "upstream unreachable", upstream: name });
         return;
       }
       res.status(504).json({ error: "upstream timeout", upstream: name });

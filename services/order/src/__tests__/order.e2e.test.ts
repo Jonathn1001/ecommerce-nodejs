@@ -34,7 +34,7 @@ describe("order slice e2e (needs docker compose up + migrated)", () => {
 
     await producer.connect();
     relay = startOutboxRelay(
-      scopedOutboxPort((id) => ownOrders.has(id)),
+      scopedOutboxPort(() => [...ownOrders]),
       producer,
       (t) => `${t}.events`,
       {

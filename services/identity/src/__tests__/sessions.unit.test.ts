@@ -17,8 +17,16 @@ function fakeTx(rows: SessionRow[]) {
       for (const row of store.values())
         if (row.familyId === familyId) row.revokedAt = NOW;
     },
+    // Mirrors the SQL guard `WHERE revokedAt IS NULL` and returns the affected count. The
+    // old fake revoked unconditionally, which is exactly why it could not see the race.
     async revokeOne(id) {
-      for (const row of store.values()) if (row.id === id) row.revokedAt = NOW;
+      let count = 0;
+      for (const row of store.values())
+        if (row.id === id && row.revokedAt === null) {
+          row.revokedAt = NOW;
+          count++;
+        }
+      return count;
     },
     async mintInFamily(n) {
       minted.push({ familyId: n.familyId, userId: n.userId });
@@ -94,6 +102,23 @@ describe("rotateRefresh", () => {
     const second = await rotateRefresh(f.tx, "h1", NOW, () => "h3");
     expect(second.outcome).toBe("REUSE");
     expect(f.store.get("h2")!.revokedAt).toEqual(NOW); // the honest client is logged out too
+  });
+
+  it("a lost claim race -> RACE, and nothing is minted (no two live tokens in a family)", async () => {
+    const f = fakeTx([live()]);
+    // Simulate the concurrent winner: the row is already claimed by the time we revoke.
+    const racing = {
+      ...f.tx,
+      async findByHash() {
+        return live(); // still looks live to this transaction (READ COMMITTED snapshot)
+      },
+      async revokeOne() {
+        return 0; // the other transaction got there first
+      },
+    };
+    const r = await rotateRefresh(racing, "h1", NOW, () => "h2");
+    expect(r.outcome).toBe("RACE");
+    expect(f.minted).toEqual([]);
   });
 
   it("another family is untouched by a reuse in this one", async () => {

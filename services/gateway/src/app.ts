@@ -2,7 +2,12 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
+import {
+  traceMiddleware,
+  createLogger,
+  createHealthRouter,
+  TRACE_HEADER,
+} from "@ecom/shared";
 import { authenticate, stripIdentityHeaders } from "./auth-middleware";
 import { authorize } from "./authz";
 import { csrfGuard } from "./csrf";
@@ -36,11 +41,34 @@ export function createApp(deps: GatewayDeps): express.Application {
   const app = express();
   const doFetch = deps.fetchImpl ?? fetch;
 
+  // Express matches mounts case-insensitively by default and hands the path through as
+  // typed, so `POST /Products` would miss the RBAC table while still reaching catalog (which
+  // also matches case-insensitively). Refuse the variant here rather than forward it.
+  app.set("case sensitive routing", true);
+  // Behind a TLS terminator every client would otherwise share one rate-limit bucket.
+  app.set("trust proxy", 1);
+
   app.use(helmet());
   app.use(cookieParser());
   app.use(traceMiddleware());
   // FIRST, always: a client must not be able to hand a service an identity.
   app.use(stripIdentityHeaders());
+  // traceMiddleware only sets req.traceId and a RESPONSE header; forward it so a request
+  // keeps one trace id across every hop instead of starting a fresh one per service.
+  app.use((req, _res, next) => {
+    req.headers[TRACE_HEADER] = req.traceId;
+    next();
+  });
+  // Traversal never has a legitimate meaning here, and one normalizing hop in front of the
+  // gateway would turn it into a rule bypass.
+  app.use((req, res, next) => {
+    const raw = req.originalUrl ?? req.url;
+    if (raw.includes("..") || /%2e/i.test(raw)) {
+      res.status(400).json({ error: "invalid path" });
+      return;
+    }
+    next();
+  });
 
   app.use(
     createHealthRouter({
@@ -122,7 +150,7 @@ export function createApp(deps: GatewayDeps): express.Application {
     }
   });
 
-  app.post("/auth/logout", async (req, res) => {
+  app.post("/auth/logout", authLimiter, async (req, res) => {
     const token = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
     if (token) {
       try {
@@ -140,8 +168,16 @@ export function createApp(deps: GatewayDeps): express.Application {
   });
 
   // ---- proxied surface ----
-  const guard = (name: string, target: string) =>
-    guardWithBreaker(name, createUpstreamProxy(target), deps.breaker);
+  // Memoised per upstream: `guard` is called several times per service, and a fresh breaker
+  // per mount would mean /products failing tells /comments nothing.
+  const breakers = new Map<string, ReturnType<typeof guardWithBreaker>>();
+  const guard = (name: string, target: string) => {
+    const existing = breakers.get(name);
+    if (existing) return existing;
+    const handler = guardWithBreaker(name, createUpstreamProxy(target), deps.breaker);
+    breakers.set(name, handler);
+    return handler;
+  };
 
   const authRequired = authenticate(deps.publicKey, { required: true });
   const authOptional = authenticate(deps.publicKey, { required: false });
@@ -153,10 +189,15 @@ export function createApp(deps: GatewayDeps): express.Application {
   app.use("/cart", authRequired, authz, guard("order", deps.upstreams.order));
   app.use("/orders", authRequired, authz, guard("order", deps.upstreams.order));
   // Browsing the catalog is public; mutating it is not (authz decides from the rules table).
+  // Browsing products is public; every other catalog surface carries mutations
+  // (DELETE /comments/:id cascades, POST /discounts/:code/apply burns a redemption), so an
+  // "unlisted route" there must still mean authenticated.
   app.use("/products", authOptional, authz, guard("catalog", deps.upstreams.catalog));
-  app.use("/comments", authOptional, authz, guard("catalog", deps.upstreams.catalog));
-  app.use("/discounts", authOptional, authz, guard("catalog", deps.upstreams.catalog));
-  app.use("/payments", authRequired, authz, guard("payment", deps.upstreams.payment));
+  app.use("/comments", authRequired, authz, guard("catalog", deps.upstreams.catalog));
+  app.use("/discounts", authRequired, authz, guard("catalog", deps.upstreams.catalog));
+  // GET /payments/:orderId is deliberately NOT proxied: Payment has no userId to scope by,
+  // so exposing it would hand any authenticated caller another user's amount and status —
+  // the same IDOR this phase closed on Order. Phase 7 carries userId onto ChargePayment.
   app.use(
     "/admin/payments",
     authRequired,

@@ -11,7 +11,8 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // caller has no XSRF cookie yet) and the provider webhook (a server-to-server callback).
 export function csrfGuard(exempt: RegExp[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (!MUTATING.has(req.method) || exempt.some((r) => r.test(req.path))) {
+    const path = (req.path || "/").replace(/\/+$/, "") || "/";
+    if (!MUTATING.has(req.method) || exempt.some((r) => r.test(path))) {
       next();
       return;
     }

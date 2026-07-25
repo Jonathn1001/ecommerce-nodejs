@@ -26,7 +26,11 @@ export function createGrantsCache(cfg: {
   let timer: ReturnType<typeof setInterval> | null = null;
 
   async function refresh(): Promise<void> {
-    const res = await doFetch(`${cfg.identityUrl}/internal/grants`);
+    // Bounded: a HUNG identity (not a down one) would otherwise hang gateway boot forever,
+    // and the healthcheck would restart-loop with no useful error.
+    const res = await doFetch(`${cfg.identityUrl}/internal/grants`, {
+      signal: AbortSignal.timeout(5_000),
+    });
     if (!res.ok) throw new Error(`grants_fetch_status_${res.status}`);
     snapshot = (await res.json()) as GrantsSnapshot;
     loaded = true;

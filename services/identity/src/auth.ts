@@ -92,6 +92,8 @@ export async function refresh(
       refreshTtlMs()
     )
   );
+  // Anything but ROTATED is a 401 — including RACE, where a concurrent refresh already
+  // consumed this token and minted the successor.
   if (result.outcome !== "ROTATED")
     return { outcome: "REJECTED", reason: result.outcome };
 
