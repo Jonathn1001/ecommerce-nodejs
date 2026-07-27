@@ -70,9 +70,3 @@ model Outbox {
 
   @@index([sentAt])
 }
-
-model ProcessedEvent {
-  eventId     String   @id
-  type        String
-  processedAt DateTime @default(now())
-}

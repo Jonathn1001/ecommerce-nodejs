@@ -65,12 +65,6 @@ model Grant {
   @@index([resourceId])
 }
 
-model ProcessedEvent {
-  eventId     String   @id
-  type        String
-  processedAt DateTime @default(now())
-}
-
 model Outbox {
   id            String    @id @default(uuid())
   aggregateType String
