@@ -231,9 +231,13 @@ anything above it.
 
 ## D. Test and CI hygiene
 
-- **CI matrix.** The integration job has 7 near-identical per-service steps. Collapse to one
-  `strategy.matrix` step over `{ service, database, seed }`, with `hello` and the
-  no-database services expressed as matrix rows rather than special cases.
+- **CI matrix.** The integration job has 7 near-identical per-service steps. Collapse them to
+  one definition. **As shipped this is a single `run` step looping over the services, not a
+  `strategy.matrix`:** a matrix is job-level only in GitHub Actions, and service containers do
+  not survive across jobs, so every matrix leg would have to start its own infra. `hello` and
+  the no-database services are `case` arms rather than special-cased steps, and an unmatched
+  service name fails the step loudly instead of being silently skipped. Do not "restore" the
+  matrix — it was considered and rejected for the reason above.
 - **Durable-topic reset.** `inventory.events` and friends grow every dev/CI run, and each new
   consumer group replays from the beginning — a latent breach of the 25s poll budgets, and
   already the cause of one truncation this session. Ship
@@ -334,7 +338,7 @@ The whole suite is green with no accepted exceptions; an unsigned webhook cannot
 payment; `GET /payments/:orderId` is scoped and re-proxied through the gateway; `ProcessedEvent`
 and `RefreshToken` are bounded; catalog's dead table is gone; a concurrent refresh no longer
 logs a user out; the gateway verifies tokens by `kid` from identity's JWKS; the CI integration
-job is one matrix step; the roadmap's backlog-absorption map has no unclaimed Phase-7 rows
+job runs one looping service-test step; the roadmap's backlog-absorption map has no unclaimed Phase-7 rows
 left except those explicitly assigned to 7b/7c/7d **and the five named in §Scope-out**.
 
 ## Open questions
