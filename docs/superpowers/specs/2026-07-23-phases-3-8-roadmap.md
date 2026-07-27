@@ -160,8 +160,8 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | 3b-review minor polish — `outbox.ts` `queueFor` compute-once; `kafka.ts` restore `eventId` key+log on the retry-exhausted DLQ path; `ORDER_CONFIRMED` const grouping; payment-leg e2e assert `payload.orderId` + tighten teardown race | opportunistic / **7** (7c hygiene) |
 | Kafka envelope-parse DLQ-bypass fix (`packages/shared/src/kafka.ts`) | **3** (3b) |
 | Trace propagation (AsyncLocalStorage, consumer-side traceId) | **7** (subsumed by OTel) |
-| `ProcessedEvent` retention | **7** (7c) |
-| `/metrics` + prom-client module | **7** (7a) |
+| `ProcessedEvent` retention | **7** (7a — landed via Task 4's `startLedgerPruner`) |
+| `/metrics` + prom-client module | **7** (7b) |
 | Compose: mailpit | **5** |
 | Compose: prometheus / grafana / jaeger | **7** |
 | Per-service compose `app` entries + hand-added CI integration steps | every phase (part of its DoD) |
@@ -169,7 +169,7 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | Gateway timeouts + circuit breaker (umbrella §Resilience) | **6** (6b) |
 | `x-user-id` → verified-identity retrofit across existing services | **6** (6b) |
 | Dedup-pattern guidance in `shared` (ProcessedEvent vs Redis `markProcessed`) | **5** (5a decides + documents) |
-| e2e durable-topic reset · CI matrix refactor | **7** (7c) |
+| e2e durable-topic reset · CI matrix refactor | **7** (7a — landed via Task 11) |
 | hello-service fate | decided: kept as canary (7a) |
 | Discount projection into Order's read model | named backlog (post-4, unscheduled) |
 | Stale repo `CLAUDE.md` (still describes the legacy MVC/MongoDB app — misleads every agent session) | one-off chore, next session touching repo docs |

@@ -28,6 +28,19 @@ before migrating or running the service:
 | RabbitMQ   | localhost:5672          | AMQP                          |
 | Rabbit UI  | http://localhost:15672  | user/pass from `.env`         |
 | Redis      | localhost:6379          |                               |
+| Mailpit    | http://localhost:8025   | SMTP on 1025; see below       |
+
+**Your local `docker-compose.yml` can drift behind `docker-compose.example.yml`.**
+It is your own gitignored copy (`cp docker-compose.example.yml docker-compose.yml`
+above), made once — it does not update itself when a later phase adds a service to
+the example file. Mailpit is the concrete case: if your copy predates the
+notification phase, it has no `mailpit` entry at all, so `docker compose up -d`
+neither starts it nor ever recycles it, and a wedged mailpit container (e.g. after
+`docker compose stop mailpit` during the DLQ-replay demo, see
+`docs/runbooks/phase-5-notification-demo.md`) silently stays down until you notice
+notification tests turning red and restart it by hand. If a service's tests depend
+on infra your local file might be missing, re-diff against
+`docker-compose.example.yml` (or just re-copy it, keeping your `.env`).
 
 ## Databases
 

@@ -170,10 +170,13 @@ own commit:
 5. The gateway re-mounts `/payments` with `authRequired`.
 
 **Backward compatibility:** in-flight `ChargePayment` commands enqueued before deploy have no
-`userId`, so the widened parse would reject them into the DLQ. The demo stack is disposable
-and the DLQ replay path exists, so the spec accepts this; the migration adds the column as
-nullable and the consumer writes it when present. Reads treat `userId === null` as "not
-owned by anyone" → 404, so an unscopeable legacy row is never leaked.
+`userId`. **As shipped, these are tolerated, not rejected:** the *producer*-side
+`ChargePaymentPayloadSchema` requires `userId`, but the consumer parses with a separate,
+more lenient schema (`userId` optional) so a pre-deploy command still processes — with
+`userId: null` and a one-time `charge_missing_user_id` log — instead of retrying three times
+and landing in the DLQ for good. The migration adds the column as nullable and the consumer
+writes it when present. Reads treat `userId === null` as "not owned by anyone" → 404, so an
+unscopeable legacy row is never leaked.
 
 ### C3. Refresh-token grace window
 
@@ -199,8 +202,12 @@ family is revoked and an honest client is logged out (a Phase-6 known limitation
 Largest item in the slice, and **last on purpose**: it can be dropped without disturbing
 anything above it.
 
-- Identity signs with a `kid` in the JWT header. `IDENTITY_KEYS` holds one or two active
-  keypairs (`kid:pem` pairs); the first is the signer, any listed key stays verifiable.
+- Identity signs with a `kid` in the JWT header (a fingerprint of the public key, so a
+  rotated key keeps its identity across restarts with no registry to maintain). **As
+  shipped:** `JWT_PRIVATE_KEY` is the single active signing key (required); the optional
+  `JWT_PREVIOUS_PUBLIC_KEY` holds only a public half — enough to stay verifiable through a
+  rotation window, never enough to sign — kept alive until the longest-lived access token
+  under it expires.
 - `GET /.well-known/jwks.json` publishes the public halves as a JWKS (`kty: RSA`, `alg:
   RS256`, `use: sig`, per-key `kid`, `n`/`e` derived with Node's `createPublicKey().export({
   format: "jwk" })`).
@@ -209,10 +216,18 @@ anything above it.
   boots healthy and 401s every request.
 - The gateway replaces its static `JWT_PUBLIC_KEY` with a **JWKS cache** — the same
   fail-fast-at-boot / keep-last-good-on-refresh shape as the grants snapshot, keyed by `kid`.
-  An unknown `kid` triggers one refresh, then 401. `JWT_PUBLIC_KEY` remains supported as a
-  fallback so the gateway still boots against an identity that has not rotated.
+  **As shipped, the cache never refreshes on a miss** — an unknown or missing `kid` is 401
+  immediately (`auth-middleware.ts` moves on to the next credential/candidate; nothing calls
+  `jwks-cache.ts`'s `refresh()` from the lookup path). The cache only ever refreshes on its
+  own `JWKS_TTL_MS` interval (default 10 minutes), so in a JWKS-only deployment a key
+  rotation can 401 real traffic for up to that long. `JWT_PUBLIC_KEY` remains supported as a
+  fallback so the gateway still boots against an identity that has not rotated, and — per the
+  rotation runbook note in `docs/runbooks/phase-6-auth-demo.md` — covers both rotation
+  hazards if kept configured through a rotation window.
 - **Rotation is manual and documented, not automatic:** add the new key second, deploy,
   promote it to first, deploy, drop the old one once the longest access-token TTL has passed.
+  See the rotation runbook note in `docs/runbooks/phase-6-auth-demo.md` for the two concrete
+  hazards an operator needs to plan around.
 
 ## D. Test and CI hygiene
 
@@ -223,7 +238,11 @@ anything above it.
   consumer group replays from the beginning — a latent breach of the 25s poll budgets, and
   already the cause of one truncation this session. Ship
   `infra/scripts/reset-dev-topics.sh` (the `kafka-delete-records` flow used by hand earlier)
-  plus a CI step that runs it before the integration job.
+  for a long-lived LOCAL dev broker. **As shipped, CI does NOT run it:** CI's Kafka comes up
+  from `docker-compose.example.yml`, which gives Kafka no named volume (unlike Postgres's
+  `pgdata`), so every CI run's broker starts with empty log segments — there is no history to
+  truncate, and running the script there would have nothing to do. The rationale lives in a
+  comment in `ci.yml`'s integration job and in the script's own header.
 - **`hello` stays, deliberately.** It is the cheapest end-to-end proof that the platform
   primitives (DB + outbox + Kafka + health + graceful shutdown) still work, and it fails
   before any real service does when a shared package regresses. Documented as an intentional
@@ -244,7 +263,7 @@ anything above it.
 
 New: `LEDGER_RETENTION_DAYS` (30) and `LEDGER_PRUNE_INTERVAL_MS` (3 600 000) in Order,
 Inventory, Payment, Notification; `PAYMENT_WEBHOOK_SECRET` (required, no default) in Payment;
-`REFRESH_GRACE_MS` (10 000) and `IDENTITY_KEYS` in Identity; `JWKS_URL` +
+`REFRESH_GRACE_MS` (10 000) and `JWT_PREVIOUS_PUBLIC_KEY` (optional) in Identity; `JWKS_URL` +
 `JWKS_TTL_MS` (600 000) in the gateway.
 
 `PAYMENT_WEBHOOK_SECRET` has **no default** on purpose — a default secret is not a secret, and
@@ -275,8 +294,11 @@ a service that cannot verify its webhook should refuse to boot.
    replay a no-op; timestamp + nonce deferred.
 3. **The grace window narrows reuse-detection by 10s** (§C3), deliberately.
 4. **Key rotation is manual** (§C4) — no automatic rollover, no revocation list.
-5. **In-flight `ChargePayment` commands are rejected across the deploy** (§C2); the DLQ
-   replay path is the remedy and the demo stack is disposable.
+5. **In-flight `ChargePayment` commands are tolerated, not rejected, across the deploy**
+   (§C2) — Task 8 shipped a lenient consumer-side schema (`userId` optional) instead of
+   hard-failing them into the DLQ: a legacy command is processed with `userId: null`, logged
+   once as `charge_missing_user_id`, and its `Payment` row lands unowned — un-scopeable (404s
+   for every caller, same as a stranger's row) but never lost or dead-lettered.
 6. **Pruning is best-effort:** a service that never runs (or a stopped stack) prunes nothing.
 
 ## Testing (TDD)
@@ -299,8 +321,9 @@ Every group starts from a failing test:
 - **Grace window (int):** a double-submit inside the window returns 401 with the family
   intact and the successor still usable; the same replay after the window revokes the family.
 - **JWKS (int):** the gateway verifies a token whose `kid` is in the published JWKS; an
-  unknown `kid` is 401 after one refresh attempt; a token signed by a retired-but-listed key
-  still verifies.
+  unknown `kid` (or no `kid` at all, with no static fallback key configured) is 401
+  immediately — the cache does not refresh on a miss, only on its interval (§C4); a token
+  signed by a retired-but-listed key still verifies.
 - **Regression gate:** every service suite with its own `DATABASE_URL`, `pnpm -r typecheck`,
   `pnpm format:check`. **The gate for this slice is a fully green suite** — the 2 sweeper
   failures are no longer an accepted exception.

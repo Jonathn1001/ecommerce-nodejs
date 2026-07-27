@@ -18,6 +18,31 @@ docker compose exec identity pnpm seed                # roles, resources, ADMIN 
 
 Without the seed nobody can register (no `USER` role) and nobody can administer anything.
 
+## Key rotation (ops note)
+
+The 7a slice added a JWKS (`GET /.well-known/jwks.json`) so the gateway can verify by `kid`
+instead of one static key, but **the shipped JWKS cache never refreshes on a miss** — only on
+its own `JWKS_TTL_MS` interval (default 10 minutes; `services/gateway/src/jwks-cache.ts`). An
+unknown or missing `kid` is 401 immediately (`auth-middleware.ts` just tries the next
+candidate, then fails). Two concrete hazards follow, and the same mitigation covers both:
+
+1. **Rotating identity's signing key.** In a JWKS-only gateway config, the new key's tokens
+   401 until the gateway's *next scheduled* refresh — up to `JWKS_TTL_MS` of real 401s, not
+   "one refresh attempt."
+2. **Tokens minted before this deploy.** They predate the `kid` claim entirely, so
+   `keyFor(undefined)` returns `null` without ever consulting the JWKS map. An operator who
+   flips straight to JWKS-only on deploy day 401s every live access token issued under the
+   previous build, for up to `ACCESS_TTL` (15m default).
+
+**Mitigation for both:** keep the gateway's static `JWT_PUBLIC_KEY` configured through the
+rotation/deploy window — `resolveKey` in `services/gateway/src/app.ts` falls back to it
+whenever the JWKS lookup misses, with no `kid` match required — or restart the gateway
+immediately after rotating (boot does a synchronous, fail-fast `refresh()`). Only drop
+`JWT_PUBLIC_KEY` once you're certain no token signed under it, and no token missing a `kid`,
+can still be live. See
+`docs/superpowers/specs/2026-07-25-phase-7a-correctness-hygiene-design.md` §C4 for the design
+rationale.
+
 ## 1. Register + login
 
 ```bash
