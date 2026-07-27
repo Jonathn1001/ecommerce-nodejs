@@ -125,8 +125,8 @@ describe("identity auth (integration — needs compose up + migrated + seeded)",
       .expect(200);
     // Clear the grace window first: an immediate replay here would be an honest
     // double-submit (GRACE), not reuse. This test wants genuine reuse. `test-grace.ts` has
-    // shrunk REFRESH_GRACE_MS to 200ms for this file, so this is a ~250ms wait, not a real
-    // ~10s one — see that module for why.
+    // set REFRESH_GRACE_MS to 2000 for this file (not the real ~10s production default), so
+    // this is a ~2050ms wait — see that module for why 2000 and not something smaller.
     await new Promise((r) => setTimeout(r, config.REFRESH_GRACE_MS + 50));
     // Replay of the consumed token -> reuse detected.
     await request(app)
