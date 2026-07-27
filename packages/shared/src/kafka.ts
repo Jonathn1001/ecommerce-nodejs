@@ -56,10 +56,19 @@ export function createConsumer(kafka: Kafka, groupId: string) {
             const env = EventEnvelopeSchema.parse(JSON.parse(raw));
             await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
           } catch (e) {
-            // Poison message (malformed envelope OR handler exhausted retries): park and
-            // commit so the partition keeps moving. No env.eventId key — env may not parse.
-            log.error("event_parked_to_dlq", { topic, message: (e as Error).message });
-            await parker.send({ topic: `${topic}.dlq`, messages: [{ value: raw }] });
+            // Poison message: park and commit so the partition keeps moving. Keep the key
+            // when the envelope parsed — a DLQ message with no key cannot be traced back.
+            let eventId: string | undefined;
+            try {
+              eventId = (JSON.parse(raw) as { eventId?: string }).eventId;
+            } catch {
+              /* malformed — no id to recover */
+            }
+            log.error("event_parked_to_dlq", { topic, eventId, message: (e as Error).message });
+            await parker.send({
+              topic: `${topic}.dlq`,
+              messages: [{ key: eventId ?? null, value: raw }],
+            });
           }
         },
       });

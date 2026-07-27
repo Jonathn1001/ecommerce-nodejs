@@ -56,9 +56,11 @@ export async function drainOutbox(
   commands?: CommandChannel
 ): Promise<number> {
   const rows = await port.fetchUnsent(limit);
-  const queueOf = (r: OutboxRow) => commands?.queueFor(r) ?? null;
-  const kafkaRows = rows.filter((r) => queueOf(r) === null);
-  const rabbitRows = rows.filter((r) => queueOf(r) !== null);
+  // One call per row: queueFor was previously invoked twice per row per tick.
+  const routed = rows.map((r) => ({ row: r, queue: commands?.queueFor(r) ?? null }));
+  const kafkaRows = routed.filter((r) => r.queue === null).map((r) => r.row);
+  const rabbitRows = routed.filter((r) => r.queue !== null);
+  const queueById = new Map(rabbitRows.map((r) => [r.row.id, r.queue!]));
 
   let sent = 0;
   // Within a lane, abort on the first failure (preserves occurredAt order per
@@ -76,7 +78,10 @@ export async function drainOutbox(
   // Lanes are independent: a Rabbit outage must not wedge the Kafka rows.
   const results = await Promise.allSettled([
     lane(kafkaRows, (r) => producer.publish(topicFor(r.aggregateType), toEnvelope(r))),
-    lane(rabbitRows, (r) => commands!.sender.sendCommand(queueOf(r)!, toEnvelope(r))),
+    lane(
+      rabbitRows.map((r) => r.row),
+      (r) => commands!.sender.sendCommand(queueById.get(r.id)!, toEnvelope(r))
+    ),
   ]);
   for (const r of results) {
     if (r.status === "rejected")
