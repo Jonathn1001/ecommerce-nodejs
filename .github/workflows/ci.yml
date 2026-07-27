@@ -98,6 +98,7 @@ jobs:
           DATABASE_URL: postgresql://ecom:ecom@localhost:5432/payment
           RABBITMQ_URL: amqp://ecom:ecom@localhost:5672
           KAFKA_BROKERS: localhost:9092
+          PAYMENT_WEBHOOK_SECRET: test-secret
         run: |
           pnpm --filter @ecom/payment exec prisma migrate deploy
           pnpm vitest run services/payment

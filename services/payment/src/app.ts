@@ -4,6 +4,8 @@ import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared"
 import { prisma } from "./db";
 import { finalizePayment, refundPayment } from "./resolve";
 import { resolveTx } from "./tx-adapters";
+import { config } from "./config";
+import { verifyWebhookSignature } from "./webhook-signature";
 
 const log = createLogger("payment");
 
@@ -11,7 +13,13 @@ export function createApp(deps: {
   rabbitHealth: () => Promise<void>;
 }): express.Application {
   const app = express();
-  app.use(express.json());
+  app.use(
+    express.json({
+      verify: (req, _res, buf) => {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+      },
+    })
+  );
   app.use(traceMiddleware());
 
   app.use(
@@ -47,9 +55,23 @@ export function createApp(deps: {
     outcome: z.enum(["SUCCEEDED", "FAILED"]),
   });
 
-  // Simulated-provider callback resolving a PROCESSING payment. Unauthenticated
-  // (Phase 6 gateway / HMAC later). Concurrent-safe via compare-and-set.
+  // Simulated-provider callback resolving a PROCESSING payment. Authenticated via an
+  // HMAC-SHA256 signature over the raw body (see webhook-signature.ts) — this is what
+  // replaces auth for a route the gateway leaves CSRF-exempt and un-authed.
+  // Concurrent-safe via compare-and-set.
   app.post("/webhooks/payment", async (req, res) => {
+    const raw =
+      (req as express.Request & { rawBody?: Buffer }).rawBody ?? Buffer.from("");
+    if (
+      !verifyWebhookSignature(
+        raw,
+        req.header("x-webhook-signature"),
+        config.PAYMENT_WEBHOOK_SECRET
+      )
+    ) {
+      log.error("webhook_signature_rejected", { traceId: req.traceId });
+      return res.status(401).json({ error: "invalid signature" });
+    }
     const parsed = WebhookSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid webhook" });
     const { orderId, outcome } = parsed.data;

@@ -8,6 +8,10 @@ import { makeEnvelope, CHARGE_PAYMENT } from "@ecom/contracts";
 
 const app = createApp({ rabbitHealth: async () => {} }); // rabbit health stubbed for the app test
 
+const seedProcessingPayment = async (orderId: string, amount = 599): Promise<void> => {
+  await prisma.payment.create({ data: { orderId, amount, status: "PROCESSING" } });
+};
+
 describe("payment app (integration — needs docker compose up + migrated)", () => {
   afterAll(async () => {
     await prisma.$disconnect();
@@ -36,5 +40,17 @@ describe("payment app (integration — needs docker compose up + migrated)", () 
 
     const missing = await request(app).get(`/payments/o_${randomUUID()}`);
     expect(missing.status).toBe(404);
+  });
+
+  it("rejects an unsigned webhook with 401 and touches no payment", async () => {
+    const orderId = `o_${randomUUID()}`;
+    await seedProcessingPayment(orderId);
+    await request(app)
+      .post("/webhooks/payment")
+      .send({ orderId, outcome: "SUCCEEDED" })
+      .expect(401);
+    expect((await prisma.payment.findUnique({ where: { orderId } }))?.status).toBe(
+      "PROCESSING"
+    );
   });
 });

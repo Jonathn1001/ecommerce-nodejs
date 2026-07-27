@@ -10,5 +10,8 @@ export const config = loadConfig(
     LEDGER_PRUNE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
     PORT: z.coerce.number().int().positive().default(3003),
     LOG_LEVEL: z.string().default("info"),
+    // No default on purpose: a default secret is not a secret, and a service that cannot
+    // verify its webhook must refuse to boot.
+    PAYMENT_WEBHOOK_SECRET: z.string().min(1),
   })
 );

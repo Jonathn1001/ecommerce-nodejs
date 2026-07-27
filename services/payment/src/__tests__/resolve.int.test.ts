@@ -4,8 +4,14 @@ import { randomUUID } from "crypto";
 import { createApp } from "../app";
 import { prisma } from "../db";
 import { PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_REFUNDED } from "@ecom/contracts";
+import { signWebhookBody } from "./sign-webhook";
 
 const app = createApp({ rabbitHealth: async () => {} });
+const postWebhook = (body: object) =>
+  request(app)
+    .post("/webhooks/payment")
+    .set("x-webhook-signature", signWebhookBody(body))
+    .send(body);
 const seedProcessing = async (amount = 599): Promise<string> => {
   const orderId = `o_${randomUUID()}`;
   await prisma.payment.create({ data: { orderId, amount, status: "PROCESSING" } });
@@ -23,9 +29,7 @@ describe("payment webhook (integration — needs compose up + migrated)", () => 
 
   it("SUCCEEDED webhook finalizes a PROCESSING payment + emits payment.succeeded", async () => {
     const orderId = await seedProcessing();
-    const res = await request(app)
-      .post("/webhooks/payment")
-      .send({ orderId, outcome: "SUCCEEDED" });
+    const res = await postWebhook({ orderId, outcome: "SUCCEEDED" });
     expect(res.status).toBe(200);
     expect(await statusOf(orderId)).toBe("SUCCEEDED");
     expect(await outbox(orderId, PAYMENT_SUCCEEDED)).toBe(1);
@@ -33,27 +37,26 @@ describe("payment webhook (integration — needs compose up + migrated)", () => 
 
   it("FAILED webhook emits payment.failed", async () => {
     const orderId = await seedProcessing();
-    await request(app).post("/webhooks/payment").send({ orderId, outcome: "FAILED" });
+    await postWebhook({ orderId, outcome: "FAILED" });
     expect(await statusOf(orderId)).toBe("FAILED");
     expect(await outbox(orderId, PAYMENT_FAILED)).toBe(1);
   });
 
   it("redelivered webhook is an idempotent no-op (one event)", async () => {
     const orderId = await seedProcessing();
-    await request(app).post("/webhooks/payment").send({ orderId, outcome: "SUCCEEDED" });
-    const res2 = await request(app)
-      .post("/webhooks/payment")
-      .send({ orderId, outcome: "SUCCEEDED" });
+    await postWebhook({ orderId, outcome: "SUCCEEDED" });
+    const res2 = await postWebhook({ orderId, outcome: "SUCCEEDED" });
     expect(res2.status).toBe(200);
     expect(await outbox(orderId, PAYMENT_SUCCEEDED)).toBe(1);
   });
 
   it("unknown order -> 404; malformed body -> 400", async () => {
-    const r404 = await request(app)
-      .post("/webhooks/payment")
-      .send({ orderId: `o_${randomUUID()}`, outcome: "SUCCEEDED" });
+    const r404 = await postWebhook({
+      orderId: `o_${randomUUID()}`,
+      outcome: "SUCCEEDED",
+    });
     expect(r404.status).toBe(404);
-    const r400 = await request(app).post("/webhooks/payment").send({ orderId: "o1" });
+    const r400 = await postWebhook({ orderId: "o1" });
     expect(r400.status).toBe(400);
   });
 });

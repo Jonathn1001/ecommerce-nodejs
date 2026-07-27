@@ -18,6 +18,7 @@ import {
   PAYMENT_SUCCEEDED,
   type EventEnvelope,
 } from "@ecom/contracts";
+import { signWebhookBody } from "./sign-webhook";
 
 const PAYMENT_TOPIC = "payment.events";
 const CHARGE_QUEUE = `payment.charge.e2e.wh.${Date.now()}`; // isolated queue per run
@@ -98,9 +99,11 @@ describe("payment async webhook e2e (needs docker compose up + migrated)", () =>
       })
     ).toBe(0);
 
+    const webhookBody = { orderId, outcome: "SUCCEEDED" };
     await request(createApp({ rabbitHealth: async () => {} }))
       .post("/webhooks/payment")
-      .send({ orderId, outcome: "SUCCEEDED" });
+      .set("x-webhook-signature", signWebhookBody(webhookBody))
+      .send(webhookBody);
 
     await waitFor(
       async () =>
