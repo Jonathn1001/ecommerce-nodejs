@@ -1,5 +1,8 @@
-// MUST come first: it plants JWT_PRIVATE_KEY before ../app validates its config.
+// MUST come first: these plant env vars before ../app validates its config — JWT_PRIVATE_KEY
+// so signing/verification works at all, REFRESH_GRACE_MS so the "outside the grace window"
+// test below doesn't need a real ~10s sleep to prove it (see test-grace.ts).
 import { TEST_PUBLIC_KEY } from "./test-key";
+import "./test-grace";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "crypto";
 import request from "supertest";
@@ -121,7 +124,9 @@ describe("identity auth (integration — needs compose up + migrated + seeded)",
       .send({ refreshToken: deviceA.refreshToken })
       .expect(200);
     // Clear the grace window first: an immediate replay here would be an honest
-    // double-submit (GRACE), not reuse. This test wants genuine reuse.
+    // double-submit (GRACE), not reuse. This test wants genuine reuse. `test-grace.ts` has
+    // shrunk REFRESH_GRACE_MS to 200ms for this file, so this is a ~250ms wait, not a real
+    // ~10s one — see that module for why.
     await new Promise((r) => setTimeout(r, config.REFRESH_GRACE_MS + 50));
     // Replay of the consumed token -> reuse detected.
     await request(app)
