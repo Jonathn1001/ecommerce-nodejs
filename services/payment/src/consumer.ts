@@ -24,6 +24,11 @@ const ChargePaymentConsumeSchema = ChargePaymentPayloadSchema.partial({ userId: 
 export async function handleChargePayment(env: EventEnvelope): Promise<void> {
   if (env.type !== CHARGE_PAYMENT) return; // not ours — no-op
   const { orderId, userId, amount } = ChargePaymentConsumeSchema.parse(env.payload);
+  // Distinct from charge_handled: today only pre-deploy replays hit this (the sole producer
+  // always supplies userId), so it should be rare. A sustained rate after the cutover window
+  // means a producer regression is minting unowned, permanently-unreadable payments — this is
+  // the signal that would catch it.
+  if (!userId) log.warn("charge_missing_user_id", { orderId, traceId: env.traceId });
   const outcome = await prisma.$transaction((tx) =>
     chargeOrder(chargeTx(tx, env.traceId), {
       eventId: env.eventId,

@@ -29,6 +29,9 @@ export function createApp(deps: {
     })
   );
 
+  // The caller's identity is the x-user-id header, which ONLY the gateway may set: it strips
+  // any client-supplied copy before injecting the value it verified from the JWT (Phase 6).
+  // Direct access to this port is closed in the prod compose profile.
   app.get("/payments/:orderId", async (req, res) => {
     const callerId = req.header("x-user-id");
     if (!callerId) return res.status(400).json({ error: "missing x-user-id" });
