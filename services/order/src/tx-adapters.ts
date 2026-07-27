@@ -72,8 +72,12 @@ export function transitionTx(
       });
       return r.count > 0;
     },
-    async setStatus(orderId, status) {
-      await tx.order.update({ where: { id: orderId }, data: { status } });
+    async setStatus(orderId, status, expected) {
+      const r = await tx.order.updateMany({
+        where: { id: orderId, status: expected },
+        data: { status },
+      });
+      return r.count > 0;
     },
     async enqueue(type, orderId, payload) {
       await tx.outbox.create({

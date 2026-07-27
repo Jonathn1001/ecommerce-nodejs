@@ -17,6 +17,7 @@ function fakeTx(init: { status: string | null; totalPrice?: number; userId?: str
   let status = init.status;
   const totalPrice = init.totalPrice ?? 500;
   const userId = init.userId ?? "u1";
+  let casFails = false;
   const tx: TransitionTx = {
     async loadOrder() {
       return status === null ? null : { status, totalPrice, userId };
@@ -26,8 +27,11 @@ function fakeTx(init: { status: string | null; totalPrice?: number; userId?: str
       processed.add(eventId);
       return true;
     },
-    async setStatus(_o, s) {
+    async setStatus(_o, s, expected) {
+      if (casFails) return false;
+      if (expected !== status) return false; // mirrors WHERE status = expected
       status = s;
+      return true;
     },
     async enqueue(type, orderId, payload) {
       emitted.push({ type, orderId, payload });
@@ -36,7 +40,16 @@ function fakeTx(init: { status: string | null; totalPrice?: number; userId?: str
       notified.push({ orderId, status });
     },
   };
-  return { tx, emitted, processed, notified, statusNow: () => status };
+  return {
+    tx,
+    emitted,
+    processed,
+    notified,
+    statusNow: () => status,
+    failCas: () => {
+      casFails = true;
+    },
+  };
 }
 
 describe("nextStatus (widened table)", () => {
@@ -136,6 +149,18 @@ describe("applyResult", () => {
   it("does not NOTIFY on a guarded NO_OP", async () => {
     const f = fakeTx({ status: "CONFIRMED" });
     await applyResult(f.tx, { eventId: "n2", type: PAYMENT_SUCCEEDED, orderId: "o9" });
+    expect(f.notified).toEqual([]);
+  });
+  it("a lost CAS -> NO_OP: no event emitted, no SSE notify", async () => {
+    const f = fakeTx({ status: "AWAITING_PAYMENT" });
+    f.failCas(); // another event already advanced this order
+    const outcome = await applyResult(f.tx, {
+      eventId: "e9",
+      type: PAYMENT_SUCCEEDED,
+      orderId: "o9",
+    });
+    expect(outcome).toBe("NO_OP");
+    expect(f.emitted).toEqual([]);
     expect(f.notified).toEqual([]);
   });
 });

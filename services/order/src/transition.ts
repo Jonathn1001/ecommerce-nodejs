@@ -30,7 +30,7 @@ export interface TransitionTx {
     orderId: string
   ): Promise<{ status: string; totalPrice: number; userId: string } | null>;
   markProcessed(eventId: string, type: string): Promise<boolean>;
-  setStatus(orderId: string, status: OrderStatus): Promise<void>;
+  setStatus(orderId: string, status: OrderStatus, expected: string): Promise<boolean>;
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
   notify(orderId: string, status: OrderStatus): Promise<void>;
 }
@@ -58,7 +58,10 @@ export async function applyResult(
   const next = nextStatus(order.status, p.type);
   if (next === null) return "NO_OP";
 
-  await tx.setStatus(p.orderId, next);
+  // Compare-and-set: `expected` is the status we read above. A lost CAS means another
+  // event legitimately advanced this order, so this one must emit nothing.
+  const moved = await tx.setStatus(p.orderId, next, order.status);
+  if (!moved) return "NO_OP";
   await tx.notify(p.orderId, next); // SSE: pg_notify on commit (Task 6/7 fan-out)
   if (next === "AWAITING_PAYMENT") {
     // Atomic command emission: the ChargePayment outbox row commits with the
