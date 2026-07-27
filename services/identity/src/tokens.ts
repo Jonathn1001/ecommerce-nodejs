@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from "crypto";
 import jwt from "jsonwebtoken";
+import { toSigningKey } from "./jwks";
 
 export type AccessClaims = { sub: string; role: string };
 
@@ -17,11 +18,15 @@ export function createTokenIssuer(cfg: {
   accessTtl: string;
 }): TokenIssuer {
   const hash = (token: string) => createHash("sha256").update(token).digest("hex");
+  // Stamping the kid into every access token is what lets the gateway pick the right JWKS
+  // entry without trying every published key.
+  const signingKey = toSigningKey(cfg.privateKey);
   return {
     signAccess(claims) {
-      return jwt.sign(claims, cfg.privateKey, {
+      return jwt.sign(claims, signingKey.privateKey, {
         algorithm: "RS256",
         expiresIn: cfg.accessTtl as jwt.SignOptions["expiresIn"],
+        keyid: signingKey.kid,
       });
     },
     mintRefresh() {

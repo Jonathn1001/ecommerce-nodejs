@@ -14,6 +14,7 @@ import { csrfGuard } from "./csrf";
 import { setSessionCookies, clearSessionCookies, REFRESH_COOKIE } from "./cookies";
 import { createUpstreamProxy, createStreamProxy, guardWithBreaker } from "./proxy";
 import type { GrantsCache } from "./grants-cache";
+import type { JwksCache } from "./jwks-cache";
 
 const log = createLogger("gateway");
 
@@ -25,7 +26,10 @@ export type Upstreams = {
 };
 
 export type GatewayDeps = {
-  publicKey: string;
+  // At least one of publicKey / jwks must resolve a key or nothing can ever verify — main.ts
+  // asserts that at boot.
+  publicKey?: string;
+  jwks?: JwksCache;
   upstreams: Upstreams;
   grants: GrantsCache;
   cookieSecure: boolean;
@@ -179,8 +183,11 @@ export function createApp(deps: GatewayDeps): express.Application {
     return handler;
   };
 
-  const authRequired = authenticate(deps.publicKey, { required: true });
-  const authOptional = authenticate(deps.publicKey, { required: false });
+  // Static-key-only deployments never carry a kid: `keyFor` is skipped (no jwks configured)
+  // and the static key is tried instead — the pre-JWKS behaviour, unchanged.
+  const resolveKey = (kid: string | undefined) => deps.jwks?.keyFor(kid) ?? deps.publicKey ?? null;
+  const authRequired = authenticate(resolveKey, { required: true });
+  const authOptional = authenticate(resolveKey, { required: false });
   const authz = authorize(deps.grants);
 
   // SSE: authenticated, but exempt from breaker + timeout (see proxy.ts).

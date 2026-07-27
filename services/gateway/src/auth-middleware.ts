@@ -27,7 +27,16 @@ export function stripIdentityHeaders() {
 // Verifies the RS256 access token (cookie first, then Authorization: Bearer) and injects the
 // verified identity for downstream services. `required: false` lets public routes through
 // while still honouring a valid token if one is present.
-export function authenticate(publicKey: string, opts: { required: boolean }) {
+//
+// `resolveKey` picks WHICH key to try, by `kid` — it never picks the algorithm. That stays
+// hardcoded to RS256 below, so a forged/decoded header can never downgrade verification. An
+// unresolved kid (unknown, or missing with no fallback key configured) is treated exactly
+// like a bad signature: try the next candidate, then 401 — never "try every key" and never
+// let the request through unauthenticated just because no key matched.
+export function authenticate(
+  resolveKey: (kid: string | undefined) => string | null,
+  opts: { required: boolean }
+) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const fromCookie = (req.cookies as Record<string, string> | undefined)?.access_token;
     const header = req.header("authorization");
@@ -45,8 +54,14 @@ export function authenticate(publicKey: string, opts: { required: boolean }) {
     }
 
     for (const token of candidates) {
+      // Decoding just reads the header to pick a key; it is never trusted for anything else
+      // (claims are only accepted once `jwt.verify` below has checked the signature).
+      const decoded = jwt.decode(token, { complete: true }) as { header: { kid?: string } } | null;
+      const key = resolveKey(decoded?.header?.kid);
+      if (!key) continue; // unknown or missing kid: no key to verify against, try the next candidate
+
       try {
-        const claims = jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as {
+        const claims = jwt.verify(token, key, { algorithms: ["RS256"] }) as {
           sub?: string;
           role?: string;
         };

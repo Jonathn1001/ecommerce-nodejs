@@ -2,10 +2,20 @@ import express from "express";
 import { z } from "zod";
 import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
 import { prisma } from "./db";
+import { config } from "./config";
 import { register, login, refresh, logout } from "./auth";
 import { grantsRouter, grantsSnapshot } from "./grants";
+import { toJwks, toSigningKey, type SigningKey } from "./jwks";
 
 const log = createLogger("identity");
+
+// The active signing key, plus the previous public key when a rotation is in flight — never
+// used to sign, only published so tokens minted before the rotation still verify.
+function publishedKeys(): SigningKey[] {
+  const keys = [toSigningKey(config.JWT_PRIVATE_KEY)];
+  if (config.JWT_PREVIOUS_PUBLIC_KEY) keys.push(toSigningKey(config.JWT_PREVIOUS_PUBLIC_KEY));
+  return keys;
+}
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -23,6 +33,12 @@ export function createApp(): express.Application {
   app.use(
     createHealthRouter({ db: async () => void (await prisma.$queryRaw`SELECT 1`) })
   );
+
+  // Public: the gateway (and anyone else who needs to verify) fetches this to learn the
+  // current signing key by kid, instead of both services sharing one static key.
+  app.get("/.well-known/jwks.json", (_req, res) => {
+    res.json(toJwks(publishedKeys()));
+  });
 
   app.post("/auth/register", async (req, res) => {
     const parsed = RegisterSchema.safeParse(req.body);

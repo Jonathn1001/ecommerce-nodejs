@@ -3,8 +3,12 @@ import { loadConfig } from "@ecom/shared";
 
 export const config = loadConfig(
   z.object({
-    // Public half only — the gateway verifies, it can never mint.
-    JWT_PUBLIC_KEY: z.string().min(1),
+    // Public half only — the gateway verifies, it can never mint. Optional now that a JWKS
+    // fetched from identity can serve the same purpose; main.ts asserts at least one is set.
+    JWT_PUBLIC_KEY: z.string().min(1).optional(),
+    // Set to have the gateway learn identity's signing key(s) by kid instead of a static PEM.
+    JWKS_URL: z.string().url().optional(),
+    JWKS_TTL_MS: z.coerce.number().int().positive().default(600_000),
     IDENTITY_URL: z.string().url().default("http://localhost:3006"),
     ORDER_URL: z.string().url().default("http://localhost:3002"),
     CATALOG_URL: z.string().url().default("http://localhost:3004"),

@@ -8,6 +8,9 @@ export const config = loadConfig(
     // PEM. Identity is the ONLY holder of the private key — the gateway verifies with the
     // public half, so a gateway compromise cannot mint tokens.
     JWT_PRIVATE_KEY: z.string().min(1),
+    // PEM, public half only. Set for one rotation window so tokens signed under the
+    // previous key still verify; published in the JWKS, never used to sign.
+    JWT_PREVIOUS_PUBLIC_KEY: z.string().optional(),
     ACCESS_TTL: z.string().default("15m"),
     REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(7),
     // How long after a rotation a replay of the rotated token is treated as an honest

@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import type express from "express";
 import { createApp, type GatewayDeps } from "../app";
 import type { GrantsCache } from "../grants-cache";
+import type { JwksCache } from "../jwks-cache";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -62,6 +63,17 @@ function startStub(): Promise<{ server: Server; url: string; seen: string[] }> {
 function fakeGrants(snapshot: Record<string, Record<string, string[]>>): GrantsCache {
   return {
     get: () => snapshot,
+    refresh: async () => {},
+    stop: () => {},
+    ready: () => true,
+  };
+}
+
+// Stands in for jwks-cache.ts (already unit-tested on its own): a plain kid -> PEM lookup so
+// these tests can drive `app.ts`'s resolver composition without a real identity JWKS fetch.
+function fakeJwks(keys: Record<string, string>): JwksCache {
+  return {
+    keyFor: (kid) => (kid ? (keys[kid] ?? null) : null),
     refresh: async () => {},
     stop: () => {},
     ready: () => true,
@@ -145,6 +157,71 @@ describe("gateway (integration — stub upstream)", () => {
         .get("/orders")
         .set("Authorization", `Bearer ${forged}`)
         .expect(401);
+    });
+  });
+
+  describe("JWKS verification (kid-based)", () => {
+    it("verifies a token by kid against the JWKS cache instead of the static key", async () => {
+      const rotated = generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: "spki", format: "pem" },
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      });
+      const withJwks = build({
+        publicKey: undefined,
+        jwks: fakeJwks({ "kid-1": rotated.publicKey }),
+      });
+      const token = jwt.sign({ sub: "u1", role: "USER" }, rotated.privateKey, {
+        algorithm: "RS256",
+        keyid: "kid-1",
+      });
+      const res = await request(withJwks)
+        .get("/orders")
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+      expect(res.body.userId).toBe("u1");
+    });
+
+    it("401s a kid the JWKS cache does not know, with no static key to fall back to", async () => {
+      const withJwks = build({ publicKey: undefined, jwks: fakeJwks({}) });
+      const token = jwt.sign({ sub: "u1", role: "USER" }, privateKey, {
+        algorithm: "RS256",
+        keyid: "unknown-kid",
+      });
+      await request(withJwks)
+        .get("/orders")
+        .set("Authorization", `Bearer ${token}`)
+        .expect(401);
+    });
+
+    it("401s a token with no kid at all when only the JWKS is configured", async () => {
+      const withJwks = build({ publicKey: undefined, jwks: fakeJwks({ "kid-1": publicKey }) });
+      await request(withJwks)
+        .get("/orders")
+        .set("Authorization", `Bearer ${sign("u1", "USER")}`) // signed with no keyid
+        .expect(401);
+    });
+
+    it("falls back to the static key when a JWKS is configured but has no match", async () => {
+      // Composition per app.ts: `deps.jwks?.keyFor(kid) ?? deps.publicKey ?? null`. An
+      // operator running both must not lose the static key just by adding a JWKS.
+      const withBoth = build({ jwks: fakeJwks({}) });
+      const res = await request(withBoth)
+        .get("/orders")
+        .set("Authorization", `Bearer ${sign("u1", "USER")}`)
+        .expect(200);
+      expect(res.body.userId).toBe("u1");
+    });
+
+    it("rejects an alg-confusion token even when its header carries a kid: the RS256 allowlist never comes from the token", async () => {
+      // Classic RS256->HS256 downgrade: sign with the (public, non-secret) RSA public key as
+      // an HMAC secret. If verification ever honoured the token's own header alg, this would
+      // forge a valid signature outright.
+      const forged = jwt.sign({ sub: "attacker", role: "ADMIN" }, publicKey, {
+        algorithm: "HS256",
+        keyid: "whatever",
+      });
+      await request(app).get("/orders").set("Authorization", `Bearer ${forged}`).expect(401);
     });
   });
 
