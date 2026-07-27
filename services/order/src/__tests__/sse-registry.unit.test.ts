@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SubscriberRegistry, type Sink, type StatusFrame } from "../sse-listener";
+import { SubscriberRegistry, type Sink, type StatusFrame } from "../sse-registry";
 
 function fakeSink() {
   const sent: StatusFrame[] = [];

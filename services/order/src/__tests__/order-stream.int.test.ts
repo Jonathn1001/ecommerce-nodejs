@@ -113,15 +113,20 @@ describe("order SSE stream (integration — needs compose up + migrated)", () =>
   }, 15000);
 
   it("404 for an unknown order", async () => {
-    const status = await new Promise<number>((resolve) => {
-      http.get(
+    const status = await new Promise<number>((resolve, reject) => {
+      // Without an error handler, a connection failure here is an unhandled 'error'
+      // event on the request — it crashes the worker instead of failing this one test,
+      // which reads as the whole suite hanging/timing out rather than a clean red.
+      const req = http.get(
         `${baseUrl}/orders/o_${randomUUID()}/stream`,
         { headers: { "x-user-id": `u_${randomUUID()}` } },
         (res) => {
+          res.on("error", reject);
           resolve(res.statusCode ?? 0);
           res.destroy();
         }
       );
+      req.on("error", reject);
     });
     expect(status).toBe(404);
   });

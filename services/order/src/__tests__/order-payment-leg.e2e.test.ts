@@ -119,6 +119,7 @@ describe("order payment-leg e2e (needs compose up + migrated)", () => {
     // the ChargePayment was routed to the isolated queue (real Rabbit round-trip)
     const cmd = await rabbit.consumeDlqOnce(CHARGE_QUEUE, 10_000);
     expect(cmd?.type).toBe(CHARGE_PAYMENT);
+    expect((cmd?.payload as { orderId?: string } | undefined)?.orderId).toBe(id);
     // inject the payment result Payment would emit
     await producer.publish(
       "payment.events",
