@@ -44,6 +44,11 @@ jobs:
           printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
           docker compose up -d
           timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 5 ]; do sleep 3; done'
+      # No dev-topic reset runs here on purpose: `docker-compose.example.yml` gives Kafka no
+      # named volume (unlike Postgres's `pgdata`), so this container's log segments live only
+      # in its own writable layer and start empty on every run — there is no history to
+      # truncate. `infra/scripts/reset-dev-topics.sh` exists for the opposite case: a
+      # long-lived LOCAL dev broker that accumulates real history across many manual runs.
       # A "healthy" KRaft broker answers kafka-topics --list before it has
       # elected a leader for freshly-created topics, so the first test to create
       # a topic can hit LEADER_NOT_AVAILABLE. Warm up leader election with a
@@ -79,12 +84,18 @@ jobs:
       # one loop step keeps the already-verified infra bootstrap untouched and collapses
       # the duplication instead: one step definition, one case branch per service, run
       # serially against the one broker/DB this job already started.
+      #
+      # Trade-off: this used to be 8 named steps, so a broken suite showed up as its own red
+      # check (e.g. "Payment service (migrate + int/e2e)"). Now it's one "Service tests"
+      # check for all 8. To find which service failed: the failing service's `::error::`
+      # line names it directly in the Actions summary (no need to open the log), and each
+      # service's output is still folded under its own `::group::<service>` for the full log.
       - name: Service tests (migrate + seed + test, per service)
         run: |
           set -euo pipefail
           for svc in hello inventory order payment catalog notification identity gateway; do
             echo "::group::${svc}"
-            case "$svc" in
+            if ! case "$svc" in
               hello)
                 # migrate + e2e; needs Kafka + Redis.
                 (
@@ -165,6 +176,17 @@ jobs:
                 # database and no broker at all.
                 pnpm vitest run services/gateway
                 ;;
-            esac
+              *)
+                # The `for` list above and this `case` are two lists kept in sync by hand.
+                # Without this arm, a service added to the `for` with no matching branch (or
+                # a typo'd rename) would silently match nothing, exit 0, and run no tests —
+                # CI green for a service never exercised. Fail loudly instead.
+                echo "::error::unknown service '$svc' — add a case branch in ci.yml" >&2
+                exit 1
+                ;;
+            esac; then
+              echo "::error::${svc} tests failed — see the '${svc}' log group above"
+              exit 1
+            fi
             echo "::endgroup::"
           done
