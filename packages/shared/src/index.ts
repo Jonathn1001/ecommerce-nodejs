@@ -10,3 +10,4 @@ export * from "./config";
 export * from "./health";
 export * from "./retry";
 export * from "./lifecycle";
+export * from "./ledger-pruner";

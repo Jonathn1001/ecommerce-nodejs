@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
+import { ledgerPrunerPort } from "./prune-adapter";
 import { handleOrderEvent } from "./consumer";
 import { startExpirySweeper } from "./sweeper";
 import { prisma } from "./db";
@@ -9,6 +10,7 @@ import {
   createProducer,
   createConsumer,
   startOutboxRelay,
+  startLedgerPruner,
   createLogger,
   gracefulShutdown,
   closeRedis,
@@ -38,6 +40,11 @@ async function main() {
 
   const sweeper = startExpirySweeper(config.SWEEP_INTERVAL_MS);
 
+  const pruner = startLedgerPruner(ledgerPrunerPort, {
+    retentionDays: config.LEDGER_RETENTION_DAYS,
+    intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
+  });
+
   const app = createApp();
   const server = app.listen(config.PORT, () =>
     log.info("inventory_listening", { port: config.PORT })
@@ -48,7 +55,7 @@ async function main() {
   // last here (torn down FIRST — stop accepting traffic, then drain the rest).
   // Each closer awaits its own work so shutdown actually drains before exit.
   // Resulting teardown order:
-  //   server.close -> consumer.disconnect -> sweeper.stop -> relay.stop
+  //   server.close -> consumer.disconnect -> pruner.stop -> sweeper.stop -> relay.stop
   //   -> producer.disconnect -> closeRedis -> prisma.$disconnect
   gracefulShutdown([
     async () => {
@@ -65,6 +72,9 @@ async function main() {
     },
     async () => {
       sweeper.stop();
+    },
+    async () => {
+      pruner.stop();
     },
     async () => {
       await consumer.disconnect();

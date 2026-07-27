@@ -8,6 +8,8 @@ export const config = loadConfig(
     REDIS_URL: z.string().default("redis://localhost:6379"),
     RESERVATION_TTL_MS: z.coerce.number().int().positive().default(900_000),
     SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+    LEDGER_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    LEDGER_PRUNE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
     PORT: z.coerce.number().int().positive().default(3001),
   })
 );

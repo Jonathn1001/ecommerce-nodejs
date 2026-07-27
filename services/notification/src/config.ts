@@ -10,6 +10,8 @@ export const config = loadConfig(
     SMTP_PORT: z.coerce.number().int().positive().default(1025),
     NOTIFY_EMAIL_DOMAIN: z.string().default("example.test"),
     RABBIT_PREFETCH: z.coerce.number().int().positive().default(10),
+    LEDGER_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    LEDGER_PRUNE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
     PORT: z.coerce.number().int().positive().default(3005),
     LOG_LEVEL: z.string().default("info"),
   })

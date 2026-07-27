@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
+import { ledgerPrunerPort } from "./prune-adapter";
 import { handleEvent } from "./consumer";
 import { handleCatalogEvent } from "./catalog-projection";
 import { createOrderListener } from "./sse-listener";
@@ -10,6 +11,7 @@ import {
   createProducer,
   createConsumer,
   startOutboxRelay,
+  startLedgerPruner,
   createRabbit,
   createLogger,
   gracefulShutdown,
@@ -50,13 +52,18 @@ async function main() {
   await catalogConsumer.connect();
   await catalogConsumer.run(["catalog.events"], handleCatalogEvent);
 
+  const pruner = startLedgerPruner(ledgerPrunerPort, {
+    retentionDays: config.LEDGER_RETENTION_DAYS,
+    intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
+  });
+
   const app = createApp({ sseRegistry: listener.registry });
   const server = app.listen(config.PORT, () =>
     log.info("order_listening", { port: config.PORT })
   );
 
   // Reverse teardown. Effective order:
-  //   server.close -> consumer.disconnect -> catalogConsumer.disconnect
+  //   server.close -> consumer.disconnect -> catalogConsumer.disconnect -> pruner.stop
   //   -> relay.stop -> rabbit.close -> producer.disconnect -> listener.close
   //   -> prisma.$disconnect
   // The relay must stop before its Rabbit send channel closes.
@@ -75,6 +82,9 @@ async function main() {
     },
     async () => {
       relay.stop();
+    },
+    async () => {
+      pruner.stop();
     },
     async () => {
       await catalogConsumer.disconnect();

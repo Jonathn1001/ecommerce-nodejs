@@ -1,12 +1,14 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
+import { ledgerPrunerPort } from "./prune-adapter";
 import { handleChargePayment } from "./consumer";
 import { prisma } from "./db";
 import {
   createKafka,
   createProducer,
   startOutboxRelay,
+  startLedgerPruner,
   createRabbit,
   createLogger,
   gracefulShutdown,
@@ -29,13 +31,18 @@ async function main() {
   await rabbit.assertWorkQueue(CHARGE_QUEUE);
   await rabbit.consumeCommands(CHARGE_QUEUE, handleChargePayment, { maxRetries: 3 });
 
+  const pruner = startLedgerPruner(ledgerPrunerPort, {
+    retentionDays: config.LEDGER_RETENTION_DAYS,
+    intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
+  });
+
   const app = createApp({ rabbitHealth: rabbit.checkHealth });
   const server = app.listen(config.PORT, () =>
     log.info("payment_listening", { port: config.PORT })
   );
 
-  // Reverse teardown: server.close -> rabbit.close -> relay.stop -> producer.disconnect
-  //   -> prisma.$disconnect
+  // Reverse teardown: server.close -> rabbit.close -> pruner.stop -> relay.stop
+  //   -> producer.disconnect -> prisma.$disconnect
   gracefulShutdown([
     async () => {
       await prisma.$disconnect();
@@ -45,6 +52,9 @@ async function main() {
     },
     async () => {
       relay.stop();
+    },
+    async () => {
+      pruner.stop();
     },
     async () => {
       await rabbit.close();

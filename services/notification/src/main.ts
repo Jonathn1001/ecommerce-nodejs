@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
+import { ledgerPrunerPort } from "./prune-adapter";
 import { handleOrderEvent } from "./consumer";
 import { makeHandleSendEmail } from "./worker";
 import { createMailer } from "./mailer";
@@ -10,6 +11,7 @@ import {
   createProducer,
   createConsumer,
   startOutboxRelay,
+  startLedgerPruner,
   createRabbit,
   createLogger,
   gracefulShutdown,
@@ -42,13 +44,18 @@ async function main() {
   const mailer = createMailer({ host: config.SMTP_HOST, port: config.SMTP_PORT });
   await rabbit.consumeCommands(QUEUE, makeHandleSendEmail(mailer), { maxRetries: 3 });
 
+  const pruner = startLedgerPruner(ledgerPrunerPort, {
+    retentionDays: config.LEDGER_RETENTION_DAYS,
+    intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
+  });
+
   const app = createApp({ rabbitHealth: rabbit.checkHealth });
   const server = app.listen(config.PORT, () =>
     log.info("notification_listening", { port: config.PORT })
   );
 
   // Reverse teardown. Effective order:
-  //   server.close -> consumer.disconnect -> relay.stop -> rabbit.close
+  //   server.close -> consumer.disconnect -> pruner.stop -> relay.stop -> rabbit.close
   //   -> producer.disconnect -> prisma.$disconnect
   // The relay must stop before its Rabbit send channel closes (this relay has a
   // commands lane — unlike payment's, which is Kafka-only).
@@ -64,6 +71,9 @@ async function main() {
     },
     async () => {
       relay.stop();
+    },
+    async () => {
+      pruner.stop();
     },
     async () => {
       await consumer.disconnect();
