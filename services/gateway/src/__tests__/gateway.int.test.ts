@@ -195,7 +195,10 @@ describe("gateway (integration — stub upstream)", () => {
     });
 
     it("401s a token with no kid at all when only the JWKS is configured", async () => {
-      const withJwks = build({ publicKey: undefined, jwks: fakeJwks({ "kid-1": publicKey }) });
+      const withJwks = build({
+        publicKey: undefined,
+        jwks: fakeJwks({ "kid-1": publicKey }),
+      });
       await request(withJwks)
         .get("/orders")
         .set("Authorization", `Bearer ${sign("u1", "USER")}`) // signed with no keyid
@@ -221,7 +224,10 @@ describe("gateway (integration — stub upstream)", () => {
         algorithm: "HS256",
         keyid: "whatever",
       });
-      await request(app).get("/orders").set("Authorization", `Bearer ${forged}`).expect(401);
+      await request(app)
+        .get("/orders")
+        .set("Authorization", `Bearer ${forged}`)
+        .expect(401);
     });
   });
 

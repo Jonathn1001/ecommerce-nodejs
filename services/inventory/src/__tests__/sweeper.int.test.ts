@@ -95,7 +95,8 @@ describe("expiry sweeper (integration — needs docker compose up + migrated)", 
     await sweepOnce();
 
     expect(
-      (await prisma.inventory.findUnique({ where: { productId: goodProduct } }))?.available
+      (await prisma.inventory.findUnique({ where: { productId: goodProduct } }))
+        ?.available
     ).toBe(7);
     expect(
       (await prisma.reservation.findFirst({ where: { orderId: goodOrder } }))?.status

@@ -185,7 +185,8 @@ export function createApp(deps: GatewayDeps): express.Application {
 
   // Static-key-only deployments never carry a kid: `keyFor` is skipped (no jwks configured)
   // and the static key is tried instead — the pre-JWKS behaviour, unchanged.
-  const resolveKey = (kid: string | undefined) => deps.jwks?.keyFor(kid) ?? deps.publicKey ?? null;
+  const resolveKey = (kid: string | undefined) =>
+    deps.jwks?.keyFor(kid) ?? deps.publicKey ?? null;
   const authRequired = authenticate(resolveKey, { required: true });
   const authOptional = authenticate(resolveKey, { required: false });
   const authz = authorize(deps.grants);

@@ -23,7 +23,12 @@ describe("catalog price lock (integration — needs compose up + migrated)", () 
   it("two concurrent price PATCHes emit exactly two price_changed rows", async () => {
     const created = await request(app)
       .post("/products")
-      .send({ type: "ELECTRONICS", name: `p_${randomUUID()}`, price: 100, attributes: { manufacturer: "m", model: "x", color: "black" } })
+      .send({
+        type: "ELECTRONICS",
+        name: `p_${randomUUID()}`,
+        price: 100,
+        attributes: { manufacturer: "m", model: "x", color: "black" },
+      })
       .expect(201);
     const id = created.body.productId as string;
 
@@ -57,7 +62,12 @@ describe("catalog price lock (integration — needs compose up + migrated)", () 
   it("two concurrent PATCHes to the SAME new price emit exactly one price_changed row", async () => {
     const created = await request(app)
       .post("/products")
-      .send({ type: "ELECTRONICS", name: `p_${randomUUID()}`, price: 100, attributes: { manufacturer: "m", model: "x", color: "black" } })
+      .send({
+        type: "ELECTRONICS",
+        name: `p_${randomUUID()}`,
+        price: 100,
+        attributes: { manufacturer: "m", model: "x", color: "black" },
+      })
       .expect(201);
     const id = created.body.productId as string;
 

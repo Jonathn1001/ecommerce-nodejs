@@ -11,7 +11,8 @@ const app = createApp();
 describe("JWKS", () => {
   it("publishes the active public key with a kid that matches the token header", async () => {
     const res = await request(app).get("/.well-known/jwks.json").expect(200);
-    const keys = (res.body as { keys: Array<{ kid: string; kty: string; alg: string }> }).keys;
+    const keys = (res.body as { keys: Array<{ kid: string; kty: string; alg: string }> })
+      .keys;
     expect(keys.length).toBeGreaterThan(0);
     expect(keys[0].kty).toBe("RSA");
     expect(keys[0].alg).toBe("RS256");
@@ -25,9 +26,9 @@ describe("JWKS", () => {
       algorithm: "RS256",
       keyid: keys[0].kid,
     });
-    expect((jwt.decode(token, { complete: true }) as { header: { kid: string } }).header.kid).toBe(
-      keys[0].kid
-    );
+    expect(
+      (jwt.decode(token, { complete: true }) as { header: { kid: string } }).header.kid
+    ).toBe(keys[0].kid);
   });
 
   describe("a real login-issued token (integration — needs compose up + migrated + seeded)", () => {

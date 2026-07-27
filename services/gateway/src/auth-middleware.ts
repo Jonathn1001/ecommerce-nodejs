@@ -56,7 +56,9 @@ export function authenticate(
     for (const token of candidates) {
       // Decoding just reads the header to pick a key; it is never trusted for anything else
       // (claims are only accepted once `jwt.verify` below has checked the signature).
-      const decoded = jwt.decode(token, { complete: true }) as { header: { kid?: string } } | null;
+      const decoded = jwt.decode(token, { complete: true }) as {
+        header: { kid?: string };
+      } | null;
       const key = resolveKey(decoded?.header?.kid);
       if (!key) continue; // unknown or missing kid: no key to verify against, try the next candidate
 

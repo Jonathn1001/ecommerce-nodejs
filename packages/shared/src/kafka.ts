@@ -64,7 +64,11 @@ export function createConsumer(kafka: Kafka, groupId: string) {
             } catch {
               /* malformed — no id to recover */
             }
-            log.error("event_parked_to_dlq", { topic, eventId, message: (e as Error).message });
+            log.error("event_parked_to_dlq", {
+              topic,
+              eventId,
+              message: (e as Error).message,
+            });
             await parker.send({
               topic: `${topic}.dlq`,
               messages: [{ key: eventId ?? null, value: raw }],

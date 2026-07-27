@@ -45,7 +45,9 @@ export function createJwksCache(cfg: {
   }
 
   timer = setInterval(() => {
-    refresh().catch((e) => log.error("jwks_refresh_failed", { message: (e as Error).message }));
+    refresh().catch((e) =>
+      log.error("jwks_refresh_failed", { message: (e as Error).message })
+    );
   }, cfg.ttlMs);
   timer.unref?.();
 

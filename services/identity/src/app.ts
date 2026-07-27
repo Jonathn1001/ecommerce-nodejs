@@ -15,7 +15,8 @@ const log = createLogger("identity");
 // the return type reflects that rather than smuggling the public PEM into a `privateKey` field.
 function publishedKeys(): PublishableKey[] {
   const keys: PublishableKey[] = [toSigningKey(config.JWT_PRIVATE_KEY)];
-  if (config.JWT_PREVIOUS_PUBLIC_KEY) keys.push(toPublishableKey(config.JWT_PREVIOUS_PUBLIC_KEY));
+  if (config.JWT_PREVIOUS_PUBLIC_KEY)
+    keys.push(toPublishableKey(config.JWT_PREVIOUS_PUBLIC_KEY));
   return keys;
 }
 
