@@ -12,6 +12,14 @@ describe("catalog price lock (integration — needs compose up + migrated)", () 
     await prisma.$disconnect();
   });
 
+  // NOTE: this case cannot fail under any implementation of loadForUpdate, locked or not.
+  // updateProduct always does `version: { increment: 1 }` atomically at the SQL layer
+  // (tx-adapters.ts:35, "version" = "version" + 1), so versions come out distinct regardless
+  // of read staleness, and both 200 and 300 differ from the stale base 100, so priceChanged is
+  // true for both requests independent of locking. It provides zero regression protection for
+  // the lock this task implements — kept anyway because it still guards a real invariant (no
+  // lost or duplicated version across concurrent updates). The same-price case below is the one
+  // that actually proves the lock.
   it("two concurrent price PATCHes emit exactly two price_changed rows", async () => {
     const created = await request(app)
       .post("/products")
@@ -41,6 +49,11 @@ describe("catalog price lock (integration — needs compose up + migrated)", () 
   // priceChanged=true -> 2 events for one real transition. With `FOR UPDATE` the second
   // transaction blocks until the first commits, then reads cur.price=200 (already the target)
   // and correctly decides priceChanged=false -> exactly 1 event.
+  // Detection is probabilistic pre-fix, not deterministic (observed ~3/6 runs failing): the bug
+  // only manifests when both reads genuinely overlap before either commits. GREEN is
+  // deterministic once the lock is in place, but a single green run after a future revert of the
+  // lock is not conclusive on its own — this case needs repeated runs to reliably witness a
+  // regression.
   it("two concurrent PATCHes to the SAME new price emit exactly one price_changed row", async () => {
     const created = await request(app)
       .post("/products")
