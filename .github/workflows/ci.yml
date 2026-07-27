@@ -69,66 +69,102 @@ jobs:
         run: pnpm vitest run packages/shared
       # Each service runs with ITS OWN database URL, so the two Prisma clients
       # never contend for a single DATABASE_URL inside one test process.
-      - name: Hello service (migrate + e2e)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/hello
-          KAFKA_BROKERS: localhost:9092
-          REDIS_URL: redis://localhost:6379
+      #
+      # These eight suites used to be one near-identical `steps:` entry each (migrate +
+      # env + test, give or take a seed or a missing database). GitHub Actions can only
+      # matrix at the job level, and a matrix leg is a fresh runner with no infra carried
+      # over from `needs:` — matrixing this would mean re-running "Start infra" and the
+      # Kafka leader-election warm-up above eight separate times, multiplying both cost
+      # and the number of untestable-from-a-diff leader-election races. A single job with
+      # one loop step keeps the already-verified infra bootstrap untouched and collapses
+      # the duplication instead: one step definition, one case branch per service, run
+      # serially against the one broker/DB this job already started.
+      - name: Service tests (migrate + seed + test, per service)
         run: |
-          pnpm --filter @ecom/hello exec prisma migrate deploy
-          pnpm vitest run services/hello
-      - name: Inventory service (migrate + int/e2e)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/inventory
-          KAFKA_BROKERS: localhost:9092
-          REDIS_URL: redis://localhost:6379
-        run: |
-          pnpm --filter @ecom/inventory exec prisma migrate deploy
-          pnpm vitest run services/inventory
-      - name: Order service (migrate + int/e2e)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/order
-          KAFKA_BROKERS: localhost:9092
-          RABBITMQ_URL: amqp://ecom:ecom@localhost:5672
-        run: |
-          pnpm --filter @ecom/order exec prisma migrate deploy
-          pnpm vitest run services/order
-      - name: Payment service (migrate + int/e2e)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/payment
-          RABBITMQ_URL: amqp://ecom:ecom@localhost:5672
-          KAFKA_BROKERS: localhost:9092
-          PAYMENT_WEBHOOK_SECRET: test-secret
-        run: |
-          pnpm --filter @ecom/payment exec prisma migrate deploy
-          pnpm vitest run services/payment
-      - name: Catalog service (migrate + int/e2e)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/catalog
-          KAFKA_BROKERS: localhost:9092
-        run: |
-          pnpm --filter @ecom/catalog exec prisma migrate deploy
-          pnpm vitest run services/catalog
-      # mailpit (SMTP 1025 / API 8025) comes up with the compose infra set.
-      - name: Notification service (migrate + int/e2e)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/notification
-          RABBITMQ_URL: amqp://ecom:ecom@localhost:5672
-          KAFKA_BROKERS: localhost:9092
-          SMTP_HOST: localhost
-          SMTP_PORT: 1025
-        run: |
-          pnpm --filter @ecom/notification exec prisma migrate deploy
-          pnpm vitest run services/notification
-      # Identity signs with a throwaway keypair generated per run; the gateway suite makes
-      # its own, so it needs no key from the environment and no database at all.
-      - name: Identity service (migrate + seed + int)
-        env:
-          DATABASE_URL: postgresql://ecom:ecom@localhost:5432/identity
-          KAFKA_BROKERS: localhost:9092
-        run: |
-          pnpm --filter @ecom/identity exec prisma migrate deploy
-          pnpm --filter @ecom/identity seed
-          pnpm vitest run services/identity
-      - name: Gateway service (stub-backed int)
-        run: pnpm vitest run services/gateway
+          set -euo pipefail
+          for svc in hello inventory order payment catalog notification identity gateway; do
+            echo "::group::${svc}"
+            case "$svc" in
+              hello)
+                # migrate + e2e; needs Kafka + Redis.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/hello"
+                  export KAFKA_BROKERS="localhost:9092"
+                  export REDIS_URL="redis://localhost:6379"
+                  pnpm --filter @ecom/hello exec prisma migrate deploy
+                  pnpm vitest run services/hello
+                )
+                ;;
+              inventory)
+                # migrate + int/e2e; needs Kafka + Redis.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/inventory"
+                  export KAFKA_BROKERS="localhost:9092"
+                  export REDIS_URL="redis://localhost:6379"
+                  pnpm --filter @ecom/inventory exec prisma migrate deploy
+                  pnpm vitest run services/inventory
+                )
+                ;;
+              order)
+                # migrate + int/e2e; needs Kafka + Rabbit.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/order"
+                  export KAFKA_BROKERS="localhost:9092"
+                  export RABBITMQ_URL="amqp://ecom:ecom@localhost:5672"
+                  pnpm --filter @ecom/order exec prisma migrate deploy
+                  pnpm vitest run services/order
+                )
+                ;;
+              payment)
+                # migrate + int/e2e; needs Kafka + Rabbit + the webhook secret.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/payment"
+                  export RABBITMQ_URL="amqp://ecom:ecom@localhost:5672"
+                  export KAFKA_BROKERS="localhost:9092"
+                  export PAYMENT_WEBHOOK_SECRET="test-secret"
+                  pnpm --filter @ecom/payment exec prisma migrate deploy
+                  pnpm vitest run services/payment
+                )
+                ;;
+              catalog)
+                # migrate + int/e2e; needs Kafka only.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/catalog"
+                  export KAFKA_BROKERS="localhost:9092"
+                  pnpm --filter @ecom/catalog exec prisma migrate deploy
+                  pnpm vitest run services/catalog
+                )
+                ;;
+              notification)
+                # migrate + int/e2e; needs Kafka + Rabbit + mailpit SMTP (comes up with
+                # the compose infra set).
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/notification"
+                  export RABBITMQ_URL="amqp://ecom:ecom@localhost:5672"
+                  export KAFKA_BROKERS="localhost:9092"
+                  export SMTP_HOST="localhost"
+                  export SMTP_PORT="1025"
+                  pnpm --filter @ecom/notification exec prisma migrate deploy
+                  pnpm vitest run services/notification
+                )
+                ;;
+              identity)
+                # migrate + seed + int; needs Kafka only. Identity signs with a
+                # throwaway keypair generated per run, so it needs no key from the
+                # environment.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/identity"
+                  export KAFKA_BROKERS="localhost:9092"
+                  pnpm --filter @ecom/identity exec prisma migrate deploy
+                  pnpm --filter @ecom/identity seed
+                  pnpm vitest run services/identity
+                )
+                ;;
+              gateway)
+                # stub-backed int; the gateway suite makes its own key, so it needs no
+                # database and no broker at all.
+                pnpm vitest run services/gateway
+                ;;
+            esac
+            echo "::endgroup::"
+          done

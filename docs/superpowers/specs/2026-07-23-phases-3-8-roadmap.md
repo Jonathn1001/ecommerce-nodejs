@@ -169,7 +169,8 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | Gateway timeouts + circuit breaker (umbrella §Resilience) | **6** (6b) |
 | `x-user-id` → verified-identity retrofit across existing services | **6** (6b) |
 | Dedup-pattern guidance in `shared` (ProcessedEvent vs Redis `markProcessed`) | **5** (5a decides + documents) |
-| e2e durable-topic reset · hello-service fate · CI matrix refactor | **7** (7c) |
+| e2e durable-topic reset · CI matrix refactor | **7** (7c) |
+| hello-service fate | decided: kept as canary (7a) |
 | Discount projection into Order's read model | named backlog (post-4, unscheduled) |
 | Stale repo `CLAUDE.md` (still describes the legacy MVC/MongoDB app — misleads every agent session) | one-off chore, next session touching repo docs |
 

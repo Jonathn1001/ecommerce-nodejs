@@ -1,3 +1,7 @@
+// KEPT DELIBERATELY (Phase 7a decision). hello is the platform's canary: the cheapest
+// end-to-end proof that DB + outbox + Kafka + health + graceful shutdown still work
+// together. It fails before any real service does when a shared package regresses. Do not
+// retire it as leftover scaffolding.
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
