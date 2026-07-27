@@ -58,9 +58,15 @@ export function createConsumer(kafka: Kafka, groupId: string) {
           } catch (e) {
             // Poison message: park and commit so the partition keeps moving. Keep the key
             // when the envelope parsed — a DLQ message with no key cannot be traced back.
-            let eventId: string | undefined;
+            // `eventId` must actually be checked to be a string before use as a Kafka
+            // message key: a JSON-parseable envelope whose `eventId` is a number or object
+            // would otherwise pass an unchecked cast straight to `parker.send`, which
+            // throws on a non-string/Buffer/null key — wedging the very partition this
+            // DLQ path exists to unblock.
+            let eventId: string | null = null;
             try {
-              eventId = (JSON.parse(raw) as { eventId?: string }).eventId;
+              const parsed = JSON.parse(raw) as { eventId?: unknown };
+              if (typeof parsed.eventId === "string") eventId = parsed.eventId;
             } catch {
               /* malformed — no id to recover */
             }
@@ -71,7 +77,7 @@ export function createConsumer(kafka: Kafka, groupId: string) {
             });
             await parker.send({
               topic: `${topic}.dlq`,
-              messages: [{ key: eventId ?? null, value: raw }],
+              messages: [{ key: eventId, value: raw }],
             });
           }
         },

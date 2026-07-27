@@ -42,4 +42,25 @@ describe("startLedgerPruner", () => {
     pruner.stop();
     vi.useRealTimers();
   });
+
+  it("a port that throws synchronously (not a rejection) does not wedge the timer", async () => {
+    // deleteOlderThan is typed to return Promise<number>, but a buggy adapter could
+    // still throw before ever constructing a promise — e.g. a bad query builder
+    // throwing during argument validation. If the call site awaited/chained off of
+    // that call directly, this throw would happen outside any .then/.catch, leaving
+    // the `running` guard stuck true and silently stopping all future pruning.
+    vi.useFakeTimers();
+    let calls = 0;
+    const port: LedgerPrunerPort = {
+      deleteOlderThan(): Promise<number> {
+        calls++;
+        throw new Error("sync boom");
+      },
+    };
+    const pruner = startLedgerPruner(port, { intervalMs: 1000 });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls).toBeGreaterThanOrEqual(2); // proves the timer kept firing, not wedged
+    pruner.stop();
+    vi.useRealTimers();
+  });
 });

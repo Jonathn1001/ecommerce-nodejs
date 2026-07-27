@@ -21,8 +21,12 @@ export function startLedgerPruner(
     if (running) return; // never overlap a slow prune with the next tick
     running = true;
     const cutoff = new Date(Date.now() - retentionDays * 24 * 3600_000);
-    port
-      .deleteOlderThan(cutoff)
+    // Call the port from inside the `.then`, not directly: a port that throws
+    // synchronously (rather than rejecting) would otherwise throw before any
+    // `.then/.catch/.finally` chain exists to catch it, leaving `running` stuck
+    // true forever and silently stopping all future pruning.
+    Promise.resolve()
+      .then(() => port.deleteOlderThan(cutoff))
       .then((count) => {
         if (count > 0) log.info("ledger_pruned", { count, retentionDays });
       })
