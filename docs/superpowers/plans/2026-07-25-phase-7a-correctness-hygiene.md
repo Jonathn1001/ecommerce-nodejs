@@ -467,7 +467,7 @@ adding `async () => { pruner.stop(); },` to that service's `gracefulShutdown` ar
 
 ```bash
 pnpm -r typecheck
-git add packages/shared/src/ledger-pruner.ts packages/shared/src/index.ts packages/shared/src/__tests__/ledger-pruner.unit.test.ts services/order/src services/inventory/src services/payment/src services/notification/src
+git add packages/shared/src/ledger-pruner.ts packages/shared/src/index.ts packages/shared/src/__tests__/ledger-pruner.unit.test.ts services/order/src/config.ts services/order/src/main.ts services/order/src/prune-adapter.ts services/inventory/src/config.ts services/inventory/src/main.ts services/inventory/src/prune-adapter.ts services/payment/src/config.ts services/payment/src/main.ts services/payment/src/prune-adapter.ts services/notification/src/config.ts services/notification/src/main.ts services/notification/src/prune-adapter.ts
 git commit -m "feat(shared): startLedgerPruner + adoption in order/inventory/payment/notification"
 ```
 
@@ -625,10 +625,21 @@ DATABASE_URL='postgresql://ecom:ecom@localhost:5432/catalog' pnpm vitest run ser
 DATABASE_URL='postgresql://ecom:ecom@localhost:5432/identity' pnpm vitest run services/identity
 ```
 
+> `pnpm --filter "./services/*" exec prisma generate` always reports overall failure as
+> written: `services/gateway` matches the filter but has no `prisma/schema.prisma`, so its
+> `exec` leg exits non-zero and pnpm reports the whole command failed even though every
+> service that actually has a schema (catalog, hello, identity, inventory, notification,
+> order, payment) generated successfully. Fix by listing the services that have a schema
+> explicitly — `pnpm --filter @ecom/catalog --filter @ecom/hello --filter @ecom/identity
+> --filter @ecom/inventory --filter @ecom/notification --filter @ecom/order --filter
+> @ecom/payment exec prisma generate` — or, if running the command as written, treat a
+> non-zero exit as expected here and check each service's own generate output rather than
+> the aggregate exit code.
+
 - [ ] **Step 5: Commit**
 
 ```bash
-git add services/catalog/prisma services/identity/prisma
+git add services/catalog/prisma/schema.prisma services/catalog/prisma/migrations/20260727030045_drop_dead_processed_event/migration.sql services/identity/prisma/schema.prisma services/identity/prisma/migrations/20260727025651_drop_dead_processed_event/migration.sql
 git commit -m "chore(catalog,identity): drop the dead ProcessedEvent tables (neither service consumes events)"
 ```
 
@@ -749,7 +760,7 @@ and at the very top of the webhook handler, before any parsing or lookup:
 
 ```bash
 DATABASE_URL='postgresql://ecom:ecom@localhost:5432/payment' PAYMENT_WEBHOOK_SECRET='test-secret' pnpm vitest run services/payment
-git add services/payment/src .github/workflows/ci.yml
+git add services/payment/src/app.ts services/payment/src/config.ts services/payment/src/webhook-signature.ts services/payment/src/__tests__/app.int.test.ts services/payment/src/__tests__/resolve.int.test.ts services/payment/src/__tests__/sign-webhook.ts services/payment/src/__tests__/webhook-refund.e2e.test.ts services/payment/src/__tests__/webhook-signature.unit.test.ts .github/workflows/ci.yml docker-compose.example.yml
 git commit -m "fix(payment): require an HMAC signature on the provider webhook"
 ```
 
@@ -869,7 +880,7 @@ pnpm vitest run packages/contracts
 DATABASE_URL='postgresql://ecom:ecom@localhost:5432/order' pnpm vitest run services/order
 DATABASE_URL='postgresql://ecom:ecom@localhost:5432/payment' PAYMENT_WEBHOOK_SECRET='test-secret' pnpm vitest run services/payment
 pnpm vitest run services/gateway
-git add packages/contracts services/order/src/transition.ts services/payment services/gateway/src/app.ts
+git add packages/contracts/src/__tests__/payment-events.test.ts packages/contracts/src/events/payment.ts services/order/src/transition.ts services/order/src/__tests__/transition.unit.test.ts services/payment/prisma/schema.prisma services/payment/prisma/migrations/20260727033103_payment_user_id/migration.sql services/payment/src/app.ts services/payment/src/charge.ts services/payment/src/consumer.ts services/payment/src/tx-adapters.ts services/payment/src/__tests__/app.int.test.ts services/payment/src/__tests__/charge.int.test.ts services/gateway/src/app.ts services/gateway/src/__tests__/gateway.int.test.ts
 git commit -m "feat(payment): carry userId on ChargePayment and scope GET /payments/:orderId by caller"
 ```
 
@@ -994,7 +1005,7 @@ and in `sessions.ts` the claim call becomes `await tx.revokeOne(row.id, now, tru
 ```bash
 DATABASE_URL='postgresql://ecom:ecom@localhost:5432/identity' pnpm vitest run services/identity
 pnpm --filter @ecom/identity typecheck
-git add services/identity
+git add services/identity/prisma/schema.prisma services/identity/prisma/migrations/20260727035515_refresh_replaced_at/migration.sql services/identity/src/auth.ts services/identity/src/config.ts services/identity/src/sessions.ts services/identity/src/tx-adapters.ts services/identity/src/__tests__/auth.int.test.ts services/identity/src/__tests__/sessions.unit.test.ts
 git commit -m "feat(identity): grace window so an honest double-refresh no longer kills the family"
 ```
 
@@ -1145,7 +1156,7 @@ decoding the header first (`jwt.decode(token, { complete: true })`), resolving b
 DATABASE_URL='postgresql://ecom:ecom@localhost:5432/identity' pnpm vitest run services/identity
 pnpm vitest run services/gateway
 pnpm -r typecheck
-git add services/identity services/gateway
+git add services/identity/src/app.ts services/identity/src/config.ts services/identity/src/jwks.ts services/identity/src/tokens.ts services/identity/src/__tests__/jwks.int.test.ts services/gateway/src/app.ts services/gateway/src/auth-middleware.ts services/gateway/src/config.ts services/gateway/src/jwks-cache.ts services/gateway/src/main.ts services/gateway/src/__tests__/gateway.int.test.ts services/gateway/src/__tests__/jwks-cache.unit.test.ts
 git commit -m "feat(identity,gateway): publish a JWKS and verify tokens by kid"
 ```
 
@@ -1311,7 +1322,7 @@ for s in hello inventory order payment catalog notification identity; do
 done
 pnpm vitest run services/gateway packages
 pnpm -r typecheck && pnpm format && pnpm format:check
-git add services/order packages/contracts
+git add packages/contracts/src/events/order.ts services/order/src/sse-listener.ts services/order/src/sse-registry.ts services/order/src/__tests__/sse-registry.unit.test.ts services/order/src/__tests__/order-stream.int.test.ts services/order/src/__tests__/order-payment-leg.e2e.test.ts
 git commit -m "refactor(order): split SubscriberRegistry into its own file; test and const polish"
 ```
 
