@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import type express from "express";
 import { IDENTITY_USER_REGISTERED } from "@ecom/contracts";
 import { createApp } from "../app";
+import { config } from "../config";
 import { prisma } from "../db";
 
 const email = () => `u_${randomUUID()}@example.test`;
@@ -119,6 +120,9 @@ describe("identity auth (integration — needs compose up + migrated + seeded)",
       .post("/auth/refresh")
       .send({ refreshToken: deviceA.refreshToken })
       .expect(200);
+    // Clear the grace window first: an immediate replay here would be an honest
+    // double-submit (GRACE), not reuse. This test wants genuine reuse.
+    await new Promise((r) => setTimeout(r, config.REFRESH_GRACE_MS + 50));
     // Replay of the consumed token -> reuse detected.
     await request(app)
       .post("/auth/refresh")
@@ -167,14 +171,32 @@ describe("identity auth (integration — needs compose up + migrated + seeded)",
 
     // The security property: a thief racing the honest client cannot end up with a parallel
     // session. Depending on which interleaving happens, the loser either loses the row claim
-    // (RACE -> 401, family intact) or reads the winner's committed revoke and treats it as
-    // reuse (-> the family is revoked and BOTH clients must log in again). Either way the
-    // count of live tokens is never 2 — see "Known limitations" in the spec.
+    // (RACE -> 401, family intact) or reads the winner's committed revoke — and since that
+    // happens within milliseconds, well inside the grace window, it reads as GRACE (401,
+    // family intact) rather than REUSE. Either way the count of live tokens is never 2 — see
+    // "Known limitations" in the spec.
     const userId = (jwt.decode(s.accessToken) as jwt.JwtPayload).sub as string;
     const live = await prisma.refreshToken.count({
       where: { userId, revokedAt: null },
     });
     expect(live).toBeLessThanOrEqual(1);
+  });
+
+  it("a double-submit inside the grace window keeps the session alive", async () => {
+    const s = await registerAndLogin();
+    const first = await request(app)
+      .post("/auth/refresh")
+      .send({ refreshToken: s.refreshToken })
+      .expect(200);
+    // Immediate replay of the consumed token: rejected, but the family survives.
+    await request(app)
+      .post("/auth/refresh")
+      .send({ refreshToken: s.refreshToken })
+      .expect(401);
+    await request(app)
+      .post("/auth/refresh")
+      .send({ refreshToken: first.body.refreshToken })
+      .expect(200);
   });
 
   it("an unknown refresh token is 401 and revokes nothing", async () => {

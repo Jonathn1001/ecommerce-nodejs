@@ -19,11 +19,14 @@ function fakeTx(rows: SessionRow[]) {
     },
     // Mirrors the SQL guard `WHERE revokedAt IS NULL` and returns the affected count. The
     // old fake revoked unconditionally, which is exactly why it could not see the race.
-    async revokeOne(id) {
+    // `rotated` stamps `replacedAt` too, mirroring the production adapter, so the grace
+    // window can tell "rotated" apart from "revoked by logout".
+    async revokeOne(id, at, rotated = false) {
       let count = 0;
       for (const row of store.values())
         if (row.id === id && row.revokedAt === null) {
-          row.revokedAt = NOW;
+          row.revokedAt = at;
+          if (rotated) row.replacedAt = at;
           count++;
         }
       return count;
@@ -36,6 +39,7 @@ function fakeTx(rows: SessionRow[]) {
         userId: n.userId,
         familyId: n.familyId,
         revokedAt: null,
+        replacedAt: null,
         expiresAt: n.expiresAt,
       });
       return `new_${minted.length}`;
@@ -53,6 +57,7 @@ const live = (over: Partial<SessionRow> = {}): SessionRow => ({
   userId: "u1",
   familyId: "f1",
   revokedAt: null,
+  replacedAt: null,
   expiresAt: new Date(NOW.getTime() + 24 * HOUR),
   ...over,
 });
@@ -99,7 +104,9 @@ describe("rotateRefresh", () => {
   it("rotating twice with the same token trips REUSE the second time", async () => {
     const f = fakeTx([live()]);
     expect((await rotateRefresh(f.tx, "h1", NOW, () => "h2")).outcome).toBe("ROTATED");
-    const second = await rotateRefresh(f.tx, "h1", NOW, () => "h3");
+    // Past the default grace window: a genuine replay, not an honest double-submit.
+    const later = new Date(NOW.getTime() + 60_000);
+    const second = await rotateRefresh(f.tx, "h1", later, () => "h3");
     expect(second.outcome).toBe("REUSE");
     expect(f.store.get("h2")!.revokedAt).toEqual(NOW); // the honest client is logged out too
   });
@@ -128,5 +135,54 @@ describe("rotateRefresh", () => {
     ]);
     await rotateRefresh(f.tx, "h1", NOW, () => "hx");
     expect(f.store.get("h9")!.revokedAt).toBeNull();
+  });
+
+  it("a replay inside the grace window -> GRACE: 401 without revoking the family", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW, replacedAt: NOW }),
+      live({ id: "s2", tokenHash: "h2" }), // the successor, still live
+    ]);
+    const r = await rotateRefresh(
+      f.tx,
+      "h1",
+      new Date(NOW.getTime() + 2_000),
+      () => "h3",
+      undefined,
+      10_000
+    );
+    expect(r.outcome).toBe("GRACE");
+    expect(f.revokedFamilies).toEqual([]);
+    expect(f.store.get("h2")!.revokedAt).toBeNull(); // honest client keeps its session
+  });
+
+  it("a replay after the grace window is still REUSE", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW, replacedAt: NOW }),
+    ]);
+    const r = await rotateRefresh(
+      f.tx,
+      "h1",
+      new Date(NOW.getTime() + 60_000),
+      () => "h3",
+      undefined,
+      10_000
+    );
+    expect(r.outcome).toBe("REUSE");
+    expect(f.revokedFamilies).toEqual(["f1"]);
+  });
+
+  it("a row revoked by logout (never rotated) is REUSE even inside the window", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW, replacedAt: null }),
+    ]);
+    const r = await rotateRefresh(
+      f.tx,
+      "h1",
+      new Date(NOW.getTime() + 2_000),
+      () => "h3",
+      undefined,
+      10_000
+    );
+    expect(r.outcome).toBe("REUSE");
   });
 });

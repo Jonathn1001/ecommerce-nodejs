@@ -10,6 +10,9 @@ export const config = loadConfig(
     JWT_PRIVATE_KEY: z.string().min(1),
     ACCESS_TTL: z.string().default("15m"),
     REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(7),
+    // How long after a rotation a replay of the rotated token is treated as an honest
+    // double-submit (GRACE) instead of reuse (which would revoke the whole family).
+    REFRESH_GRACE_MS: z.coerce.number().int().nonnegative().default(10_000),
     BCRYPT_COST: z.coerce.number().int().positive().default(10),
     LEDGER_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
     LEDGER_PRUNE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),

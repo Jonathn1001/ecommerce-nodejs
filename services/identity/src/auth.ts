@@ -89,11 +89,15 @@ export async function refresh(
       presentedHash,
       new Date(),
       () => minted.tokenHash,
-      refreshTtlMs()
+      refreshTtlMs(),
+      config.REFRESH_GRACE_MS
     )
   );
-  // Anything but ROTATED is a 401 — including RACE, where a concurrent refresh already
-  // consumed this token and minted the successor.
+  // Whitelist, not a default branch: only ROTATED mints new tokens. Every other outcome —
+  // including GRACE (a recent, honest double-submit; the client keeps the successor it
+  // already holds, no new tokens here) and RACE (a concurrent refresh already consumed this
+  // token and minted the successor) — is a 401. A future RotateOutcome variant is rejected
+  // by default until explicitly allowed above.
   if (result.outcome !== "ROTATED")
     return { outcome: "REJECTED", reason: result.outcome };
 

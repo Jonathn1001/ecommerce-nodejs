@@ -13,6 +13,7 @@ export function sessionTx(tx: Prisma.TransactionClient): SessionTx {
             familyId: r.familyId,
             revokedAt: r.revokedAt,
             replacedBy: r.replacedBy,
+            replacedAt: r.replacedAt,
             expiresAt: r.expiresAt,
           }
         : null;
@@ -23,10 +24,10 @@ export function sessionTx(tx: Prisma.TransactionClient): SessionTx {
         data: { revokedAt: at },
       });
     },
-    async revokeOne(id, at) {
+    async revokeOne(id, at, rotated = false) {
       const r = await tx.refreshToken.updateMany({
         where: { id, revokedAt: null },
-        data: { revokedAt: at },
+        data: rotated ? { revokedAt: at, replacedAt: at } : { revokedAt: at },
       });
       return r.count; // 0 = another transaction claimed this token first
     },

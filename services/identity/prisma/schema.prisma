@@ -33,6 +33,7 @@ model RefreshToken {
   familyId   String
   revokedAt  DateTime?
   replacedBy String?
+  replacedAt DateTime?                       // set when this row was ROTATED (not revoked)
   expiresAt  DateTime
   createdAt  DateTime  @default(now())
 
