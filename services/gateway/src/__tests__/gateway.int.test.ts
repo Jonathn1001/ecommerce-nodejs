@@ -174,6 +174,14 @@ describe("gateway (integration — stub upstream)", () => {
         .expect(200);
     });
 
+    it("GET /payments/:orderId is proxied and needs authentication only (ownership is payment's job)", async () => {
+      await request(app).get("/payments/o1").expect(401);
+      await request(app)
+        .get("/payments/o1")
+        .set("Authorization", `Bearer ${sign("u1", "USER")}`)
+        .expect(200);
+    });
+
     it("browsing the catalog is public", async () => {
       await request(app).get("/products").expect(200);
     });
@@ -237,6 +245,7 @@ describe("gateway (integration — stub upstream)", () => {
       expect(await get("/orders/o1")).toBe("/orders/o1");
       expect(await get("/cart")).toBe("/cart");
       expect(await get("/products/p1")).toBe("/products/p1");
+      expect(await get("/payments/o1")).toBe("/payments/o1");
 
       const posted = await request(app)
         .post("/cart/items")

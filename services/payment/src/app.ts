@@ -30,11 +30,16 @@ export function createApp(deps: {
   );
 
   app.get("/payments/:orderId", async (req, res) => {
+    const callerId = req.header("x-user-id");
+    if (!callerId) return res.status(400).json({ error: "missing x-user-id" });
     try {
       const p = await prisma.payment.findUnique({
         where: { orderId: req.params.orderId },
       });
-      if (!p) return res.status(404).json({ error: "not found" });
+      // A payment belonging to someone else — or to nobody (a legacy row) — is reported
+      // absent, not forbidden, so order ids stay unenumerable.
+      if (!p || p.userId !== callerId)
+        return res.status(404).json({ error: "not found" });
       res.json({
         orderId: p.orderId,
         amount: p.amount,

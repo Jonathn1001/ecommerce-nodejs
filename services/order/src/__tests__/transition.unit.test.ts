@@ -82,7 +82,11 @@ describe("applyResult", () => {
     });
     expect(outcome).toBe("AWAITING_PAYMENT");
     expect(f.emitted).toEqual([
-      { type: CHARGE_PAYMENT, orderId: "o1", payload: { orderId: "o1", amount: 700 } },
+      {
+        type: CHARGE_PAYMENT,
+        orderId: "o1",
+        payload: { orderId: "o1", userId: "u1", amount: 700 },
+      },
     ]);
   });
   it("reservation-failed -> CANCELLED + OrderCancelled", async () => {

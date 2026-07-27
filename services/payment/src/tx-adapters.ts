@@ -20,8 +20,8 @@ export function chargeTx(tx: Prisma.TransactionClient, traceId: string): ChargeT
       });
       return row !== null;
     },
-    async createPayment(orderId, amount, status) {
-      const p = await tx.payment.create({ data: { orderId, amount, status } });
+    async createPayment(orderId, amount, status, userId) {
+      const p = await tx.payment.create({ data: { orderId, amount, status, userId } });
       return p.id;
     },
     async createAttempt(paymentId, outcome) {

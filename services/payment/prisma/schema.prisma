@@ -13,6 +13,7 @@ datasource db {
 model Payment {
   id        String           @id @default(uuid())
   orderId   String           @unique
+  userId    String?                          // nullable: rows predate the widened command
   amount    Int                              // integer minor units
   status    String
   attempts  PaymentAttempt[]

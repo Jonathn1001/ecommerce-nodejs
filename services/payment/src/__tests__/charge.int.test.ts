@@ -10,7 +10,17 @@ import {
   type EventEnvelope,
 } from "@ecom/contracts";
 
-function chargeCmd(orderId: string, amount: number): EventEnvelope {
+function chargeCmd(orderId: string, amount: number, userId: string): EventEnvelope {
+  return makeEnvelope({
+    type: CHARGE_PAYMENT,
+    version: 1,
+    traceId: "t",
+    producer: "test",
+    payload: { orderId, userId, amount },
+  });
+}
+// A command minted before this deploy's contract widened — no userId key at all.
+function legacyChargeCmd(orderId: string, amount: number): EventEnvelope {
   return makeEnvelope({
     type: CHARGE_PAYMENT,
     version: 1,
@@ -23,6 +33,8 @@ const outboxCount = (orderId: string, type: string) =>
   prisma.outbox.count({ where: { aggregateId: orderId, type } });
 const statusOf = async (orderId: string) =>
   (await prisma.payment.findUnique({ where: { orderId } }))?.status;
+const userIdOf = async (orderId: string) =>
+  (await prisma.payment.findUnique({ where: { orderId } }))?.userId;
 
 describe("payment charge consumer (integration — needs docker compose up + migrated)", () => {
   afterAll(async () => {
@@ -31,8 +43,10 @@ describe("payment charge consumer (integration — needs docker compose up + mig
 
   it("charges a success amount -> Payment SUCCEEDED + one PaymentSucceeded outbox + one attempt", async () => {
     const orderId = `o_${randomUUID()}`;
-    await handleChargePayment(chargeCmd(orderId, 500));
+    const userId = `u_${randomUUID()}`;
+    await handleChargePayment(chargeCmd(orderId, 500, userId));
     expect(await statusOf(orderId)).toBe("SUCCEEDED");
+    expect(await userIdOf(orderId)).toBe(userId);
     expect(await outboxCount(orderId, PAYMENT_SUCCEEDED)).toBe(1);
     const pay = await prisma.payment.findUnique({ where: { orderId } });
     expect(await prisma.paymentAttempt.count({ where: { paymentId: pay!.id } })).toBe(1);
@@ -40,14 +54,15 @@ describe("payment charge consumer (integration — needs docker compose up + mig
 
   it("declines a ...01 amount -> Payment FAILED + one PaymentFailed outbox", async () => {
     const orderId = `o_${randomUUID()}`;
-    await handleChargePayment(chargeCmd(orderId, 101));
+    const userId = `u_${randomUUID()}`;
+    await handleChargePayment(chargeCmd(orderId, 101, userId));
     expect(await statusOf(orderId)).toBe("FAILED");
     expect(await outboxCount(orderId, PAYMENT_FAILED)).toBe(1);
   });
 
   it("dedupes a redelivered command -> one payment, one ProcessedEvent", async () => {
     const orderId = `o_${randomUUID()}`;
-    const cmd = chargeCmd(orderId, 500);
+    const cmd = chargeCmd(orderId, 500, `u_${randomUUID()}`);
     await handleChargePayment(cmd);
     await handleChargePayment(cmd); // same eventId
     expect(await prisma.payment.count({ where: { orderId } })).toBe(1);
@@ -58,8 +73,21 @@ describe("payment charge consumer (integration — needs docker compose up + mig
 
   it("re-sent command (new eventId, same order) -> still one payment (ALREADY_CHARGED)", async () => {
     const orderId = `o_${randomUUID()}`;
-    await handleChargePayment(chargeCmd(orderId, 500));
-    await handleChargePayment(chargeCmd(orderId, 500)); // different eventId
+    const userId = `u_${randomUUID()}`;
+    await handleChargePayment(chargeCmd(orderId, 500, userId));
+    await handleChargePayment(chargeCmd(orderId, 500, userId)); // different eventId
     expect(await prisma.payment.count({ where: { orderId } })).toBe(1);
+  });
+
+  // Controller resolution: a ChargePayment enqueued before this deploy's contract widened
+  // has no userId at all. The consumer must not hard-fail on it (that would retry 3x then
+  // DLQ the command forever, leaving its order stuck in AWAITING_PAYMENT) — it tolerates
+  // the missing field and stores userId as null instead.
+  it("a legacy command with no userId is charged normally, storing userId as null", async () => {
+    const orderId = `o_${randomUUID()}`;
+    await handleChargePayment(legacyChargeCmd(orderId, 500));
+    expect(await statusOf(orderId)).toBe("SUCCEEDED");
+    expect(await userIdOf(orderId)).toBeNull();
+    expect(await outboxCount(orderId, PAYMENT_SUCCEEDED)).toBe(1);
   });
 });

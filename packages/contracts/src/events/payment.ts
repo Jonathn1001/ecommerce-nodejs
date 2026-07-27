@@ -7,6 +7,7 @@ export const PAYMENT_FAILED = "payment.failed" as const;
 // RabbitMQ command. amount is integer minor units (Order is the pricing authority).
 export const ChargePaymentPayloadSchema = z.object({
   orderId: z.string().min(1),
+  userId: z.string().min(1), // Payment scopes its read routes by this
   amount: z.number().int().positive(),
 });
 export type ChargePaymentPayload = z.infer<typeof ChargePaymentPayloadSchema>;

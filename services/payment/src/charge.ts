@@ -13,7 +13,13 @@ export function simulateCharge(amount: number): "SUCCEEDED" | "FAILED" | "PROCES
 export interface ChargeTx {
   markProcessed(eventId: string, type: string): Promise<boolean>; // false => already processed
   paymentExists(orderId: string): Promise<boolean>;
-  createPayment(orderId: string, amount: number, status: string): Promise<string>; // returns paymentId
+  // userId is nullable: a legacy ChargePayment (minted before this contract widened) carries none.
+  createPayment(
+    orderId: string,
+    amount: number,
+    status: string,
+    userId: string | null
+  ): Promise<string>; // returns paymentId
   createAttempt(paymentId: string, outcome: string): Promise<void>;
   enqueue(type: string, orderId: string, payload: unknown): Promise<void>;
 }
@@ -26,7 +32,10 @@ export type ChargeOutcome =
 // unique Payment.orderId is the DB-level backstop to paymentExists.
 export async function chargeOrder(
   tx: ChargeTx,
-  p: { eventId: string; orderId: string; amount: number }
+  // userId is optional here (not on ChargeTx) so a legacy caller that never had it to
+  // give still compiles; chargeOrder is the one place that decides the missing case
+  // becomes a stored null rather than a crash.
+  p: { eventId: string; orderId: string; userId?: string | null; amount: number }
 ): Promise<ChargeOutcome> {
   const fresh = await tx.markProcessed(p.eventId, CHARGE_PAYMENT);
   if (!fresh) return "DUPLICATE";
@@ -34,7 +43,12 @@ export async function chargeOrder(
   if (await tx.paymentExists(p.orderId)) return "ALREADY_CHARGED";
 
   const outcome = simulateCharge(p.amount);
-  const paymentId = await tx.createPayment(p.orderId, p.amount, outcome);
+  const paymentId = await tx.createPayment(
+    p.orderId,
+    p.amount,
+    outcome,
+    p.userId ?? null
+  );
   await tx.createAttempt(paymentId, outcome);
 
   if (outcome === "SUCCEEDED") {

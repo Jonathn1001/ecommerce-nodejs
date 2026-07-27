@@ -24,22 +24,50 @@ describe("payment app (integration — needs docker compose up + migrated)", () 
 
   it("GET /payments/:orderId returns the payment after a charge; 404 when unknown", async () => {
     const orderId = `o_${randomUUID()}`;
+    const userId = `u_${randomUUID()}`;
     await handleChargePayment(
       makeEnvelope({
         type: CHARGE_PAYMENT,
         version: 1,
         traceId: "t",
         producer: "test",
-        payload: { orderId, amount: 700 },
+        payload: { orderId, userId, amount: 700 },
       })
     );
-    const got = await request(app).get(`/payments/${orderId}`);
+    const got = await request(app).get(`/payments/${orderId}`).set("x-user-id", userId);
     expect(got.status).toBe(200);
     expect(got.body.status).toBe("SUCCEEDED");
     expect(got.body.amount).toBe(700);
 
-    const missing = await request(app).get(`/payments/o_${randomUUID()}`);
+    const missing = await request(app)
+      .get(`/payments/o_${randomUUID()}`)
+      .set("x-user-id", userId);
     expect(missing.status).toBe(404);
+  });
+
+  it("GET /payments/:orderId is 400 without x-user-id", async () => {
+    const orderId = `o_${randomUUID()}`;
+    const res = await request(app).get(`/payments/${orderId}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("the owner reads their payment; another user and a legacy row both 404", async () => {
+    const orderId = `o_${randomUUID()}`;
+    const userId = `u_${randomUUID()}`;
+    await prisma.payment.create({
+      data: { orderId, userId, amount: 100, status: "SUCCEEDED" },
+    });
+    await request(app).get(`/payments/${orderId}`).set("x-user-id", userId).expect(200);
+    await request(app)
+      .get(`/payments/${orderId}`)
+      .set("x-user-id", "someone-else")
+      .expect(404);
+
+    const legacy = `o_${randomUUID()}`;
+    await prisma.payment.create({
+      data: { orderId: legacy, amount: 100, status: "SUCCEEDED" },
+    });
+    await request(app).get(`/payments/${legacy}`).set("x-user-id", userId).expect(404);
   });
 
   it("rejects an unsigned webhook with 401 and touches no payment", async () => {

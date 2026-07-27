@@ -195,9 +195,10 @@ export function createApp(deps: GatewayDeps): express.Application {
   app.use("/products", authOptional, authz, guard("catalog", deps.upstreams.catalog));
   app.use("/comments", authRequired, authz, guard("catalog", deps.upstreams.catalog));
   app.use("/discounts", authRequired, authz, guard("catalog", deps.upstreams.catalog));
-  // GET /payments/:orderId is deliberately NOT proxied: Payment has no userId to scope by,
-  // so exposing it would hand any authenticated caller another user's amount and status —
-  // the same IDOR this phase closed on Order. Phase 7 carries userId onto ChargePayment.
+  // GET /payments/:orderId is scoped by the caller's x-user-id in the payment service itself
+  // (Phase 7a carried userId onto ChargePayment for this); the gateway needs no ownership
+  // rule here, just authentication.
+  app.use("/payments", authRequired, authz, guard("payment", deps.upstreams.payment));
   app.use(
     "/admin/payments",
     authRequired,

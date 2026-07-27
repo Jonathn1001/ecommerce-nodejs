@@ -68,6 +68,7 @@ export async function applyResult(
     // status change; the relay routes it to RabbitMQ payment.charge.
     await tx.enqueue(CHARGE_PAYMENT, p.orderId, {
       orderId: p.orderId,
+      userId: order.userId,
       amount: order.totalPrice,
     });
   } else if (next === "CONFIRMED") {
