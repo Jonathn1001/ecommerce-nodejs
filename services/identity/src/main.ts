@@ -1,11 +1,13 @@
 import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
+import { refreshTokenPrunerPort } from "./prune-adapter";
 import { prisma } from "./db";
 import {
   createKafka,
   createProducer,
   startOutboxRelay,
+  startLedgerPruner,
   createLogger,
   gracefulShutdown,
 } from "@ecom/shared";
@@ -23,12 +25,17 @@ async function main() {
     intervalMs: 500,
   });
 
+  const pruner = startLedgerPruner(refreshTokenPrunerPort, {
+    retentionDays: config.LEDGER_RETENTION_DAYS,
+    intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
+  });
+
   const app = createApp();
   const server = app.listen(config.PORT, () =>
     log.info("identity_listening", { port: config.PORT })
   );
 
-  // Reverse teardown: server.close -> relay.stop -> producer.disconnect -> prisma.
+  // Reverse teardown: server.close -> pruner.stop -> relay.stop -> producer.disconnect -> prisma.
   // The relay stops before its transport closes.
   gracefulShutdown([
     async () => {
@@ -39,6 +46,9 @@ async function main() {
     },
     async () => {
       relay.stop();
+    },
+    async () => {
+      pruner.stop();
     },
     async () => {
       await new Promise<void>((resolve, reject) =>

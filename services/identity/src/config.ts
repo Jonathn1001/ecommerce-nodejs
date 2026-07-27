@@ -11,6 +11,8 @@ export const config = loadConfig(
     ACCESS_TTL: z.string().default("15m"),
     REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(7),
     BCRYPT_COST: z.coerce.number().int().positive().default(10),
+    LEDGER_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    LEDGER_PRUNE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
     PORT: z.coerce.number().int().positive().default(3006),
     LOG_LEVEL: z.string().default("info"),
   })
