@@ -117,9 +117,11 @@ and cheap. Configurable per service via `LEDGER_RETENTION_DAYS`.
 
 ### B2. Identity `RefreshToken` sweeper
 
-Same shape, in identity: delete rows past `expiresAt`, and revoked rows older than
-`retentionDays`. Revoked rows cannot be pruned immediately — reuse-detection needs to find a
-revoked row to recognise a replay (§C3's grace window depends on it too).
+Same shape, in identity: delete never-revoked rows past `expiresAt`, and revoked rows older
+than `retentionDays`. Revoked rows cannot be pruned immediately — reuse-detection needs to find
+a revoked row to recognise a replay (§C3's grace window depends on it too). The expiry arm is
+scoped to `revokedAt: null` because a row can be both revoked and expired at once (`logout()`
+sets `revokedAt` with no expiry filter), and expiry must never override a pending revocation.
 
 ### B3. Drop the dead `ProcessedEvent` tables (catalog **and** identity)
 
