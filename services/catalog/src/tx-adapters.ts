@@ -15,11 +15,13 @@ export function productTx(tx: Prisma.TransactionClient, traceId: string): Produc
       return { id: p.id, version: p.version };
     },
     async loadForUpdate(id) {
-      const p = await tx.product.findUnique({
-        where: { id },
-        select: { type: true, name: true, price: true },
-      });
-      return p ?? null;
+      // Real row lock: the name says FOR UPDATE, so it must actually take one. Without it
+      // two concurrent price PATCHes interleave read-read-write-write and either suppress
+      // or duplicate a price_changed event. Bound param — never interpolate the id.
+      const rows = await tx.$queryRaw<
+        Array<{ type: string; name: string; price: number }>
+      >`SELECT "type", "name", "price" FROM "Product" WHERE "id" = ${id} FOR UPDATE`;
+      return rows[0] ?? null;
     },
     async updateProduct(id, data) {
       const p = await tx.product.update({
