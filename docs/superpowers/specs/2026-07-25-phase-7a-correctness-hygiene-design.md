@@ -285,7 +285,7 @@ a service that cannot verify its webhook should refuse to boot.
 | 6 | `userId` required on `ChargePayment`, legacy rows read as unowned | Same widening pattern as Phase 5's `order.events`; a null-owner row 404s rather than leaking. |
 | 7 | Grace window returns 401 without re-issuing the successor | Preserves the honest session without creating a second way to fork a family. |
 | 8 | JWKS minimal: `kid` + two-key overlap, manual rotation | Automatic rotation is a phase on its own; `kid` + a cache is what makes rotation *possible*. |
-| 9 | CI matrix over per-service steps | 7 near-identical steps is where copy-paste drift starts; 7b/7c add more services. |
+| 9 | One looping service-test step over per-service steps (NOT a `strategy.matrix` — see §D) | 7 near-identical steps is where copy-paste drift starts; 7b/7c add more services. A matrix is job-level only and containers do not cross jobs, so each leg would start its own infra. |
 | 10 | JWKS ordered last | The largest item; droppable without touching anything above it. |
 | 11 | Comment deletion stays ADMIN-only | `Comment` records no author, so "delete your own" does not exist. Deletion is moderation; adding authorship is a feature, and this slice is debt. |
 | 12 | Five tracked items explicitly out (§Scope) | A DoD claiming "the backlog reaches zero" is only checkable if the exclusions are named. |
