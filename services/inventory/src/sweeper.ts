@@ -53,14 +53,21 @@ export async function sweepOnce(): Promise<number> {
   let count = 0;
   for (const [orderId, rows] of byOrder) {
     const traceId = `sweeper-${randomUUID()}`;
-    await prisma.$transaction((tx) =>
-      releaseRows(
-        sweepTx(tx, traceId),
-        orderId,
-        rows.map((r) => ({ id: r.id, productId: r.productId, quantity: r.quantity }))
-      )
-    );
-    count += rows.length;
+    try {
+      await prisma.$transaction((tx) =>
+        releaseRows(
+          sweepTx(tx, traceId),
+          orderId,
+          rows.map((r) => ({ id: r.id, productId: r.productId, quantity: r.quantity }))
+        )
+      );
+      count += rows.length;
+    } catch (e) {
+      // One order's failure must not abandon the batch — same lane isolation the outbox
+      // relay tick uses. The reservation stays ACTIVE and is retried next sweep; releasing
+      // stock against a missing inventory row would be worse than leaving it held.
+      log.error("sweep_order_failed", { orderId, message: (e as Error).message });
+    }
   }
   log.info("reservations_swept", { count });
   return count;
