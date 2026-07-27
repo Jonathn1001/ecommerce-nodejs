@@ -5,15 +5,17 @@ import { prisma } from "./db";
 import { config } from "./config";
 import { register, login, refresh, logout } from "./auth";
 import { grantsRouter, grantsSnapshot } from "./grants";
-import { toJwks, toSigningKey, type SigningKey } from "./jwks";
+import { toJwks, toSigningKey, toPublishableKey, type PublishableKey } from "./jwks";
 
 const log = createLogger("identity");
 
 // The active signing key, plus the previous public key when a rotation is in flight — never
 // used to sign, only published so tokens minted before the rotation still verify.
-function publishedKeys(): SigningKey[] {
-  const keys = [toSigningKey(config.JWT_PRIVATE_KEY)];
-  if (config.JWT_PREVIOUS_PUBLIC_KEY) keys.push(toSigningKey(config.JWT_PREVIOUS_PUBLIC_KEY));
+// `toPublishableKey` (not `toSigningKey`) for the previous key: it has no private half, and
+// the return type reflects that rather than smuggling the public PEM into a `privateKey` field.
+function publishedKeys(): PublishableKey[] {
+  const keys: PublishableKey[] = [toSigningKey(config.JWT_PRIVATE_KEY)];
+  if (config.JWT_PREVIOUS_PUBLIC_KEY) keys.push(toPublishableKey(config.JWT_PREVIOUS_PUBLIC_KEY));
   return keys;
 }
 
