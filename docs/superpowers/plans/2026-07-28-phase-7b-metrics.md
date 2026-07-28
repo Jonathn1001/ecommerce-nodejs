@@ -552,6 +552,20 @@ describe("createConsumer metrics wiring", () => {
 Note `offsetLag` arrives as a **string** from kafkajs — the `Number(...)` coercion in Step 3 is
 what makes the `lag: 17` assertion pass.
 
+Add one more case, covering the success-path hooks rather than just the batch listener. It fails
+if the recording calls share the handler's `try`:
+
+```ts
+  it("a throwing success-path hook does not divert the message to the DLQ", async () => {
+    // Build the consumer with hooks whose observeHandler throws, drive one message
+    // through eachMessage with a handler that succeeds, and assert the message was
+    // NOT parked: the fake producer records no DLQ send.
+  });
+```
+
+Write it against the same `fakeKafka()` helper, capturing the `eachMessage` callback the way the
+batch test captures the listener, and assert on the fake producer's recorded sends.
+
 - [ ] **Step 2: Run it and confirm it fails**
 
 Run: `pnpm vitest run packages/shared/src/__tests__/kafka-hooks.unit.test.ts`
@@ -597,15 +611,27 @@ recording:
           const env = EventEnvelopeSchema.parse(JSON.parse(raw));
           const started = process.hrtime.bigint();
           await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
-          hooks?.observeHandler({
-            group: groupId,
-            topic,
-            type: env.type,
-            seconds: Number(process.hrtime.bigint() - started) / 1e9,
-          });
-          hooks?.onMessage({ group: groupId, topic, result: "ok" });
+          // Recording is wrapped SEPARATELY from the handler's try. Unwrapped, a throwing
+          // hook would fall into the DLQ catch below and park a message whose handler
+          // already succeeded — instrumentation causing a DLQ is a business-logic change,
+          // which the Global Constraints forbid.
+          try {
+            hooks?.observeHandler({
+              group: groupId,
+              topic,
+              type: env.type,
+              seconds: Number(process.hrtime.bigint() - started) / 1e9,
+            });
+            hooks?.onMessage({ group: groupId, topic, result: "ok" });
+          } catch {
+            /* never let a metric change message handling */
+          }
         } catch (e) {
-          hooks?.onMessage({ group: groupId, topic, result: "dlq" });
+          try {
+            hooks?.onMessage({ group: groupId, topic, result: "dlq" });
+          } catch {
+            /* same rule on the failure path */
+          }
           // ... existing DLQ/park logic unchanged
 ```
 
