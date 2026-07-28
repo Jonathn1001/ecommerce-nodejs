@@ -34,10 +34,10 @@ const HTTP_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
 
 // `upstream` is "" everywhere except the gateway, where proxy mounts name their target.
 // A constant empty label costs no cardinality and keeps one middleware for all services.
-// `service` is carried as an explicit label here rather than via registry.setDefaultLabels:
-// setDefaultLabels stamps every metric family in the registry, including the kafka/DLQ
-// gauges below, which must stay free of it to keep their label sets small and predictable.
-const HTTP_LABELS = ["method", "route", "status", "upstream", "service"] as const;
+// `service` is NOT in this list — it's a registry-wide default label (see
+// registry.setDefaultLabels below) so it lands on every metric family, HTTP and
+// domain alike, without ever appearing in an individual metric's own label list.
+const HTTP_LABELS = ["method", "route", "status", "upstream"] as const;
 
 export function resolveRoute(req: Request, metricsRoute?: string): string {
   if (metricsRoute) return metricsRoute;
@@ -53,6 +53,7 @@ export function createMetrics(
   opts: { defaultMetrics?: boolean } = {}
 ): Metrics {
   const registry = new Registry();
+  registry.setDefaultLabels({ service: serviceName });
 
   // Off by default: collectDefaultMetrics starts an interval with no per-registry stop
   // handle, so calling it from every createApp() in every test file leaks collectors and
@@ -108,7 +109,6 @@ export function createMetrics(
             route: resolveRoute(req, res.locals.metricsRoute as string | undefined),
             status: String(res.statusCode),
             upstream: (res.locals.metricsUpstream as string | undefined) ?? "",
-            service: serviceName,
           };
           httpRequests.inc(labels);
           httpDuration.observe(labels, Number(process.hrtime.bigint() - start) / 1e9);

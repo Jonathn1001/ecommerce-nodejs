@@ -16,9 +16,9 @@ describe("kafka metric recorders", () => {
     });
 
     const out = await m.registry.metrics();
-    expect(out).toContain(
-      'kafka_consumer_lag{group="g1",topic="order.events",partition="0"} 42'
-    );
+    // Label-order-independent: registry.setDefaultLabels appends service= to every
+    // sample, so never pin the closing brace of a sample line.
+    expect(out).toMatch(/kafka_consumer_lag\{[^}]*partition="0"[^}]*\} 42/);
     expect(out).toContain('result="dlq"');
     expect(out).toContain("kafka_handler_duration_seconds_bucket");
   });

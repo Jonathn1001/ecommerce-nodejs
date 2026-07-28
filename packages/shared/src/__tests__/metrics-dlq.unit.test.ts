@@ -9,8 +9,8 @@ describe("startDlqPoller", () => {
     });
 
     await vi.waitFor(async () =>
-      expect(await m.registry.metrics()).toContain(
-        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 7'
+      expect(await m.registry.metrics()).toMatch(
+        /rabbitmq_dlq_depth\{[^}]*queue="payment\.charge\.dlq"[^}]*\} 7/
       )
     );
     poller.stop();
@@ -27,8 +27,8 @@ describe("startDlqPoller", () => {
     const poller = m.startDlqPoller(probe, ["payment.charge.dlq"], { intervalMs: 5 });
 
     await vi.waitFor(async () =>
-      expect(await m.registry.metrics()).toContain(
-        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 2'
+      expect(await m.registry.metrics()).toMatch(
+        /rabbitmq_dlq_depth\{[^}]*queue="payment\.charge\.dlq"[^}]*\} 2/
       )
     );
     poller.stop();
