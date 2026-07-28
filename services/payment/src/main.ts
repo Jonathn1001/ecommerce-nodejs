@@ -45,7 +45,7 @@ async function main() {
     log.info("payment_listening", { port: config.PORT })
   );
 
-  // Reverse teardown: server.close -> rabbit.close -> dlqPoller.stop -> pruner.stop
+  // Reverse teardown: server.close -> dlqPoller.stop -> rabbit.close -> pruner.stop
   //   -> relay.stop -> producer.disconnect -> prisma.$disconnect
   gracefulShutdown([
     async () => {
@@ -61,10 +61,13 @@ async function main() {
       pruner.stop();
     },
     async () => {
-      dlqPoller.stop();
-    },
-    async () => {
       await rabbit.close();
+    },
+    // Stops BEFORE rabbit.close() (declared after it — this array tears down in
+    // reverse) because the poller's probe borrows rabbit's connection; it must not
+    // outlive it.
+    async () => {
+      dlqPoller.stop();
     },
     async () => {
       await new Promise<void>((resolve, reject) =>

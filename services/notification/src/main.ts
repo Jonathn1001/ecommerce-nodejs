@@ -79,6 +79,9 @@ async function main() {
     async () => {
       pruner.stop();
     },
+    // Stops BEFORE rabbit.close() (declared after it — this array tears down in
+    // reverse) because the poller's probe borrows rabbit's connection; it must not
+    // outlive it.
     async () => {
       dlqPoller.stop();
     },
