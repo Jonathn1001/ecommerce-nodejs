@@ -118,4 +118,40 @@ describe("saga metrics recording via handleEvent (integration — needs compose 
     await handleEvent(e);
     expect(calls).toEqual([]);
   });
+
+  it("a failing advisory pre-read does not block the real transition and records nothing", async () => {
+    const id = await seedOrder("PENDING", 700);
+
+    // Prisma's model delegate is proxy-backed; vi.spyOn(...).mockRestore() does not
+    // reliably hand the original method back, so save/replace/restore by hand.
+    const originalFindUnique = prisma.order.findUnique.bind(prisma.order);
+    let readCount = 0;
+    (prisma.order as unknown as { findUnique: unknown }).findUnique = (
+      args: Parameters<typeof prisma.order.findUnique>[0]
+    ) => {
+      readCount += 1;
+      if (readCount === 1) return Promise.reject(new Error("pool exhausted"));
+      return originalFindUnique(args);
+    };
+
+    try {
+      // The pre-read is metrics-adjacent, not load-bearing. A DB failure on it must
+      // not propagate out of handleEvent — the transaction below still has to run.
+      await expect(
+        handleEvent(
+          env(INVENTORY_RESERVED, id, {
+            orderId: id,
+            items: [{ productId: "p1", quantity: 1 }],
+          })
+        )
+      ).resolves.toBeUndefined();
+    } finally {
+      (prisma.order as unknown as { findUnique: unknown }).findUnique =
+        originalFindUnique;
+    }
+
+    expect(calls).toEqual([]); // before stayed null -> the existing gate skips recording
+    const after = await prisma.order.findUnique({ where: { id } });
+    expect(after?.status).toBe("AWAITING_PAYMENT"); // the real transition still happened
+  });
 });
