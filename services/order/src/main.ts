@@ -2,7 +2,8 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { ledgerPrunerPort } from "./prune-adapter";
-import { handleEvent } from "./consumer";
+import { handleEvent, setSagaMetrics } from "./consumer";
+import { createSagaMetrics } from "./metrics";
 import { handleCatalogEvent } from "./catalog-projection";
 import { createOrderListener } from "./sse-listener";
 import { prisma } from "./db";
@@ -24,6 +25,7 @@ const CHARGE_QUEUE = "payment.charge";
 
 async function main() {
   const metrics = createMetrics("order", { defaultMetrics: true });
+  setSagaMetrics(createSagaMetrics(metrics.registry));
   const kafka = createKafka("order");
   const producer = createProducer(kafka);
   await producer.connect();
