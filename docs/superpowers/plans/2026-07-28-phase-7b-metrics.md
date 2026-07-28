@@ -1230,11 +1230,20 @@ export async function handleEvent(env: EventEnvelope): Promise<void> {
   const orderId = orderIdOf(env);
   if (orderId === null) return; // not ours
 
-  // Advisory pre-read for the saga clock only — gates no write.
-  const before = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { status: true, createdAt: true, updatedAt: true },
-  });
+  // Advisory pre-read for the saga clock only — gates no write, and must never be able
+  // to abort the transition that follows. Unguarded, a transient pool exhaustion or
+  // timeout on this extra round-trip would throw out of handleEvent BEFORE
+  // prisma.$transaction runs, so a metrics read would have killed a real state change.
+  // On failure fall through with null; the `if (before && ...)` gate below handles it.
+  let before: { status: string; createdAt: Date; updatedAt: Date } | null = null;
+  try {
+    before = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: true, createdAt: true, updatedAt: true },
+    });
+  } catch (e) {
+    log.error("saga_metrics_preread_failed", { orderId, message: (e as Error).message });
+  }
 
   const outcome = await prisma.$transaction((tx) =>
     applyResult(transitionTx(tx, env.traceId), {
