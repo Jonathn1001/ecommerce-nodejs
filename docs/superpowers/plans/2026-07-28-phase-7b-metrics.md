@@ -196,7 +196,9 @@ describe("kafka metric recorders", () => {
     });
 
     const out = await m.registry.metrics();
-    expect(out).toContain('kafka_consumer_lag{group="g1",topic="order.events",partition="0"} 42');
+    // Label-order-independent: registry.setDefaultLabels appends service= to every
+    // sample, so never pin the closing brace of a sample line.
+    expect(out).toMatch(/kafka_consumer_lag\{[^}]*partition="0"[^}]*\} 42/);
     expect(out).toContain('result="dlq"');
     expect(out).toContain("kafka_handler_duration_seconds_bucket");
   });
@@ -215,8 +217,8 @@ describe("startDlqPoller", () => {
     const poller = m.startDlqPoller(async () => 7, ["payment.charge.dlq"], { intervalMs: 5 });
 
     await vi.waitFor(async () =>
-      expect(await m.registry.metrics()).toContain(
-        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 7'
+      expect(await m.registry.metrics()).toMatch(
+        /rabbitmq_dlq_depth\{[^}]*queue="payment\.charge\.dlq"[^}]*\} 7/
       )
     );
     poller.stop();
@@ -233,8 +235,8 @@ describe("startDlqPoller", () => {
     const poller = m.startDlqPoller(probe, ["payment.charge.dlq"], { intervalMs: 5 });
 
     await vi.waitFor(async () =>
-      expect(await m.registry.metrics()).toContain(
-        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 2'
+      expect(await m.registry.metrics()).toMatch(
+        /rabbitmq_dlq_depth\{[^}]*queue="payment\.charge\.dlq"[^}]*\} 2/
       )
     );
     poller.stop();
@@ -1317,9 +1319,11 @@ describe("reservation metrics", () => {
     r.observe("DUPLICATE");
 
     const out = await m.registry.metrics();
-    expect(out).toContain('reservation_outcomes_total{outcome="RESERVED"} 1');
-    expect(out).toContain('reservation_outcomes_total{outcome="FAILED"} 1');
-    expect(out).toContain('reservation_outcomes_total{outcome="DUPLICATE"} 1');
+    // Label-order-independent: setDefaultLabels appends service= to every sample,
+    // so never pin the closing brace of a sample line.
+    expect(out).toMatch(/reservation_outcomes_total\{[^}]*outcome="RESERVED"[^}]*\} 1/);
+    expect(out).toMatch(/reservation_outcomes_total\{[^}]*outcome="FAILED"[^}]*\} 1/);
+    expect(out).toMatch(/reservation_outcomes_total\{[^}]*outcome="DUPLICATE"[^}]*\} 1/);
   });
 });
 ```
@@ -1430,14 +1434,20 @@ describe("payment metrics", () => {
     p.observe("succeeded");
     p.observe("processing");
     const out = await m.registry.metrics();
-    expect(out).toContain('payment_attempts_total{outcome="succeeded"} 1');
-    expect(out).toContain('payment_attempts_total{outcome="processing"} 1');
+    // Label-order-independent: setDefaultLabels appends service= to every sample,
+    // so never pin the closing brace of a sample line.
+    expect(out).toMatch(/payment_attempts_total\{[^}]*outcome="succeeded"[^}]*\} 1/);
+    expect(out).toMatch(/payment_attempts_total\{[^}]*outcome="processing"[^}]*\} 1/);
   });
 });
 ```
 
-The notification version asserts
-`` `notifications_sent_total{type="order_confirmed",result="sent"} 1` ``.
+The notification version asserts, in the same label-order-independent form:
+
+```ts
+    expect(out).toMatch(/notifications_sent_total\{[^}]*type="order_confirmed"[^}]*\} 1/);
+    expect(out).toMatch(/notifications_sent_total\{[^}]*result="sent"[^}]*\} 1/);
+```
 
 - [ ] **Step 2: Run both and confirm failure**
 
