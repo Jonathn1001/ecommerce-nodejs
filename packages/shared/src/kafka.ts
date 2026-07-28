@@ -75,15 +75,26 @@ export function createConsumer(kafka: Kafka, groupId: string, hooks?: KafkaMetri
             const env = EventEnvelopeSchema.parse(JSON.parse(raw));
             const started = process.hrtime.bigint();
             await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
-            hooks?.observeHandler({
-              group: groupId,
-              topic,
-              type: env.type,
-              seconds: Number(process.hrtime.bigint() - started) / 1e9,
-            });
-            hooks?.onMessage({ group: groupId, topic, result: "ok" });
+            // Recording is wrapped SEPARATELY from the handler's try. Unwrapped, a throwing
+            // hook would fall into the DLQ catch below and park a message whose handler
+            // already succeeded.
+            try {
+              hooks?.observeHandler({
+                group: groupId,
+                topic,
+                type: env.type,
+                seconds: Number(process.hrtime.bigint() - started) / 1e9,
+              });
+              hooks?.onMessage({ group: groupId, topic, result: "ok" });
+            } catch {
+              /* never let a metric change message handling */
+            }
           } catch (e) {
-            hooks?.onMessage({ group: groupId, topic, result: "dlq" });
+            try {
+              hooks?.onMessage({ group: groupId, topic, result: "dlq" });
+            } catch {
+              /* never let a metric displace the DLQ park below */
+            }
             // Poison message: park and commit so the partition keeps moving. Keep the key
             // when the envelope parsed — a DLQ message with no key cannot be traced back.
             // `eventId` must actually be checked to be a string before use as a Kafka

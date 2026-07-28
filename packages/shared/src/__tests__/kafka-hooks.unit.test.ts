@@ -1,12 +1,22 @@
 import { describe, it, expect } from "vitest";
 import type { Kafka } from "kafkajs";
+import { makeEnvelope } from "@ecom/contracts";
 import { createConsumer } from "../kafka";
 import type { KafkaMetricsHooks } from "../metrics";
 
 const END_BATCH = "consumer.end_batch_process";
 
+type EachMessageHandler = (payload: {
+  topic: string;
+  message: { value: Buffer | null };
+}) => Promise<void>;
+
 function fakeKafka() {
   const listeners: Record<string, (e: unknown) => void> = {};
+  let eachMessage: EachMessageHandler = async () => {};
+  const sent: Array<{ topic: string; messages: Array<{ key: unknown; value: string }> }> =
+    [];
+
   const consumer = {
     events: { END_BATCH_PROCESS: END_BATCH },
     on: (event: string, cb: (e: unknown) => void) => {
@@ -15,14 +25,31 @@ function fakeKafka() {
     connect: async () => {},
     disconnect: async () => {},
     subscribe: async () => {},
-    run: async () => {},
+    run: async (opts: { eachMessage: EachMessageHandler }) => {
+      eachMessage = opts.eachMessage;
+    },
   };
-  const producer = { connect: async () => {}, disconnect: async () => {} };
+  const producer = {
+    connect: async () => {},
+    disconnect: async () => {},
+    send: async (args: {
+      topic: string;
+      messages: Array<{ key: unknown; value: string }>;
+    }) => {
+      sent.push(args);
+    },
+  };
   const kafka = {
     consumer: () => consumer,
     producer: () => producer,
   } as unknown as Kafka;
-  return { kafka, listeners };
+  return {
+    kafka,
+    listeners,
+    sent,
+    deliver: (raw: string) =>
+      eachMessage({ topic: "order.events", message: { value: Buffer.from(raw) } }),
+  };
 }
 
 describe("createConsumer metrics wiring", () => {
@@ -66,5 +93,35 @@ describe("createConsumer metrics wiring", () => {
     expect(() =>
       listeners[END_BATCH]({ payload: { topic: "t", partition: 0, offsetLag: "1" } })
     ).not.toThrow();
+  });
+
+  it("does not park a successfully-handled message when a success-path hook throws", async () => {
+    const { kafka, sent, deliver } = fakeKafka();
+    const hooks: KafkaMetricsHooks = {
+      onBatch: () => {},
+      onMessage: () => {},
+      observeHandler: () => {
+        throw new Error("boom");
+      },
+    };
+
+    const consumer = createConsumer(kafka, "order-consumers", hooks);
+    await consumer.connect();
+    await consumer.run(["order.events"], async () => {
+      /* business handler succeeds */
+    });
+
+    const raw = JSON.stringify(
+      makeEnvelope({
+        type: "order.created",
+        version: 1,
+        traceId: "trace-1",
+        producer: "test",
+        payload: {},
+      })
+    );
+
+    await expect(deliver(raw)).resolves.toBeUndefined();
+    expect(sent).toHaveLength(0);
   });
 });
