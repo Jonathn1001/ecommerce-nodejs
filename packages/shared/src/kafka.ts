@@ -2,6 +2,7 @@ import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
+import type { KafkaMetricsHooks } from "./metrics";
 
 const log = createLogger("kafka");
 
@@ -27,9 +28,27 @@ export function createProducer(kafka: Kafka) {
   };
 }
 
-export function createConsumer(kafka: Kafka, groupId: string) {
+export function createConsumer(kafka: Kafka, groupId: string, hooks?: KafkaMetricsHooks) {
   const consumer: Consumer = kafka.consumer({ groupId });
   const parker: Producer = kafka.producer();
+
+  if (hooks) {
+    // kafkajs hands us offsetLag per topic/partition at the end of every batch. Wrapped
+    // because an exception raised inside an instrumentation listener would kill the consumer.
+    consumer.on(consumer.events.END_BATCH_PROCESS, (e) => {
+      try {
+        hooks.onBatch({
+          group: groupId,
+          topic: e.payload.topic,
+          partition: String(e.payload.partition),
+          lag: Number(e.payload.offsetLag ?? 0),
+        });
+      } catch {
+        /* never let a metric break consumption */
+      }
+    });
+  }
+
   return {
     connect: async () => {
       await withRetry(() => consumer.connect(), { label: "consumer.connect" });
@@ -54,8 +73,17 @@ export function createConsumer(kafka: Kafka, groupId: string) {
           const raw = message.value.toString();
           try {
             const env = EventEnvelopeSchema.parse(JSON.parse(raw));
+            const started = process.hrtime.bigint();
             await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+            hooks?.observeHandler({
+              group: groupId,
+              topic,
+              type: env.type,
+              seconds: Number(process.hrtime.bigint() - started) / 1e9,
+            });
+            hooks?.onMessage({ group: groupId, topic, result: "ok" });
           } catch (e) {
+            hooks?.onMessage({ group: groupId, topic, result: "dlq" });
             // Poison message: park and commit so the partition keeps moving. Keep the key
             // when the envelope parsed — a DLQ message with no key cannot be traced back.
             // `eventId` must actually be checked to be a string before use as a Kafka
