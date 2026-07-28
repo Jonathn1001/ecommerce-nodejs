@@ -245,11 +245,13 @@ one. A broker-side `kafka-exporter` is the production answer and is explicitly o
 
 The instrumentation listener is wrapped so an exception inside it can never kill the consumer.
 
-**Coverage is narrower than "all services" suggests, by design.** Only three services run
-Kafka consumers: `order` (two groups — `order-consumers` and `order-catalog-projection`),
-`inventory`, and `notification`. `identity` and `catalog` are emit-only, `payment` consumes
-RabbitMQ commands rather than Kafka, and `hello` consumes nothing. The lag panel therefore
-shows four group/service rows, not eight — expected, not a broken panel.
+**Coverage is narrower than "all services" suggests, by design.** Four services run Kafka
+consumers: `order` (two groups — `order-consumers` and `order-catalog-projection`),
+`inventory`, `notification`, and `hello` (`hello-consumers`, consuming its own `hello.events`
+— it is the platform canary and exercises the full DB + outbox + Kafka path deliberately).
+`identity` and `catalog` are emit-only and `payment` consumes RabbitMQ commands rather than
+Kafka. The lag panel therefore shows five group/service rows, not eight — expected, not a
+broken panel.
 
 ### C2. RabbitMQ DLQ depth — in-process poll
 

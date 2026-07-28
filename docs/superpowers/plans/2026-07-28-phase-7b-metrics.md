@@ -839,7 +839,14 @@ For `inventory`, also pass the hooks to its consumer: `createConsumer(kafka, "in
 - [ ] **Step 5: Repeat for `inventory`, `catalog`, `identity`**
 
 Same five edits per service, with the service's own name in `createMetrics` and in the test's
-`service="…"` assertion. `catalog` and `identity` run no Kafka consumer, so they pass no hooks.
+`service="…"` assertion.
+
+Kafka hooks, per service — check `main.ts`, do not assume:
+- `hello` **does** run a real consumer (`createConsumer(kafka, "hello-consumers")` consuming its
+  own `hello.events` — it is the platform canary and deliberately exercises the whole DB +
+  outbox + Kafka path). It gets `metrics.kafkaHooks` too.
+- `inventory` runs `inventory-consumers`. Gets the hooks.
+- `catalog` and `identity` are emit-only. No hooks.
 
 - [ ] **Step 6: Run all four suites**
 
@@ -1794,8 +1801,8 @@ no others:
 8. Consumer lag — `kafka_consumer_lag`, **with `up` on the same panel**. Lag only updates when a batch completes, so a crashed consumer leaves the gauge stale rather than climbing; `up == 0` next to a flat lag is what distinguishes dead from idle.
 9. DLQ depth — `rabbitmq_dlq_depth` by queue
 
-Only `order`, `inventory` and `notification` run Kafka consumers, so panel 8 shows four
-group rows, not eight. That is expected, not a broken panel.
+Only `order` (two groups), `inventory`, `notification` and `hello` run Kafka consumers, so
+panel 8 shows five group rows, not eight. That is expected, not a broken panel.
 
 - [ ] **Step 6: Verify against a real checkout**
 
