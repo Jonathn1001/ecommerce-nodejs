@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { v4 as uuidv4 } from "uuid";
 import { makeEnvelope, type EventEnvelope } from "@ecom/contracts";
 import { createRabbit } from "../rabbitmq";
@@ -174,6 +174,39 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
     expect(stillThere).toBeTruthy(); // message survived the failed move
   }, 15_000);
 
+  describe("queueDepth", () => {
+    let rabbit: Awaited<ReturnType<typeof createRabbit>>;
+
+    beforeAll(async () => {
+      rabbit = await createRabbit();
+    });
+
+    afterAll(async () => {
+      await rabbit.close();
+    });
+
+    it("queueDepth reports the DLQ message count", async () => {
+      const queue = `metrics-depth-${Date.now()}`;
+      await rabbit.assertWorkQueue(queue);
+      expect(await rabbit.queueDepth(`${queue}.dlq`)).toBe(0);
+    });
+
+    it("queueDepth on a missing queue rejects without killing the command lane", async () => {
+      await expect(rabbit.queueDepth(`no-such-queue-${Date.now()}`)).rejects.toThrow();
+      // The working ConfirmChannel must still be usable — this is the whole reason
+      // queueDepth owns a separate channel.
+      const queue = `metrics-after-miss-${Date.now()}`;
+      await rabbit.assertWorkQueue(queue);
+      expect(await rabbit.queueDepth(`${queue}.dlq`)).toBe(0);
+    });
+  });
+
+  // NOTE: kept last deliberately — it mutates process.env.RABBITMQ_URL for the duration
+  // of the test and its `finally` restore re-assigns `prev` even when `prev` is
+  // `undefined`, which Node stringifies to the literal "undefined" on process.env rather
+  // than clearing the key. Any test relying on the default-URL fallback that ran after
+  // this one would connect with a corrupted URL. Not touching that pre-existing behavior
+  // here — just preserving the ordering that avoids tripping over it.
   it("createRabbit boot-retries, then throws (fail-fast) when the broker is unreachable", async () => {
     // boot-retry exhausts against a dead port, then throws — no degraded adapter
     const prev = process.env.RABBITMQ_URL;

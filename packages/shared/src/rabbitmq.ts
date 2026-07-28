@@ -1,4 +1,4 @@
-import amqp, { type ConfirmChannel, type ChannelModel } from "amqplib";
+import amqp, { type ConfirmChannel, type ChannelModel, type Channel } from "amqplib";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
@@ -148,8 +148,38 @@ export async function createRabbit(
     if (!lifecycle.isHealthy()) throw new Error("rabbit connection is down");
   }
 
+  // Dedicated NON-confirm channel. checkQueue against a missing queue closes the channel it
+  // runs on, and `ch` above carries the relay's command lane — a metric must not be able to
+  // kill message sending.
+  let pollCh: Channel | null = null;
+  async function queueDepth(queue: string): Promise<number> {
+    try {
+      if (!pollCh) {
+        pollCh = await conn.createChannel();
+        // amqplib emits 'error' on a channel-level close (e.g. checkQueue's 404 for a
+        // missing queue) IN ADDITION to rejecting the pending RPC. With zero listeners,
+        // Node's EventEmitter throws synchronously inside amqplib's frame-dispatch loop;
+        // that throw is caught there and re-emitted as the connection's 'frameError',
+        // which amqplib wires straight to onSocketError — tearing down the WHOLE
+        // connection (every channel on it, including `ch`) instead of just this one.
+        // A listener here is required for "dedicated channel" to actually contain the
+        // failure; the catch below already handles the rejection.
+        pollCh.on("error", () => {});
+      }
+      const info = await pollCh.checkQueue(queue);
+      return info.messageCount;
+    } catch (e) {
+      pollCh = null; // the failure closed it; next call reopens
+      throw e;
+    }
+  }
+
   async function close(): Promise<void> {
     lifecycle.markClosing(); // graceful teardown must not trip the restart handler
+    if (pollCh) {
+      await pollCh.close();
+      pollCh = null;
+    }
     await ch.close();
     await conn.close();
   }
@@ -161,6 +191,7 @@ export async function createRabbit(
     consumeDlqOnce,
     moveDlqOnce,
     checkHealth,
+    queueDepth,
     close,
   };
 }
