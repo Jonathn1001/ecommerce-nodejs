@@ -1,6 +1,12 @@
 import express from "express";
 import { z } from "zod";
-import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
+import {
+  traceMiddleware,
+  createLogger,
+  createHealthRouter,
+  createMetrics,
+  type Metrics,
+} from "@ecom/shared";
 import { prisma } from "./db";
 import { finalizePayment, refundPayment } from "./resolve";
 import { resolveTx } from "./tx-adapters";
@@ -11,7 +17,9 @@ const log = createLogger("payment");
 
 export function createApp(deps: {
   rabbitHealth: () => Promise<void>;
+  metrics?: Metrics;
 }): express.Application {
+  const metrics = deps.metrics ?? createMetrics("payment");
   const app = express();
   app.use(
     express.json({
@@ -21,6 +29,8 @@ export function createApp(deps: {
     })
   );
   app.use(traceMiddleware());
+  app.use(metrics.httpMiddleware());
+  app.use(metrics.router());
 
   app.use(
     createHealthRouter({

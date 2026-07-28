@@ -11,6 +11,7 @@ import {
   startLedgerPruner,
   createRabbit,
   createLogger,
+  createMetrics,
   gracefulShutdown,
 } from "@ecom/shared";
 
@@ -18,6 +19,7 @@ const log = createLogger("payment-main");
 const CHARGE_QUEUE = "payment.charge";
 
 async function main() {
+  const metrics = createMetrics("payment", { defaultMetrics: true });
   const kafka = createKafka("payment");
   const producer = createProducer(kafka);
   await producer.connect();
@@ -36,13 +38,15 @@ async function main() {
     intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
   });
 
-  const app = createApp({ rabbitHealth: rabbit.checkHealth });
+  const dlqPoller = metrics.startDlqPoller(rabbit.queueDepth, [`${CHARGE_QUEUE}.dlq`]);
+
+  const app = createApp({ rabbitHealth: rabbit.checkHealth, metrics });
   const server = app.listen(config.PORT, () =>
     log.info("payment_listening", { port: config.PORT })
   );
 
-  // Reverse teardown: server.close -> rabbit.close -> pruner.stop -> relay.stop
-  //   -> producer.disconnect -> prisma.$disconnect
+  // Reverse teardown: server.close -> rabbit.close -> dlqPoller.stop -> pruner.stop
+  //   -> relay.stop -> producer.disconnect -> prisma.$disconnect
   gracefulShutdown([
     async () => {
       await prisma.$disconnect();
@@ -55,6 +59,9 @@ async function main() {
     },
     async () => {
       pruner.stop();
+    },
+    async () => {
+      dlqPoller.stop();
     },
     async () => {
       await rabbit.close();
