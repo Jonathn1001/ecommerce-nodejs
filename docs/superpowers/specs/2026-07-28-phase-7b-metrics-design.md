@@ -74,8 +74,13 @@ export function createMetrics(
 ): Metrics;
 ```
 
-`prom-client` is a new dependency of **`packages/shared` only**. No service depends on it
-directly; they receive the `Metrics` type transitively.
+`prom-client` is a new dependency of **`packages/shared`**, and additionally of each service
+that defines its own domain metrics (§A2) — `order`, `inventory`, `payment`, `notification`.
+Those four import `Counter`/`Histogram`/`Registry` directly to declare their metrics, and the
+repo uses pnpm's default strict `node_modules` with no `.npmrc` hoisting, so a direct import
+must be a declared dependency of the importing package. Services that only *consume* the
+`Metrics` type (`hello`, `catalog`, `identity`, `gateway`) receive it transitively and add
+nothing.
 
 The poller takes a `probe` **function**, not a channel. That keeps amqplib types out of
 `metrics.ts` entirely and makes the poller testable against a plain `async () => 7` stub with
@@ -436,7 +441,7 @@ the rows are already correct.
 | 10 | Saga metrics recorded **in the caller after commit** | Recording inside the pure `transition.ts` would count rolled-back transitions and would change a pure module's contract. |
 | 11 | Pinned Prometheus/Grafana image tags | A committed dashboard JSON is version-coupled to the Grafana that renders it. |
 | 12 | `outbox_pending` **excluded** | Needs `OutboxPort.countPending()` across five adapters plus a per-tick `COUNT`; no demonstrated need yet. |
-| 13 | `prom-client` added to **`packages/shared` only** | It is a new dependency for the repo. Only `shared` imports it; services receive the `Metrics` type transitively. |
+| 13 | `prom-client` added to `packages/shared` **and to the four services that declare domain metrics** | §A2 gives services ownership of their own domain metrics, and declaring a `Histogram` means importing the library. pnpm's default strict resolution (no `.npmrc`) requires a direct import to be a declared dependency. Services that only consume the `Metrics` type add nothing. |
 | 14 | DLQ depth via a narrow `rabbit.queueDepth(queue)` + an **injected probe**, not an exposed channel | `createRabbit` returns a closed surface, so a channel-taking poller is uncallable. The narrow method keeps amqplib inside `rabbitmq.ts` and lets the poller be tested against `async () => 7`. |
 | 15 | `collectDefaultMetrics` **opt-in, `main.ts` only** | It starts an interval per call with no per-registry stop handle; unconditional calls would leak one collector per test file and hang vitest — the exact hazard decision 4 exists to avoid. |
 | 16 | `createApp`'s metrics parameter is **optional in all four signature groups** | The eight services have four different `createApp` shapes today; optionality is what keeps every pre-existing test passing unmodified. |

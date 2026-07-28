@@ -13,7 +13,13 @@
 ## Global Constraints
 
 - **No business-logic change.** This slice is instrumentation only. Every pre-existing test must pass **unmodified**. If a test needs editing to accommodate metrics, the metrics design is wrong — stop and report it.
-- **`prom-client` is a dependency of `packages/shared` only.** No service adds it directly.
+- **`prom-client` is a dependency of `packages/shared`, plus each service that declares its own
+  domain metrics** (`order`, `inventory`, `payment`, `notification` — Tasks 7-9). Those import
+  `Counter`/`Histogram`/`Registry` directly, and the repo uses pnpm's default strict
+  `node_modules` (no `.npmrc`), so a direct import must be a declared dependency of the importing
+  package. Pin the same version already used by `packages/shared`; introduce no new version.
+  Services that only consume the `Metrics` type (`hello`, `catalog`, `identity`, `gateway`) add
+  nothing.
 - **The `route` label is a bounded route pattern, never a raw path.** Unmatched requests label `route="unmatched"`. This is the cardinality bomb; it gets a direct test.
 - **`collectDefaultMetrics` is opt-in** via `createMetrics(name, { defaultMetrics: true })` and is enabled **only from `main.ts`**. It starts an interval with no stop handle; enabling it by default leaks one collector per test file and hangs vitest.
 - **The metrics parameter on `createApp` is optional in every service**, defaulting to a fresh `createMetrics("<service>")`. This is what keeps existing `createApp()` calls compiling untouched.
