@@ -61,19 +61,39 @@ export interface Metrics {
   httpMiddleware(): RequestHandler;                     // RED
   router(): Router;                                     // GET /metrics
   kafkaHooks: KafkaMetricsHooks;                        // passed into createConsumer
-  startDlqPoller(ch: Channel, queues: string[], opts?: { intervalMs?: number }):
-    { stop(): void };
+  startDlqPoller(
+    probe: (queue: string) => Promise<number>,          // injected, NOT an amqplib channel
+    queues: string[],
+    opts?: { intervalMs?: number }
+  ): { stop(): void };
 }
 
-export function createMetrics(serviceName: string): Metrics;
+export function createMetrics(
+  serviceName: string,
+  opts?: { defaultMetrics?: boolean }                   // default false — see A1
+): Metrics;
 ```
+
+`prom-client` is a new dependency of **`packages/shared` only**. No service depends on it
+directly; they receive the `Metrics` type transitively.
+
+The poller takes a `probe` **function**, not a channel. That keeps amqplib types out of
+`metrics.ts` entirely and makes the poller testable against a plain `async () => 7` stub with
+no broker double. §C2 supplies the real probe.
 
 ### A1. Explicit registry, not the default one
 
 `createMetrics` constructs its own `prom-client` `Registry` and calls
 `registry.setDefaultLabels({ service: serviceName })`, so `service` never appears in an
-individual metric's label list. `collectDefaultMetrics({ register: registry })` supplies the
-`process_*` / `nodejs_*` families.
+individual metric's label list.
+
+**`collectDefaultMetrics` is opt-in and off by default.** It supplies the `process_*` /
+`nodejs_*` families — event-loop lag and heap are worth having — but it starts an interval per
+call and prom-client offers no per-registry stop handle. Since every `createApp()` in every
+test file constructs a `Metrics`, an unconditional call would start one collector per test file
+and leave open handles behind: the "process did not exit" vitest hang, caused by the very
+multi-instance scenario this section exists to support. Only `main.ts` passes
+`{ defaultMetrics: true }`.
 
 The alternative — module-level metric singletons on prom-client's global default registry —
 was rejected on a concrete failure mode: vitest runs a service's suites in one process, and a
@@ -107,17 +127,24 @@ app.use(metrics.router());
 
 ### A4. Wiring — who constructs the `Metrics` object
 
-`main.ts` constructs it, because the Kafka hooks and the DLQ poller are wired there, and passes
-it into `createApp`. To keep the "every pre-existing test passes unmodified" promise in §I,
-`createApp` **defaults it**:
+`main.ts` constructs it — the Kafka hooks and the DLQ poller are wired there — and passes it
+into `createApp`. It must be the *same* instance, or `/metrics` would serve a registry the
+broker hooks never write to.
 
-```ts
-export function createApp({ metrics = createMetrics("order"), ... }: Deps = {}) { ... }
-```
+`createApp` is **not uniform across the eight services today**, so adoption differs by group.
+The binding rule is that the new parameter is optional everywhere, which is what keeps §I's
+"every pre-existing test passes unmodified" true:
 
-Every existing `createApp()` call in the test suites keeps working untouched, and a test that
-wants to assert on metrics passes its own instance. Order already threads `sseRegistry` through
-`createApp` this way, so the shape is not new.
+| Group | Services | Current signature | Change |
+|---|---|---|---|
+| Zero-arg | `hello`, `inventory`, `catalog`, `identity` | `createApp(): Application` | Gains an optional deps object: `createApp(deps: { metrics?: Metrics } = {})` |
+| Required deps | `payment`, `notification` | `createApp(deps: { rabbitHealth })` | Gains an optional `metrics?` field |
+| Required deps | `gateway` | `createApp(deps: GatewayDeps)` | Gains an optional `metrics?` field |
+| Optional deps | `order` | `createApp(deps: { sseRegistry? } = {})` | Gains an optional `metrics?` field |
+
+In every case the default is `createMetrics("<service>")` — a fresh throwaway registry, with
+`defaultMetrics` off per §A1 — so a bare `createApp()` in a test still works and still exposes
+`/metrics`. Order already threads `sseRegistry` this way, so the shape is not new.
 
 ---
 
@@ -154,9 +181,18 @@ finish, from `req.route`. Two traps, both of which must be covered by a test:
    Critical C1 (http-proxy-middleware v3 forwarding the mount-stripped path), so it gets an
    explicit assertion rather than an assumption.
 
-The gateway proxies arbitrary upstream paths and has no Express route pattern for them, so it
-labels `route` with the **matched rule's path prefix** (the rules table's own key, e.g.
-`/products`) and adds an `upstream` label naming the target service. Never the raw URL.
+**The gateway has two kinds of route and needs both handled.** It serves real Express routes
+(`/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/logout`, `/healthz` —
+`services/gateway/src/app.ts:100-161`), which label exactly like any other service. It also
+serves **proxy mounts** (`app.use("/cart" | "/orders" | "/products" | "/comments" |
+"/discounts" | "/payments" | "/webhooks/payment", ...)` at `app.ts:195-218`), where there is no
+Express route pattern for the upstream path at all.
+
+For the mount case, `route = req.baseUrl` — the mount as registered, which is a fixed literal
+prefix and therefore bounded — plus an `upstream` label taken from the `name` argument
+`guard(name, target)` already receives (`app.ts:178`). Never the raw URL. Note this labels the
+*normalized* mount, not the raw request path, which is the correct side of 7a's C2
+case-sensitivity finding.
 
 ### B3. Where `/metrics` listens
 
@@ -177,6 +213,12 @@ cannot be case-varied around.
 
 Prometheus targets are per-service `host:port` regardless, so the asymmetry costs nothing in
 the scrape config.
+
+**`METRICS_PORT` must be declared with a default**, in three places: the zod schema in
+`services/gateway/src/config.ts` (`z.coerce.number().default(9464)`), `services/gateway/.env.example`,
+and the gateway's compose `environment:` block. A zod key with **no** default is precisely the
+7a Task-7 failure — `PAYMENT_WEBHOOK_SECRET` has none, so an ad-hoc run that omits it refuses
+to boot. A metrics port must never be able to stop the gateway from starting.
 
 ---
 
@@ -203,24 +245,40 @@ one. A broker-side `kafka-exporter` is the production answer and is explicitly o
 
 The instrumentation listener is wrapped so an exception inside it can never kill the consumer.
 
-### C2. RabbitMQ DLQ depth — in-process poll
+**Coverage is narrower than "all services" suggests, by design.** Only three services run
+Kafka consumers: `order` (two groups — `order-consumers` and `order-catalog-projection`),
+`inventory`, and `notification`. `identity` and `catalog` are emit-only, `payment` consumes
+RabbitMQ commands rather than Kafka, and `hello` consumes nothing. The lag panel therefore
+shows four group/service rows, not eight — expected, not a broken panel.
 
-`startDlqPoller(ch, queues, { intervalMs = 15_000 })` calls `ch.checkQueue(dlq)` on an
-interval and sets:
+### C2. RabbitMQ DLQ depth — in-process poll
 
 | Metric | Type | Labels |
 |---|---|---|
 | `rabbitmq_dlq_depth` | Gauge | `queue` |
 
-Two hard requirements:
+**`createRabbit` gains one method.** Its return object is a closed surface today
+(`packages/shared/src/rabbitmq.ts:155-163` returns `assertWorkQueue, sendCommand,
+consumeCommands, consumeDlqOnce, moveDlqOnce, checkHealth, close`) — neither the connection nor
+the channel escapes the closure, so nothing outside the module can probe a queue. Add:
 
-1. **Its own channel.** `createRabbit`'s working channel is a `ConfirmChannel`, and
-   `checkQueue` against a missing queue closes the channel it runs on. Polling on the command
-   lane's channel would let a metric take down message sending. The poller opens a dedicated
-   non-confirm channel from the same connection.
-2. **Never throws.** On a poll error: log, leave the gauge at its last value, keep the
-   interval alive. `stop()` clears the interval and joins `gracefulShutdown` alongside
-   `pruner.stop()`.
+```ts
+async function queueDepth(queue: string): Promise<number>   // -> messageCount
+```
+
+It owns a **dedicated non-confirm channel**, opened lazily from the same connection and reused
+across polls. This is not optional tidiness: `checkQueue` against a missing queue closes the
+channel it runs on, and the working channel is the `ConfirmChannel` that carries the relay's
+command lane. Probing on it would let a metric kill message sending.
+
+The narrow method was chosen over exposing `createPollChannel()` so that amqplib types stay
+inside `rabbitmq.ts` and `metrics.ts` stays broker-agnostic.
+
+`main.ts` then wires `metrics.startDlqPoller(rabbit.queueDepth, ["payment.charge.dlq", ...])`.
+
+**Never throws.** On a poll error: log, leave the gauge at its last value, keep the interval
+alive. `stop()` clears the interval and joins `gracefulShutdown` alongside `pruner.stop()`.
+`queueDepth`'s channel is closed by `createRabbit`'s existing `close()`.
 
 `assertWorkQueue` already asserts `${queue}.dlq`, so the queues exist by the time the poller
 starts.
@@ -376,6 +434,10 @@ the rows are already correct.
 | 10 | Saga metrics recorded **in the caller after commit** | Recording inside the pure `transition.ts` would count rolled-back transitions and would change a pure module's contract. |
 | 11 | Pinned Prometheus/Grafana image tags | A committed dashboard JSON is version-coupled to the Grafana that renders it. |
 | 12 | `outbox_pending` **excluded** | Needs `OutboxPort.countPending()` across five adapters plus a per-tick `COUNT`; no demonstrated need yet. |
+| 13 | `prom-client` added to **`packages/shared` only** | It is a new dependency for the repo. Only `shared` imports it; services receive the `Metrics` type transitively. |
+| 14 | DLQ depth via a narrow `rabbit.queueDepth(queue)` + an **injected probe**, not an exposed channel | `createRabbit` returns a closed surface, so a channel-taking poller is uncallable. The narrow method keeps amqplib inside `rabbitmq.ts` and lets the poller be tested against `async () => 7`. |
+| 15 | `collectDefaultMetrics` **opt-in, `main.ts` only** | It starts an interval per call with no per-registry stop handle; unconditional calls would leak one collector per test file and hang vitest — the exact hazard decision 4 exists to avoid. |
+| 16 | `createApp`'s metrics parameter is **optional in all four signature groups** | The eight services have four different `createApp` shapes today; optionality is what keeps every pre-existing test passing unmodified. |
 
 ---
 
@@ -389,14 +451,21 @@ the rows are already correct.
   (§B2 trap 2) rather than `req.baseUrl + req.route.path`.
 - An unmatched request labels `route="unmatched"` — asserted directly, since this is the
   cardinality guard.
-- `startDlqPoller` against a fake channel: updates the gauge, survives a `checkQueue` throw
-  without stopping, and `stop()` clears the interval.
+- `startDlqPoller` against a plain probe stub (`async () => 7`, no amqplib double): updates the
+  gauge, survives a rejecting probe without stopping the interval, and `stop()` clears it.
+- `createMetrics(name)` with `defaultMetrics` unset registers **no** `process_*` family and
+  leaves no open handle — the guard against the vitest hang in §A1.
 - The Kafka hook maps an `END_BATCH_PROCESS` payload to the right gauge labels, and a throwing
   listener does not propagate.
 
 **Integration — per service:**
 - `GET /metrics` → 200, `text/plain`, body carries `service="<name>"`.
 - Gateway: `/metrics` answers on `METRICS_PORT` and **not** on the app port.
+- Gateway: a request through a proxy mount labels `route="/orders"` with the matching
+  `upstream`, never the upstream's full path — the §B2 mount case.
+
+**`packages/shared` — `queueDepth`:**
+- Returns `messageCount` and reuses one channel across calls; `close()` closes it.
 
 **Order:**
 - Saga metrics are recorded after a committed transition, and **not** recorded when the tx
