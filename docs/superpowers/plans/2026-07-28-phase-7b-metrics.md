@@ -715,7 +715,17 @@ In `packages/shared/src/rabbitmq.ts`, add a lazily-opened dedicated channel and 
   let pollCh: Channel | null = null;
   async function queueDepth(queue: string): Promise<number> {
     try {
-      if (!pollCh) pollCh = await conn.createChannel();
+      if (!pollCh) {
+        pollCh = await conn.createChannel();
+        // MANDATORY. amqplib emits 'error' on the channel when the broker closes it
+        // (checkQueue against a missing queue does exactly that). With no listener,
+        // EventEmitter throws inside amqplib's accept loop, which re-emits as the
+        // CONNECTION's 'frameError' and tears down every channel on it — including the
+        // working ConfirmChannel — after which conn.on("close") fires onConnectionLost
+        // and exits the process. The rejection still surfaces through the RPC promise
+        // below, so nothing is lost by silencing the redundant EventEmitter throw.
+        pollCh.on("error", () => {});
+      }
       const info = await pollCh.checkQueue(queue);
       return info.messageCount;
     } catch (e) {
