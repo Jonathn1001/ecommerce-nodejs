@@ -1,0 +1,202 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/**"]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from the root package.json `packageManager` field.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      # Prisma clients are gitignored, so generate them before typecheck/build.
+      # Each service owns its own client output (default location for hello, a
+      # custom path for inventory) so multiple schemas never clobber one client.
+      # gateway matches the "./services/*" filter but has no Prisma dependency
+      # and no schema — exclude it, or `prisma generate` fails the whole step
+      # with ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL before any test runs.
+      - name: Generate Prisma clients
+        run: pnpm --filter "./services/*" --filter '!@ecom/gateway' exec prisma generate
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      # All unit tests (packages + services); infra-backed int/e2e run separately.
+      - run: pnpm vitest run --exclude "**/*.int.test.ts" --exclude "**/*.e2e.test.ts"
+      - run: pnpm -r build
+      - run: pnpm audit --audit-level high || true
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma clients
+        run: pnpm --filter "./services/*" --filter '!@ecom/gateway' exec prisma generate
+      - name: Start infra
+        run: |
+          cp docker-compose.example.yml docker-compose.yml
+          printf 'POSTGRES_USER=ecom\nPOSTGRES_PASSWORD=ecom\nRABBITMQ_USER=ecom\nRABBITMQ_PASSWORD=ecom\n' > .env
+          docker compose up -d
+          timeout 120 sh -c 'until [ "$(docker compose ps --format "{{.Health}}" | grep -c healthy)" -ge 5 ]; do sleep 3; done'
+      # No dev-topic reset runs here on purpose: `docker-compose.example.yml` gives Kafka no
+      # named volume (unlike Postgres's `pgdata`), so this container's log segments live only
+      # in its own writable layer and start empty on every run — there is no history to
+      # truncate. `infra/scripts/reset-dev-topics.sh` exists for the opposite case: a
+      # long-lived LOCAL dev broker that accumulates real history across many manual runs.
+      # A "healthy" KRaft broker answers kafka-topics --list before it has
+      # elected a leader for freshly-created topics, so the first test to create
+      # a topic can hit LEADER_NOT_AVAILABLE. Warm up leader election with a
+      # canary topic until it reports a real leader.
+      - name: Warm up Kafka (KRaft leader election)
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+                 --bootstrap-server localhost:9092 --create --topic ci-warmup \
+                 --if-not-exists --partitions 1 --replication-factor 1 >/dev/null 2>&1 \
+               && docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+                 --bootstrap-server localhost:9092 --describe --topic ci-warmup 2>/dev/null \
+                 | grep -q 'Leader: [0-9]'; then
+              echo "kafka leader ready"; exit 0
+            fi
+            echo "waiting for kafka leader election ($i/30)"; sleep 2
+          done
+          echo "kafka warm-up timed out" >&2; exit 1
+      # Vitest positional args are SUBSTRING path filters, not globs — select
+      # test files by directory substring (a glob like "**/*.int.test.ts" here
+      # matches nothing). Shared runs unit+int (Redis/Kafka/RabbitMQ; no DB).
+      - name: Shared integration tests
+        run: pnpm vitest run packages/shared
+      # Each service runs with ITS OWN database URL, so the two Prisma clients
+      # never contend for a single DATABASE_URL inside one test process.
+      #
+      # These eight suites used to be one near-identical `steps:` entry each (migrate +
+      # env + test, give or take a seed or a missing database). GitHub Actions can only
+      # matrix at the job level, and a matrix leg is a fresh runner with no infra carried
+      # over from `needs:` — matrixing this would mean re-running "Start infra" and the
+      # Kafka leader-election warm-up above eight separate times, multiplying both cost
+      # and the number of untestable-from-a-diff leader-election races. A single job with
+      # one loop step keeps the already-verified infra bootstrap untouched and collapses
+      # the duplication instead: one step definition, one case branch per service, run
+      # serially against the one broker/DB this job already started.
+      #
+      # Trade-off: this used to be 8 named steps, so a broken suite showed up as its own red
+      # check (e.g. "Payment service (migrate + int/e2e)"). Now it's one "Service tests"
+      # check for all 8. To find which service failed: the failing service's `::error::`
+      # line names it directly in the Actions summary (no need to open the log), and each
+      # service's output is still folded under its own `::group::<service>` for the full log.
+      - name: Service tests (migrate + seed + test, per service)
+        run: |
+          set -euo pipefail
+          for svc in hello inventory order payment catalog notification identity gateway; do
+            echo "::group::${svc}"
+            if ! case "$svc" in
+              hello)
+                # migrate + e2e; needs Kafka + Redis.
+                # `&&`-chained: `if ! <case> ; then` puts this whole case in a condition
+                # context, where POSIX suspends errexit — a bare newline-separated list
+                # here would let a failed `migrate deploy` fall through to `vitest run`
+                # and have that command's exit status alone decide the arm's result.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/hello" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  export REDIS_URL="redis://localhost:6379" &&
+                  pnpm --filter @ecom/hello exec prisma migrate deploy &&
+                  pnpm vitest run services/hello
+                )
+                ;;
+              inventory)
+                # migrate + int/e2e; needs Kafka + Redis. `&&`-chained — see hello above.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/inventory" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  export REDIS_URL="redis://localhost:6379" &&
+                  pnpm --filter @ecom/inventory exec prisma migrate deploy &&
+                  pnpm vitest run services/inventory
+                )
+                ;;
+              order)
+                # migrate + int/e2e; needs Kafka + Rabbit. `&&`-chained — see hello above.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/order" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  export RABBITMQ_URL="amqp://ecom:ecom@localhost:5672" &&
+                  pnpm --filter @ecom/order exec prisma migrate deploy &&
+                  pnpm vitest run services/order
+                )
+                ;;
+              payment)
+                # migrate + int/e2e; needs Kafka + Rabbit + the webhook secret.
+                # `&&`-chained — see hello above.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/payment" &&
+                  export RABBITMQ_URL="amqp://ecom:ecom@localhost:5672" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  export PAYMENT_WEBHOOK_SECRET="test-secret" &&
+                  pnpm --filter @ecom/payment exec prisma migrate deploy &&
+                  pnpm vitest run services/payment
+                )
+                ;;
+              catalog)
+                # migrate + int/e2e; needs Kafka only. `&&`-chained — see hello above.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/catalog" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  pnpm --filter @ecom/catalog exec prisma migrate deploy &&
+                  pnpm vitest run services/catalog
+                )
+                ;;
+              notification)
+                # migrate + int/e2e; needs Kafka + Rabbit + mailpit SMTP (comes up with
+                # the compose infra set). `&&`-chained — see hello above.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/notification" &&
+                  export RABBITMQ_URL="amqp://ecom:ecom@localhost:5672" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  export SMTP_HOST="localhost" &&
+                  export SMTP_PORT="1025" &&
+                  pnpm --filter @ecom/notification exec prisma migrate deploy &&
+                  pnpm vitest run services/notification
+                )
+                ;;
+              identity)
+                # migrate + seed + int; needs Kafka only. Identity signs with a
+                # throwaway keypair generated per run, so it needs no key from the
+                # environment. `&&`-chained — see hello above; identity is the arm
+                # where a masked failure was most likely to slip through, since a
+                # failed `seed` can leave the suites able to partially self-heal.
+                (
+                  export DATABASE_URL="postgresql://ecom:ecom@localhost:5432/identity" &&
+                  export KAFKA_BROKERS="localhost:9092" &&
+                  pnpm --filter @ecom/identity exec prisma migrate deploy &&
+                  pnpm --filter @ecom/identity seed &&
+                  pnpm vitest run services/identity
+                )
+                ;;
+              gateway)
+                # stub-backed int; the gateway suite makes its own key, so it needs no
+                # database and no broker at all.
+                pnpm vitest run services/gateway
+                ;;
+              *)
+                # The `for` list above and this `case` are two lists kept in sync by hand.
+                # Without this arm, a service added to the `for` with no matching branch (or
+                # a typo'd rename) would silently match nothing, exit 0, and run no tests —
+                # CI green for a service never exercised. Fail loudly instead.
+                echo "::error::unknown service '$svc' — add a case branch in ci.yml" >&2
+                exit 1
+                ;;
+            esac; then
+              echo "::error::${svc} tests failed — see the '${svc}' log group above"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done

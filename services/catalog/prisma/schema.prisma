@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id         String    @id @default(uuid())
+  type       String
+  name       String
+  price      Int
+  version    Int       @default(1)
+  attributes Json
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  comments   Comment[]
+}
+
+model Comment {
+  id        String    @id @default(uuid())
+  productId String
+  parentId  String?
+  body      String
+  createdAt DateTime  @default(now())
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("thread", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Comment[] @relation("thread")
+
+  @@index([productId])
+}
+
+model Discount {
+  id          String               @id @default(uuid())
+  code        String               @unique
+  kind        String
+  value       Int
+  minOrder    Int                  @default(0)
+  maxUses     Int
+  maxPerUser  Int
+  expiresAt   DateTime
+  createdAt   DateTime             @default(now())
+  redemptions DiscountRedemption[]
+}
+
+model DiscountRedemption {
+  id         String   @id @default(uuid())
+  discountId String
+  userId     String
+  createdAt  DateTime @default(now())
+  discount   Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+
+  @@index([discountId, userId])
+}
+
+model Outbox {
+  id            String    @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  type          String
+  version       Int       @default(1)
+  traceId       String
+  producer      String
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([sentAt])
+}

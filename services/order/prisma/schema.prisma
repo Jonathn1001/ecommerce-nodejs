@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+  // Custom output so this service's client does not collide with other
+  // services' Prisma clients. Gitignored via **/generated/.
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One active cart per user, keyed by the x-user-id header value.
+model Cart {
+  userId    String     @id
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String @id @default(uuid())
+  userId    String
+  productId String
+  quantity  Int
+  cart      Cart   @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model Order {
+  id         String      @id @default(uuid())
+  userId     String
+  status     String      @default("PENDING") // PENDING only this slice
+  totalPrice Int                             // integer minor units
+  items      OrderItem[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Int                             // price snapshot at placement
+  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+// Local price projection. Seeded via HTTP admin in this slice; by a Catalog
+// PriceChanged consumer later. Order NEVER reads Catalog's database.
+model CatalogReadModel {
+  productId String   @id
+  name      String
+  price     Int                             // integer minor units
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model Outbox {
+  id            String    @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  type          String
+  version       Int       @default(1)
+  traceId       String
+  producer      String
+  payload       Json
+  occurredAt    DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([sentAt])
+}
+
+// Dedup ledger for at-least-once Kafka delivery. First Order consumer needs it;
+// reused by every later consumer (payment results, catalog projection).
+model ProcessedEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}

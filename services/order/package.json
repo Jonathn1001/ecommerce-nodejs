@@ -1,0 +1,26 @@
+{
+  "name": "@ecom/order",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prisma:migrate": "prisma migrate dev",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@ecom/contracts": "workspace:*",
+    "@ecom/shared": "workspace:*",
+    "@prisma/client": "^6.1.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "pg": "^8.22.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/pg": "^8.20.0",
+    "@types/supertest": "^6.0.2",
+    "prisma": "^6.1.0",
+    "supertest": "^7.0.0"
+  }
+}

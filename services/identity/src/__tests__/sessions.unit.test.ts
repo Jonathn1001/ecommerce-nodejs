@@ -1,0 +1,188 @@
+import { describe, it, expect } from "vitest";
+import { rotateRefresh, type SessionRow, type SessionTx } from "../sessions";
+
+const HOUR = 3600_000;
+const NOW = new Date("2026-07-25T00:00:00.000Z");
+
+function fakeTx(rows: SessionRow[]) {
+  const store = new Map(rows.map((r) => [r.tokenHash, { ...r }]));
+  const revokedFamilies: string[] = [];
+  const minted: Array<{ familyId: string; userId: string }> = [];
+  const tx: SessionTx = {
+    async findByHash(hash) {
+      return store.get(hash) ?? null;
+    },
+    async revokeFamily(familyId) {
+      revokedFamilies.push(familyId);
+      for (const row of store.values())
+        if (row.familyId === familyId) row.revokedAt = NOW;
+    },
+    // Mirrors the SQL guard `WHERE revokedAt IS NULL` and returns the affected count. The
+    // old fake revoked unconditionally, which is exactly why it could not see the race.
+    // `rotated` stamps `replacedAt` too, mirroring the production adapter, so the grace
+    // window can tell "rotated" apart from "revoked by logout".
+    async revokeOne(id, at, rotated = false) {
+      let count = 0;
+      for (const row of store.values())
+        if (row.id === id && row.revokedAt === null) {
+          row.revokedAt = at;
+          if (rotated) row.replacedAt = at;
+          count++;
+        }
+      return count;
+    },
+    async mintInFamily(n) {
+      minted.push({ familyId: n.familyId, userId: n.userId });
+      store.set(n.tokenHash, {
+        id: `new_${minted.length}`,
+        tokenHash: n.tokenHash,
+        userId: n.userId,
+        familyId: n.familyId,
+        revokedAt: null,
+        replacedAt: null,
+        expiresAt: n.expiresAt,
+      });
+      return `new_${minted.length}`;
+    },
+    async linkReplacement(oldId, newId) {
+      for (const row of store.values()) if (row.id === oldId) row.replacedBy = newId;
+    },
+  };
+  return { tx, store, revokedFamilies, minted };
+}
+
+const live = (over: Partial<SessionRow> = {}): SessionRow => ({
+  id: "s1",
+  tokenHash: "h1",
+  userId: "u1",
+  familyId: "f1",
+  revokedAt: null,
+  replacedAt: null,
+  expiresAt: new Date(NOW.getTime() + 24 * HOUR),
+  ...over,
+});
+
+describe("rotateRefresh", () => {
+  it("live token -> ROTATED: mints in the same family, revokes and links the old row", async () => {
+    const f = fakeTx([live()]);
+    const r = await rotateRefresh(f.tx, "h1", NOW, () => "h2");
+    expect(r.outcome).toBe("ROTATED");
+    expect(r.tokenHash).toBe("h2");
+    expect(f.minted).toEqual([{ familyId: "f1", userId: "u1" }]);
+    expect(f.store.get("h1")!.revokedAt).toEqual(NOW);
+    expect(f.store.get("h1")!.replacedBy).toBe("new_1");
+  });
+
+  it("unknown token -> UNKNOWN with no side effect (it proves nothing about a family)", async () => {
+    const f = fakeTx([live()]);
+    const r = await rotateRefresh(f.tx, "nope", NOW, () => "h2");
+    expect(r.outcome).toBe("UNKNOWN");
+    expect(f.revokedFamilies).toEqual([]);
+    expect(f.minted).toEqual([]);
+  });
+
+  it("already-revoked token -> REUSE: revokes the WHOLE family, mints nothing", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW }),
+      live({ id: "s2", tokenHash: "h2" }), // same family, still live
+    ]);
+    const r = await rotateRefresh(f.tx, "h1", NOW, () => "h3");
+    expect(r.outcome).toBe("REUSE");
+    expect(f.revokedFamilies).toEqual(["f1"]);
+    expect(f.store.get("h2")!.revokedAt).toEqual(NOW); // the thief's live token dies too
+    expect(f.minted).toEqual([]);
+  });
+
+  it("expired token -> EXPIRED and the row is revoked", async () => {
+    const f = fakeTx([live({ expiresAt: new Date(NOW.getTime() - HOUR) })]);
+    const r = await rotateRefresh(f.tx, "h1", NOW, () => "h2");
+    expect(r.outcome).toBe("EXPIRED");
+    expect(f.store.get("h1")!.revokedAt).toEqual(NOW);
+    expect(f.minted).toEqual([]);
+  });
+
+  it("rotating twice with the same token trips REUSE the second time", async () => {
+    const f = fakeTx([live()]);
+    expect((await rotateRefresh(f.tx, "h1", NOW, () => "h2")).outcome).toBe("ROTATED");
+    // Past the default grace window: a genuine replay, not an honest double-submit.
+    const later = new Date(NOW.getTime() + 60_000);
+    const second = await rotateRefresh(f.tx, "h1", later, () => "h3");
+    expect(second.outcome).toBe("REUSE");
+    expect(f.store.get("h2")!.revokedAt).toEqual(NOW); // the honest client is logged out too
+  });
+
+  it("a lost claim race -> RACE, and nothing is minted (no two live tokens in a family)", async () => {
+    const f = fakeTx([live()]);
+    // Simulate the concurrent winner: the row is already claimed by the time we revoke.
+    const racing = {
+      ...f.tx,
+      async findByHash() {
+        return live(); // still looks live to this transaction (READ COMMITTED snapshot)
+      },
+      async revokeOne() {
+        return 0; // the other transaction got there first
+      },
+    };
+    const r = await rotateRefresh(racing, "h1", NOW, () => "h2");
+    expect(r.outcome).toBe("RACE");
+    expect(f.minted).toEqual([]);
+  });
+
+  it("another family is untouched by a reuse in this one", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW }),
+      live({ id: "s9", tokenHash: "h9", familyId: "f2" }), // other device
+    ]);
+    await rotateRefresh(f.tx, "h1", NOW, () => "hx");
+    expect(f.store.get("h9")!.revokedAt).toBeNull();
+  });
+
+  it("a replay inside the grace window -> GRACE: 401 without revoking the family", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW, replacedAt: NOW }),
+      live({ id: "s2", tokenHash: "h2" }), // the successor, still live
+    ]);
+    const r = await rotateRefresh(
+      f.tx,
+      "h1",
+      new Date(NOW.getTime() + 2_000),
+      () => "h3",
+      undefined,
+      10_000
+    );
+    expect(r.outcome).toBe("GRACE");
+    expect(f.revokedFamilies).toEqual([]);
+    expect(f.store.get("h2")!.revokedAt).toBeNull(); // honest client keeps its session
+  });
+
+  it("a replay after the grace window is still REUSE", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW, replacedAt: NOW }),
+    ]);
+    const r = await rotateRefresh(
+      f.tx,
+      "h1",
+      new Date(NOW.getTime() + 60_000),
+      () => "h3",
+      undefined,
+      10_000
+    );
+    expect(r.outcome).toBe("REUSE");
+    expect(f.revokedFamilies).toEqual(["f1"]);
+  });
+
+  it("a row revoked by logout (never rotated) is REUSE even inside the window", async () => {
+    const f = fakeTx([
+      live({ id: "s1", tokenHash: "h1", revokedAt: NOW, replacedAt: null }),
+    ]);
+    const r = await rotateRefresh(
+      f.tx,
+      "h1",
+      new Date(NOW.getTime() + 2_000),
+      () => "h3",
+      undefined,
+      10_000
+    );
+    expect(r.outcome).toBe("REUSE");
+  });
+});

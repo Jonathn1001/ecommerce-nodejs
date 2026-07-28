@@ -1,0 +1,12 @@
+packages:
+  - "packages/*"
+  - "services/*"
+
+# pnpm 10 blocks dependency build scripts by default. Allow the ones we need:
+# prisma engines (query engine binary) and esbuild (backs tsx at runtime).
+# Without this, `pnpm install` fails with ERR_PNPM_IGNORED_BUILDS and tsx cannot run.
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - esbuild
+  - prisma

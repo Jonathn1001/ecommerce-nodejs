@@ -1,0 +1,32 @@
+import { z } from "zod";
+
+export const ORDER_PLACED = "order.placed" as const;
+export const ORDER_CANCELLED = "order.cancelled" as const;
+export const ORDER_CONFIRMED = "order.confirmed" as const;
+
+export const OrderLineSchema = z.object({
+  productId: z.string().min(1),
+  quantity: z.number().int().positive(),
+});
+export type OrderLine = z.infer<typeof OrderLineSchema>;
+
+// userId travels on every order event so downstream consumers (Notification)
+// can address the customer without a call back into Order.
+export const OrderPlacedPayloadSchema = z.object({
+  orderId: z.string().min(1),
+  userId: z.string().min(1),
+  items: z.array(OrderLineSchema).min(1),
+});
+export type OrderPlacedPayload = z.infer<typeof OrderPlacedPayloadSchema>;
+
+export const OrderCancelledPayloadSchema = z.object({
+  orderId: z.string().min(1),
+  userId: z.string().min(1),
+});
+export type OrderCancelledPayload = z.infer<typeof OrderCancelledPayloadSchema>;
+
+export const OrderConfirmedPayloadSchema = z.object({
+  orderId: z.string().min(1),
+  userId: z.string().min(1),
+});
+export type OrderConfirmedPayload = z.infer<typeof OrderConfirmedPayloadSchema>;
