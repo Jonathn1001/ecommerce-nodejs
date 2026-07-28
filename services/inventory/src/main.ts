@@ -12,6 +12,7 @@ import {
   startOutboxRelay,
   startLedgerPruner,
   createLogger,
+  createMetrics,
   gracefulShutdown,
   closeRedis,
 } from "@ecom/shared";
@@ -20,6 +21,7 @@ const log = createLogger("inventory-main");
 const ORDER_TOPIC = "order.events";
 
 async function main() {
+  const metrics = createMetrics("inventory", { defaultMetrics: true });
   const kafka = createKafka("inventory");
   const producer = createProducer(kafka);
   await producer.connect();
@@ -34,7 +36,7 @@ async function main() {
     }
   );
 
-  const consumer = createConsumer(kafka, "inventory-consumers");
+  const consumer = createConsumer(kafka, "inventory-consumers", metrics.kafkaHooks);
   await consumer.connect();
   await consumer.run([ORDER_TOPIC], handleOrderEvent);
 
@@ -45,7 +47,7 @@ async function main() {
     intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
   });
 
-  const app = createApp();
+  const app = createApp({ metrics });
   const server = app.listen(config.PORT, () =>
     log.info("inventory_listening", { port: config.PORT })
   );

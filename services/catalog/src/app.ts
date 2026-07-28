@@ -1,6 +1,12 @@
 import express from "express";
 import { z } from "zod";
-import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
+import {
+  traceMiddleware,
+  createLogger,
+  createHealthRouter,
+  createMetrics,
+  type Metrics,
+} from "@ecom/shared";
 import { prisma } from "./db";
 import { applyCreate, applyUpdate } from "./product";
 import { productTx } from "./tx-adapters";
@@ -37,10 +43,13 @@ const ApplySchema = z.object({
   orderTotal: z.number().int().positive(),
 });
 
-export function createApp(): express.Application {
+export function createApp(deps: { metrics?: Metrics } = {}): express.Application {
+  const metrics = deps.metrics ?? createMetrics("catalog");
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
+  app.use(metrics.httpMiddleware());
+  app.use(metrics.router());
   app.use(
     createHealthRouter({ db: async () => void (await prisma.$queryRaw`SELECT 1`) })
   );

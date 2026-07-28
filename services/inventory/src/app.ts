@@ -4,7 +4,9 @@ import {
   traceMiddleware,
   createLogger,
   createHealthRouter,
+  createMetrics,
   getRedis,
+  type Metrics,
 } from "@ecom/shared";
 import { prisma } from "./db";
 
@@ -16,10 +18,13 @@ const AddStockSchema = z.object({
   location: z.string().min(1).optional(),
 });
 
-export function createApp(): express.Application {
+export function createApp(deps: { metrics?: Metrics } = {}): express.Application {
+  const metrics = deps.metrics ?? createMetrics("inventory");
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
+  app.use(metrics.httpMiddleware());
+  app.use(metrics.router());
 
   app.use(
     createHealthRouter({

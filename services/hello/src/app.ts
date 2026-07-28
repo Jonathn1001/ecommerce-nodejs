@@ -3,17 +3,22 @@ import {
   traceMiddleware,
   createLogger,
   createHealthRouter,
+  createMetrics,
   getRedis,
+  type Metrics,
 } from "@ecom/shared";
 import { HELLO_CREATED, HelloCreatedPayloadSchema } from "@ecom/contracts";
 import { prisma } from "./db";
 
 const log = createLogger("hello");
 
-export function createApp(): express.Application {
+export function createApp(deps: { metrics?: Metrics } = {}): express.Application {
+  const metrics = deps.metrics ?? createMetrics("hello");
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
+  app.use(metrics.httpMiddleware());
+  app.use(metrics.router());
 
   app.use(
     createHealthRouter({

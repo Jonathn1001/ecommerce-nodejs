@@ -1,6 +1,12 @@
 import express from "express";
 import { z } from "zod";
-import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
+import {
+  traceMiddleware,
+  createLogger,
+  createHealthRouter,
+  createMetrics,
+  type Metrics,
+} from "@ecom/shared";
 import { prisma } from "./db";
 import { config } from "./config";
 import { register, login, refresh, logout } from "./auth";
@@ -28,10 +34,13 @@ const RegisterSchema = z.object({
 const LoginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 const RefreshSchema = z.object({ refreshToken: z.string().min(1) });
 
-export function createApp(): express.Application {
+export function createApp(deps: { metrics?: Metrics } = {}): express.Application {
+  const metrics = deps.metrics ?? createMetrics("identity");
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
+  app.use(metrics.httpMiddleware());
+  app.use(metrics.router());
 
   app.use(
     createHealthRouter({ db: async () => void (await prisma.$queryRaw`SELECT 1`) })

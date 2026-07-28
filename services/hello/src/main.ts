@@ -13,6 +13,7 @@ import {
   createConsumer,
   startOutboxRelay,
   createLogger,
+  createMetrics,
   gracefulShutdown,
   getRedis,
 } from "@ecom/shared";
@@ -30,7 +31,8 @@ async function main() {
   await consumer.connect();
   await consumer.run([TOPIC], handleEvent);
 
-  const app = createApp();
+  const metrics = createMetrics("hello", { defaultMetrics: true });
+  const app = createApp({ metrics });
   const server = app.listen(config.PORT, () =>
     log.info("hello_listening", { port: config.PORT })
   );
