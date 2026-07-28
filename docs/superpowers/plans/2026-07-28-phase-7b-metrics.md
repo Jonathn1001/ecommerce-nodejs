@@ -59,8 +59,14 @@
 **Files:**
 - Create: `packages/shared/src/metrics.ts`
 - Create: `packages/shared/src/__tests__/metrics.unit.test.ts`
+- Create: `packages/shared/src/__tests__/metrics-kafka.unit.test.ts`
+- Create: `packages/shared/src/__tests__/metrics-dlq.unit.test.ts`
 - Modify: `packages/shared/package.json`
 - Modify: `packages/shared/src/index.ts`
+
+This task implements the metric objects, the `kafkaHooks` recorders and the DLQ poller, so the
+tests covering all three live here. Tasks 2 and 3 test their own deliverables — the kafkajs
+listener wiring and `queueDepth` — not these.
 
 **Interfaces:**
 - Consumes: nothing.
@@ -168,10 +174,97 @@ describe("createMetrics", () => {
 });
 ```
 
-- [ ] **Step 3: Run it and confirm it fails**
+Also create `packages/shared/src/__tests__/metrics-kafka.unit.test.ts` — this covers the
+**recorders** this task implements; Task 2 covers the kafkajs wiring that calls them:
 
-Run: `pnpm vitest run packages/shared/src/__tests__/metrics.unit.test.ts`
-Expected: FAIL — `Failed to resolve import "../metrics"`.
+```ts
+import { describe, it, expect } from "vitest";
+import { createMetrics } from "../metrics";
+
+describe("kafka metric recorders", () => {
+  it("records lag, outcomes and handler duration on the registry", async () => {
+    const m = createMetrics("order");
+
+    m.kafkaHooks.onBatch({ group: "g1", topic: "order.events", partition: "0", lag: 42 });
+    m.kafkaHooks.onMessage({ group: "g1", topic: "order.events", result: "ok" });
+    m.kafkaHooks.onMessage({ group: "g1", topic: "order.events", result: "dlq" });
+    m.kafkaHooks.observeHandler({
+      group: "g1",
+      topic: "order.events",
+      type: "order_placed",
+      seconds: 0.2,
+    });
+
+    const out = await m.registry.metrics();
+    expect(out).toContain('kafka_consumer_lag{group="g1",topic="order.events",partition="0"} 42');
+    expect(out).toContain('result="dlq"');
+    expect(out).toContain("kafka_handler_duration_seconds_bucket");
+  });
+});
+```
+
+And `packages/shared/src/__tests__/metrics-dlq.unit.test.ts` for the poller:
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { createMetrics } from "../metrics";
+
+describe("startDlqPoller", () => {
+  it("sets the gauge from the probe", async () => {
+    const m = createMetrics("payment");
+    const poller = m.startDlqPoller(async () => 7, ["payment.charge.dlq"], { intervalMs: 5 });
+
+    await vi.waitFor(async () =>
+      expect(await m.registry.metrics()).toContain(
+        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 7'
+      )
+    );
+    poller.stop();
+  });
+
+  it("survives a rejecting probe and keeps polling", async () => {
+    const m = createMetrics("payment");
+    let calls = 0;
+    const probe = async () => {
+      calls += 1;
+      if (calls < 3) throw new Error("channel closed");
+      return 2;
+    };
+    const poller = m.startDlqPoller(probe, ["payment.charge.dlq"], { intervalMs: 5 });
+
+    await vi.waitFor(async () =>
+      expect(await m.registry.metrics()).toContain(
+        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 2'
+      )
+    );
+    poller.stop();
+  });
+
+  it("stop() halts further probing", async () => {
+    const m = createMetrics("payment");
+    let calls = 0;
+    const poller = m.startDlqPoller(
+      async () => {
+        calls += 1;
+        return 1;
+      },
+      ["q.dlq"],
+      { intervalMs: 5 }
+    );
+
+    await vi.waitFor(() => expect(calls).toBeGreaterThan(0));
+    poller.stop();
+    const seen = calls;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toBe(seen);
+  });
+});
+```
+
+- [ ] **Step 3: Run them and confirm they fail**
+
+Run: `pnpm vitest run packages/shared/src/__tests__/metrics.unit.test.ts packages/shared/src/__tests__/metrics-kafka.unit.test.ts packages/shared/src/__tests__/metrics-dlq.unit.test.ts`
+Expected: all three FAIL — `Failed to resolve import "../metrics"`.
 
 - [ ] **Step 4: Write the module**
 
@@ -345,8 +438,8 @@ export * from "./metrics";
 
 - [ ] **Step 6: Run the tests**
 
-Run: `pnpm vitest run packages/shared/src/__tests__/metrics.unit.test.ts`
-Expected: PASS, 5 tests.
+Run: `pnpm vitest run packages/shared/src/__tests__/metrics.unit.test.ts packages/shared/src/__tests__/metrics-kafka.unit.test.ts packages/shared/src/__tests__/metrics-dlq.unit.test.ts`
+Expected: PASS — 5 + 1 + 3 = 9 tests.
 
 - [ ] **Step 7: Typecheck and format**
 
@@ -358,6 +451,8 @@ Expected: both clean.
 ```bash
 git add packages/shared/src/metrics.ts \
         packages/shared/src/__tests__/metrics.unit.test.ts \
+        packages/shared/src/__tests__/metrics-kafka.unit.test.ts \
+        packages/shared/src/__tests__/metrics-dlq.unit.test.ts \
         packages/shared/src/index.ts \
         packages/shared/package.json \
         pnpm-lock.yaml
@@ -370,50 +465,96 @@ git commit -m "feat(shared): prom-client metrics module with RED middleware and 
 
 **Files:**
 - Modify: `packages/shared/src/kafka.ts`
-- Create: `packages/shared/src/__tests__/metrics-kafka.unit.test.ts`
+- Create: `packages/shared/src/__tests__/kafka-hooks.unit.test.ts`
 
 **Interfaces:**
 - Consumes: `KafkaMetricsHooks`, `createMetrics` from Task 1.
 - Produces: `createConsumer(kafka, groupId, hooks?: KafkaMetricsHooks)` — third parameter is optional, so all existing call sites keep compiling.
 
+Task 1 already tested the recorders. This task's deliverable is the **wiring**: that
+`createConsumer` registers a kafkajs `END_BATCH_PROCESS` listener and maps its payload onto
+`onBatch`. That is what the test below asserts, and it genuinely fails before Step 3.
+
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/shared/src/__tests__/metrics-kafka.unit.test.ts`:
+Create `packages/shared/src/__tests__/kafka-hooks.unit.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { createMetrics } from "../metrics";
+import type { Kafka } from "kafkajs";
+import { createConsumer } from "../kafka";
+import type { KafkaMetricsHooks } from "../metrics";
 
-describe("kafka metrics hooks", () => {
-  it("records lag, outcomes and handler duration on the registry", async () => {
-    const m = createMetrics("order");
+const END_BATCH = "consumer.end_batch_process";
 
-    m.kafkaHooks.onBatch({ group: "g1", topic: "order.events", partition: "0", lag: 42 });
-    m.kafkaHooks.onMessage({ group: "g1", topic: "order.events", result: "ok" });
-    m.kafkaHooks.onMessage({ group: "g1", topic: "order.events", result: "dlq" });
-    m.kafkaHooks.observeHandler({
-      group: "g1",
-      topic: "order.events",
-      type: "order_placed",
-      seconds: 0.2,
-    });
+function fakeKafka() {
+  const listeners: Record<string, (e: unknown) => void> = {};
+  const consumer = {
+    events: { END_BATCH_PROCESS: END_BATCH },
+    on: (event: string, cb: (e: unknown) => void) => {
+      listeners[event] = cb;
+    },
+    connect: async () => {},
+    disconnect: async () => {},
+    subscribe: async () => {},
+    run: async () => {},
+  };
+  const producer = { connect: async () => {}, disconnect: async () => {} };
+  const kafka = { consumer: () => consumer, producer: () => producer } as unknown as Kafka;
+  return { kafka, listeners };
+}
 
-    const out = await m.registry.metrics();
-    expect(out).toContain('kafka_consumer_lag{group="g1",topic="order.events",partition="0"} 42');
-    expect(out).toContain('result="dlq"');
-    expect(out).toContain("kafka_handler_duration_seconds_bucket");
+describe("createConsumer metrics wiring", () => {
+  it("registers an END_BATCH_PROCESS listener and maps its payload onto onBatch", () => {
+    const { kafka, listeners } = fakeKafka();
+    const seen: unknown[] = [];
+    const hooks: KafkaMetricsHooks = {
+      onBatch: (p) => seen.push(p),
+      onMessage: () => {},
+      observeHandler: () => {},
+    };
+
+    createConsumer(kafka, "order-consumers", hooks);
+    expect(listeners[END_BATCH]).toBeTypeOf("function");
+
+    listeners[END_BATCH]({ payload: { topic: "order.events", partition: 2, offsetLag: "17" } });
+    expect(seen).toEqual([
+      { group: "order-consumers", topic: "order.events", partition: "2", lag: 17 },
+    ]);
+  });
+
+  it("registers no listener when no hooks are passed", () => {
+    const { kafka, listeners } = fakeKafka();
+    createConsumer(kafka, "order-consumers");
+    expect(listeners[END_BATCH]).toBeUndefined();
+  });
+
+  it("does not propagate a throwing hook", () => {
+    const { kafka, listeners } = fakeKafka();
+    const hooks: KafkaMetricsHooks = {
+      onBatch: () => {
+        throw new Error("boom");
+      },
+      onMessage: () => {},
+      observeHandler: () => {},
+    };
+
+    createConsumer(kafka, "g", hooks);
+    expect(() =>
+      listeners[END_BATCH]({ payload: { topic: "t", partition: 0, offsetLag: "1" } })
+    ).not.toThrow();
   });
 });
 ```
 
+Note `offsetLag` arrives as a **string** from kafkajs — the `Number(...)` coercion in Step 3 is
+what makes the `lag: 17` assertion pass.
+
 - [ ] **Step 2: Run it and confirm it fails**
 
-Run: `pnpm vitest run packages/shared/src/__tests__/metrics-kafka.unit.test.ts`
-Expected: FAIL — the sample lines are absent (metric families are lazily emitted only once observed, and nothing has observed them).
-
-> If this test passes before you touch `kafka.ts`, that is correct and expected — Task 1
-> already created the metric objects. Its purpose is to pin the exact label ordering that the
-> `kafka.ts` wiring below must produce. Proceed to Step 3.
+Run: `pnpm vitest run packages/shared/src/__tests__/kafka-hooks.unit.test.ts`
+Expected: FAIL — `createConsumer` takes two parameters today and registers no listener, so
+`listeners[END_BATCH]` is `undefined`.
 
 - [ ] **Step 3: Wire the hooks into `createConsumer`**
 
@@ -479,21 +620,24 @@ Expected: clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/shared/src/kafka.ts packages/shared/src/__tests__/metrics-kafka.unit.test.ts
+git add packages/shared/src/kafka.ts packages/shared/src/__tests__/kafka-hooks.unit.test.ts
 git commit -m "feat(shared): optional kafka metrics hooks for lag, outcome and handler duration"
 ```
 
 ---
 
-### Task 3: `queueDepth` on the Rabbit adapter + DLQ poller
+### Task 3: `queueDepth` on the Rabbit adapter
 
 **Files:**
 - Modify: `packages/shared/src/rabbitmq.ts`
-- Create: `packages/shared/src/__tests__/metrics-dlq.unit.test.ts`
+- Modify: `packages/shared/src/__tests__/rabbitmq.int.test.ts`
 
 **Interfaces:**
-- Consumes: `startDlqPoller` from Task 1.
-- Produces: `createRabbit()` return object gains `queueDepth(queue: string): Promise<number>`.
+- Consumes: `startDlqPoller` from Task 1 (already implemented and tested there).
+- Produces: `createRabbit()` return object gains `queueDepth(queue: string): Promise<number>` — the probe Task 5 passes to `startDlqPoller`.
+
+Task 1 already implemented and tested the poller against a stub probe. This task's deliverable is
+the **real probe**: `queueDepth` on the Rabbit adapter.
 
 **Why a new method rather than exposing the channel:** `createRabbit` returns a closed surface
 (`rabbitmq.ts:155-163`); neither `conn` nor `ch` escapes, so no caller can supply a channel. And
@@ -503,68 +647,34 @@ message sending.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/shared/src/__tests__/metrics-dlq.unit.test.ts`:
+Append to `packages/shared/src/__tests__/rabbitmq.int.test.ts`, inside its existing `describe`.
+Read the file first and reuse whatever its existing connection handle is named — do **not** open
+a second connection:
 
 ```ts
-import { describe, it, expect, vi } from "vitest";
-import { createMetrics } from "../metrics";
-
-describe("startDlqPoller", () => {
-  it("sets the gauge from the probe", async () => {
-    const m = createMetrics("payment");
-    const poller = m.startDlqPoller(async () => 7, ["payment.charge.dlq"], { intervalMs: 5 });
-
-    await vi.waitFor(async () =>
-      expect(await m.registry.metrics()).toContain(
-        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 7'
-      )
-    );
-    poller.stop();
+  it("queueDepth reports the DLQ message count", async () => {
+    const queue = `metrics-depth-${Date.now()}`;
+    await rabbit.assertWorkQueue(queue);
+    expect(await rabbit.queueDepth(`${queue}.dlq`)).toBe(0);
   });
 
-  it("survives a rejecting probe and keeps polling", async () => {
-    const m = createMetrics("payment");
-    let calls = 0;
-    const probe = async () => {
-      calls += 1;
-      if (calls < 3) throw new Error("channel closed");
-      return 2;
-    };
-    const poller = m.startDlqPoller(probe, ["payment.charge.dlq"], { intervalMs: 5 });
-
-    await vi.waitFor(async () =>
-      expect(await m.registry.metrics()).toContain(
-        'rabbitmq_dlq_depth{queue="payment.charge.dlq"} 2'
-      )
-    );
-    poller.stop();
+  it("queueDepth on a missing queue rejects without killing the command lane", async () => {
+    await expect(rabbit.queueDepth(`no-such-queue-${Date.now()}`)).rejects.toThrow();
+    // The working ConfirmChannel must still be usable — this is the whole reason
+    // queueDepth owns a separate channel.
+    const queue = `metrics-after-miss-${Date.now()}`;
+    await rabbit.assertWorkQueue(queue);
+    expect(await rabbit.queueDepth(`${queue}.dlq`)).toBe(0);
   });
-
-  it("stop() halts further probing", async () => {
-    const m = createMetrics("payment");
-    let calls = 0;
-    const poller = m.startDlqPoller(
-      async () => {
-        calls += 1;
-        return 1;
-      },
-      ["q.dlq"],
-      { intervalMs: 5 }
-    );
-
-    await vi.waitFor(() => expect(calls).toBeGreaterThan(0));
-    poller.stop();
-    const seen = calls;
-    await new Promise((r) => setTimeout(r, 30));
-    expect(calls).toBe(seen);
-  });
-});
 ```
+
+The second test is the load-bearing one: it fails if `queueDepth` shares the working channel,
+which is exactly the mistake the design forbids.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
-Run: `pnpm vitest run packages/shared/src/__tests__/metrics-dlq.unit.test.ts`
-Expected: PASS if Task 1 was implemented correctly — the poller is already written. If it fails, fix Task 1's poller before continuing; do not weaken the test.
+Run: `pnpm vitest run packages/shared/src/__tests__/rabbitmq.int.test.ts` (needs `docker compose up -d`)
+Expected: FAIL — `rabbit.queueDepth is not a function`.
 
 - [ ] **Step 3: Add `queueDepth` to the Rabbit adapter**
 
@@ -602,31 +712,16 @@ In `close()`, close the poll channel before the working channel:
   }
 ```
 
-- [ ] **Step 4: Extend the existing Rabbit integration test**
-
-Append to `packages/shared/src/__tests__/rabbitmq.int.test.ts`, inside its existing `describe`:
-
-```ts
-  it("queueDepth reports the DLQ message count", async () => {
-    const queue = `metrics-depth-${Date.now()}`;
-    await rabbit.assertWorkQueue(queue);
-    expect(await rabbit.queueDepth(`${queue}.dlq`)).toBe(0);
-  });
-```
-
-Use whatever the file's existing `rabbit` handle and setup are named — read the file first and match them; do not create a second connection.
-
-- [ ] **Step 5: Run the shared suite**
+- [ ] **Step 4: Run the shared suite**
 
 Run: `pnpm vitest run packages/shared`
 Expected: PASS. The integration tests need `docker compose up -d`.
 
-- [ ] **Step 6: Typecheck and commit**
+- [ ] **Step 5: Typecheck and commit**
 
 ```bash
 pnpm -r typecheck && pnpm format:check
 git add packages/shared/src/rabbitmq.ts \
-        packages/shared/src/__tests__/metrics-dlq.unit.test.ts \
         packages/shared/src/__tests__/rabbitmq.int.test.ts
 git commit -m "feat(shared): queueDepth on a dedicated channel for DLQ-depth polling"
 ```
