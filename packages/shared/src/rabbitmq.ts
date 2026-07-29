@@ -1,4 +1,4 @@
-import amqp, { type ConfirmChannel, type ChannelModel } from "amqplib";
+import amqp, { type ConfirmChannel, type ChannelModel, type Channel } from "amqplib";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
@@ -148,8 +148,56 @@ export async function createRabbit(
     if (!lifecycle.isHealthy()) throw new Error("rabbit connection is down");
   }
 
+  // Dedicated NON-confirm channel. checkQueue against a missing queue closes the channel it
+  // runs on, and `ch` above carries the relay's command lane — a metric must not be able to
+  // kill message sending.
+  let pollCh: Channel | null = null;
+  async function queueDepth(queue: string): Promise<number> {
+    try {
+      if (!pollCh) {
+        const opened = await conn.createChannel();
+        // amqplib emits 'error' on a channel-level close (e.g. checkQueue's 404 for a
+        // missing queue) IN ADDITION to rejecting the pending RPC. With zero listeners,
+        // Node's EventEmitter throws synchronously inside amqplib's frame-dispatch loop;
+        // that throw is caught there and re-emitted as the connection's 'frameError',
+        // which amqplib wires straight to onSocketError — tearing down the WHOLE
+        // connection (every channel on it, including `ch`) instead of just this one.
+        // A listener here is required for "dedicated channel" to actually contain the
+        // failure; the catch below already handles the rejection.
+        opened.on("error", (e: Error) => {
+          // Clearing the handle here, not only in the catch below, is what makes an
+          // IDLE death recoverable: a broker-initiated close with no queueDepth call
+          // in flight has no pending RPC to reject, so the catch never runs and this
+          // would otherwise stay pointing at a dead channel — close() would then throw
+          // IllegalOperationError and never reach ch.close()/conn.close().
+          // Guarded on identity so a late error from a superseded channel cannot
+          // discard its replacement.
+          if (pollCh === opened) pollCh = null;
+          log.warn("poll_channel_error", { message: e.message });
+        });
+        pollCh = opened;
+      }
+      const info = await pollCh.checkQueue(queue);
+      return info.messageCount;
+    } catch (e) {
+      pollCh = null; // the failure closed it; next call reopens
+      throw e;
+    }
+  }
+
   async function close(): Promise<void> {
     lifecycle.markClosing(); // graceful teardown must not trip the restart handler
+    if (pollCh) {
+      // Belt-and-braces around the listener above: the channel can still die between
+      // the check and this call. Releasing the metrics channel must never be the reason
+      // the command lane and the connection are left open.
+      try {
+        await pollCh.close();
+      } catch (e) {
+        log.warn("poll_channel_close_failed", { message: (e as Error).message });
+      }
+      pollCh = null;
+    }
     await ch.close();
     await conn.close();
   }
@@ -161,6 +209,7 @@ export async function createRabbit(
     consumeDlqOnce,
     moveDlqOnce,
     checkHealth,
+    queueDepth,
     close,
   };
 }

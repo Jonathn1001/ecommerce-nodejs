@@ -21,6 +21,11 @@ export const config = loadConfig(
       .default("false")
       .transform((v) => v === "true"),
     PORT: z.coerce.number().int().positive().default(8000),
+    // Separate, deliberately unpublished listener: docker-compose.prod.example.yml exposes
+    // only PORT, so /metrics must never be mounted there (see app.ts, main.ts). Like every
+    // other numeric key here, this MUST default — a metrics port must never be able to stop
+    // the gateway from booting.
+    METRICS_PORT: z.coerce.number().int().positive().default(9464),
     LOG_LEVEL: z.string().default("info"),
   })
 );

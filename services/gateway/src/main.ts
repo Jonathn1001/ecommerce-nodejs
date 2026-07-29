@@ -1,8 +1,9 @@
+import express from "express";
 import { createApp } from "./app";
 import { config } from "./config";
 import { createGrantsCache } from "./grants-cache";
 import { createJwksCache } from "./jwks-cache";
-import { createLogger, gracefulShutdown } from "@ecom/shared";
+import { createLogger, createMetrics, gracefulShutdown } from "@ecom/shared";
 
 const log = createLogger("gateway-main");
 
@@ -29,6 +30,8 @@ async function main() {
   // instead (jwks-cache.ts).
   if (jwks) await jwks.refresh();
 
+  const metrics = createMetrics("gateway", { defaultMetrics: true });
+
   const app = createApp({
     publicKey: config.JWT_PUBLIC_KEY,
     jwks,
@@ -41,10 +44,19 @@ async function main() {
     grants,
     cookieSecure: config.COOKIE_SECURE,
     breaker: { timeoutMs: config.BREAKER_TIMEOUT_MS, resetMs: config.BREAKER_RESET_MS },
+    metrics,
   });
 
   const server = app.listen(config.PORT, () =>
     log.info("gateway_listening", { port: config.PORT })
+  );
+
+  // Separate, deliberately unpublished port: docker-compose.prod.example.yml exposes only
+  // PORT, so /metrics living there would be internet-facing (route names, error rates, and
+  // traffic volume, unauthenticated). This listener carries ONLY the scrape route.
+  const metricsApp = express().use(metrics.router());
+  const metricsServer = metricsApp.listen(config.METRICS_PORT, () =>
+    log.info("gateway_metrics_listening", { port: config.METRICS_PORT })
   );
 
   gracefulShutdown([
@@ -53,6 +65,11 @@ async function main() {
     },
     async () => {
       jwks?.stop();
+    },
+    async () => {
+      await new Promise<void>((resolve, reject) =>
+        metricsServer.close((err) => (err ? reject(err) : resolve()))
+      );
     },
     async () => {
       await new Promise<void>((resolve, reject) =>

@@ -1,0 +1,11 @@
+apiVersion: 1
+datasources:
+  # uid is pinned so checkout.json can reference this datasource explicitly rather
+  # than leaning on isDefault. A second datasource added later must not silently
+  # change which one the dashboard's panels query.
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true

@@ -78,6 +78,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # Tags are pinned, not :latest — checkout.json is version-coupled to the Grafana
+  # that renders it, so a moving tag would break the committed dashboard on a clone.
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    restart: unless-stopped
+    ports: ["9090:9090"]
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:13.1.1
+    restart: unless-stopped
+    ports: ["3007:3000"]   # 3000-3006 are taken by the services
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-ecom}
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+
   # Application services live behind the `app` profile so `docker compose up`
   # brings up only infra by default:  docker compose --profile app up -d hello
   hello:
@@ -261,6 +286,9 @@ services:
       GRANTS_TTL_MS: 60000
       COOKIE_SECURE: "false"
       PORT: 8000
+      # Deliberately not published: Prometheus reaches gateway:9464 over the compose
+      # network, and /metrics stays unreachable from the host.
+      METRICS_PORT: 9464
     ports: ["8000:8000"]
     depends_on:
       identity: { condition: service_healthy }

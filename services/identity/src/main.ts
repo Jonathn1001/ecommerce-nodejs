@@ -9,6 +9,7 @@ import {
   startOutboxRelay,
   startLedgerPruner,
   createLogger,
+  createMetrics,
   gracefulShutdown,
 } from "@ecom/shared";
 
@@ -30,7 +31,8 @@ async function main() {
     intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
   });
 
-  const app = createApp();
+  const metrics = createMetrics("identity", { defaultMetrics: true });
+  const app = createApp({ metrics });
   const server = app.listen(config.PORT, () =>
     log.info("identity_listening", { port: config.PORT })
   );

@@ -1,6 +1,12 @@
 import express from "express";
 import { z } from "zod";
-import { traceMiddleware, createLogger, createHealthRouter } from "@ecom/shared";
+import {
+  traceMiddleware,
+  createLogger,
+  createHealthRouter,
+  createMetrics,
+  type Metrics,
+} from "@ecom/shared";
 import { prisma } from "./db";
 import { placeOrder } from "./place-order";
 import { placeOrderTx } from "./tx-adapters";
@@ -23,11 +29,14 @@ function userIdOf(req: express.Request): string | null {
 }
 
 export function createApp(
-  deps: { sseRegistry?: SubscriberRegistry } = {}
+  deps: { sseRegistry?: SubscriberRegistry; metrics?: Metrics } = {}
 ): express.Application {
+  const metrics = deps.metrics ?? createMetrics("order");
   const app = express();
   app.use(express.json());
   app.use(traceMiddleware());
+  app.use(metrics.httpMiddleware());
+  app.use(metrics.router());
 
   app.use(
     createHealthRouter({

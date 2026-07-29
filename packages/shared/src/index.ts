@@ -8,6 +8,7 @@ export * from "./rabbitmq";
 export * from "./outbox";
 export * from "./config";
 export * from "./health";
+export * from "./metrics";
 export * from "./retry";
 export * from "./lifecycle";
 export * from "./ledger-pruner";

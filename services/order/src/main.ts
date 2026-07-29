@@ -2,7 +2,8 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { ledgerPrunerPort } from "./prune-adapter";
-import { handleEvent } from "./consumer";
+import { handleEvent, setSagaMetrics } from "./consumer";
+import { createSagaMetrics } from "./metrics";
 import { handleCatalogEvent } from "./catalog-projection";
 import { createOrderListener } from "./sse-listener";
 import { prisma } from "./db";
@@ -14,6 +15,7 @@ import {
   startLedgerPruner,
   createRabbit,
   createLogger,
+  createMetrics,
   gracefulShutdown,
 } from "@ecom/shared";
 import { CHARGE_PAYMENT } from "@ecom/contracts";
@@ -22,6 +24,8 @@ const log = createLogger("order-main");
 const CHARGE_QUEUE = "payment.charge";
 
 async function main() {
+  const metrics = createMetrics("order", { defaultMetrics: true });
+  setSagaMetrics(createSagaMetrics(metrics.registry));
   const kafka = createKafka("order");
   const producer = createProducer(kafka);
   await producer.connect();
@@ -42,13 +46,17 @@ async function main() {
   });
 
   // Consume BOTH the inventory result and the payment result.
-  const consumer = createConsumer(kafka, "order-consumers");
+  const consumer = createConsumer(kafka, "order-consumers", metrics.kafkaHooks);
   await consumer.connect();
   await consumer.run(["inventory.events", "payment.events"], handleEvent);
 
   // Separate consumer group for the catalog read-model projection — its own
   // offsets, independent of the saga consumer above.
-  const catalogConsumer = createConsumer(kafka, "order-catalog-projection");
+  const catalogConsumer = createConsumer(
+    kafka,
+    "order-catalog-projection",
+    metrics.kafkaHooks
+  );
   await catalogConsumer.connect();
   await catalogConsumer.run(["catalog.events"], handleCatalogEvent);
 
@@ -57,7 +65,7 @@ async function main() {
     intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
   });
 
-  const app = createApp({ sseRegistry: listener.registry });
+  const app = createApp({ sseRegistry: listener.registry, metrics });
   const server = app.listen(config.PORT, () =>
     log.info("order_listening", { port: config.PORT })
   );

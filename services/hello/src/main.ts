@@ -13,6 +13,7 @@ import {
   createConsumer,
   startOutboxRelay,
   createLogger,
+  createMetrics,
   gracefulShutdown,
   getRedis,
 } from "@ecom/shared";
@@ -21,16 +22,17 @@ const log = createLogger("hello-main");
 const TOPIC = "hello.events";
 
 async function main() {
+  const metrics = createMetrics("hello", { defaultMetrics: true });
   const kafka = createKafka("hello");
   const producer = createProducer(kafka);
   await producer.connect();
   const relay = startOutboxRelay(outboxPort, producer, () => TOPIC, { intervalMs: 500 });
 
-  const consumer = createConsumer(kafka, "hello-consumers");
+  const consumer = createConsumer(kafka, "hello-consumers", metrics.kafkaHooks);
   await consumer.connect();
   await consumer.run([TOPIC], handleEvent);
 
-  const app = createApp();
+  const app = createApp({ metrics });
   const server = app.listen(config.PORT, () =>
     log.info("hello_listening", { port: config.PORT })
   );

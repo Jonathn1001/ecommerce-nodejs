@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type RequestHandler } from "express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -6,7 +6,9 @@ import {
   traceMiddleware,
   createLogger,
   createHealthRouter,
+  createMetrics,
   TRACE_HEADER,
+  type Metrics,
 } from "@ecom/shared";
 import { authenticate, stripIdentityHeaders } from "./auth-middleware";
 import { authorize } from "./authz";
@@ -35,6 +37,10 @@ export type GatewayDeps = {
   cookieSecure: boolean;
   breaker: { timeoutMs: number; resetMs: number };
   fetchImpl?: typeof fetch;
+  // Optional so pre-existing tests that build GatewayDeps by hand keep compiling unmodified;
+  // main.ts always supplies its one real instance. The RED router lives on a SEPARATE
+  // listener (main.ts) — createApp mounts only httpMiddleware(), never router().
+  metrics?: Metrics;
 };
 
 // No CSRF token exists yet at the auth entry points, and the payment webhook is a
@@ -44,6 +50,7 @@ const CSRF_EXEMPT = [/^\/auth\/(login|register|refresh)$/, /^\/webhooks\/payment
 export function createApp(deps: GatewayDeps): express.Application {
   const app = express();
   const doFetch = deps.fetchImpl ?? fetch;
+  const metrics = deps.metrics ?? createMetrics("gateway");
 
   // Express matches mounts case-insensitively by default and hands the path through as
   // typed, so `POST /Products` would miss the RBAC table while still reaching catalog (which
@@ -55,6 +62,9 @@ export function createApp(deps: GatewayDeps): express.Application {
   app.use(helmet());
   app.use(cookieParser());
   app.use(traceMiddleware());
+  // RED data only — the scrape surface (metrics.router()) is mounted on the separate
+  // METRICS_PORT listener in main.ts, never here (see GatewayDeps.metrics doc comment).
+  app.use(metrics.httpMiddleware());
   // FIRST, always: a client must not be able to hand a service an identity.
   app.use(stripIdentityHeaders());
   // traceMiddleware only sets req.traceId and a RESPONSE header; forward it so a request
@@ -177,10 +187,19 @@ export function createApp(deps: GatewayDeps): express.Application {
   const breakers = new Map<string, ReturnType<typeof guardWithBreaker>>();
   const guard = (name: string, target: string) => {
     const existing = breakers.get(name);
-    if (existing) return existing;
-    const handler = guardWithBreaker(name, createUpstreamProxy(target), deps.breaker);
-    breakers.set(name, handler);
-    return handler;
+    const handler =
+      existing ?? guardWithBreaker(name, createUpstreamProxy(target), deps.breaker);
+    if (!existing) breakers.set(name, handler);
+    // There is no Express route pattern for a proxy mount, so the raw upstream path must
+    // never become the `route` label (its cardinality grows with every order id and every
+    // scanned URL). req.baseUrl is the registered mount itself — a bounded literal like
+    // "/orders" — and `name` is the upstream this call is guarding.
+    const wrapped: RequestHandler = (req, res, next) => {
+      res.locals.metricsRoute = req.baseUrl;
+      res.locals.metricsUpstream = name;
+      return handler(req, res, next);
+    };
+    return wrapped;
   };
 
   // Static-key-only deployments never carry a kid: `keyFor` is skipped (no jwks configured)

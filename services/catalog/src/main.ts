@@ -7,6 +7,7 @@ import {
   createProducer,
   startOutboxRelay,
   createLogger,
+  createMetrics,
   gracefulShutdown,
 } from "@ecom/shared";
 
@@ -19,7 +20,8 @@ async function main() {
   const relay = startOutboxRelay(outboxPort, producer, () => "catalog.events", {
     intervalMs: 500,
   });
-  const app = createApp();
+  const metrics = createMetrics("catalog", { defaultMetrics: true });
+  const app = createApp({ metrics });
   const server = app.listen(config.PORT, () =>
     log.info("catalog_listening", { port: config.PORT })
   );

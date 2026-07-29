@@ -2,7 +2,8 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { ledgerPrunerPort } from "./prune-adapter";
-import { handleOrderEvent } from "./consumer";
+import { handleOrderEvent, setReservationMetrics } from "./consumer";
+import { createReservationMetrics } from "./metrics";
 import { startExpirySweeper } from "./sweeper";
 import { prisma } from "./db";
 import {
@@ -12,6 +13,7 @@ import {
   startOutboxRelay,
   startLedgerPruner,
   createLogger,
+  createMetrics,
   gracefulShutdown,
   closeRedis,
 } from "@ecom/shared";
@@ -20,6 +22,8 @@ const log = createLogger("inventory-main");
 const ORDER_TOPIC = "order.events";
 
 async function main() {
+  const metrics = createMetrics("inventory", { defaultMetrics: true });
+  setReservationMetrics(createReservationMetrics(metrics.registry));
   const kafka = createKafka("inventory");
   const producer = createProducer(kafka);
   await producer.connect();
@@ -34,7 +38,7 @@ async function main() {
     }
   );
 
-  const consumer = createConsumer(kafka, "inventory-consumers");
+  const consumer = createConsumer(kafka, "inventory-consumers", metrics.kafkaHooks);
   await consumer.connect();
   await consumer.run([ORDER_TOPIC], handleOrderEvent);
 
@@ -45,7 +49,7 @@ async function main() {
     intervalMs: config.LEDGER_PRUNE_INTERVAL_MS,
   });
 
-  const app = createApp();
+  const app = createApp({ metrics });
   const server = app.listen(config.PORT, () =>
     log.info("inventory_listening", { port: config.PORT })
   );

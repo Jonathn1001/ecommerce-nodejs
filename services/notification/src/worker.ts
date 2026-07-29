@@ -4,6 +4,7 @@ import { prisma } from "./db";
 import { renderTemplate } from "./templates";
 import { SendEmailPayloadSchema } from "./commands";
 import type { Mailer } from "./mailer";
+import type { NotificationMetrics } from "./metrics";
 
 const log: Logger = createLogger("notification-worker");
 
@@ -20,16 +21,26 @@ export interface WorkerPort {
   casSent(id: string): Promise<number>; // updateMany where status=PENDING -> SENT; returns count
 }
 
+// `record` is optional so every existing call site and test keeps compiling with 3 args.
 export async function applySend(
   port: WorkerPort,
   mailer: Mailer,
-  notificationId: string
+  notificationId: string,
+  record?: (type: string, result: "sent" | "skipped" | "failed") => void
 ): Promise<"SENT" | "SKIP"> {
   const row = await port.loadRow(notificationId);
   if (row === null || row.status === "SENT") return "SKIP"; // redelivery / dedup
+  // Stays above the try: renderTemplate throws for any unmapped type, so only the three
+  // mapped template types can reach a record() call and the `type` label stays bounded.
   const { subject, html } = renderTemplate(row.type, { orderId: row.orderId });
-  await mailer.send({ to: row.to, subject, html }); // throws -> caller retries -> DLQ; row stays PENDING
+  try {
+    await mailer.send({ to: row.to, subject, html }); // throws -> caller retries -> DLQ; row stays PENDING
+  } catch (e) {
+    record?.(row.type, "failed");
+    throw e; // rethrow unchanged: the retry/DLQ behaviour must not change
+  }
   const n = await port.casSent(notificationId);
+  record?.(row.type, n > 0 ? "sent" : "skipped");
   return n > 0 ? "SENT" : "SKIP"; // a concurrent worker won the CAS
 }
 
@@ -50,10 +61,11 @@ const workerPort: WorkerPort = {
   },
 };
 
-export function makeHandleSendEmail(mailer: Mailer) {
+export function makeHandleSendEmail(mailer: Mailer, metrics?: NotificationMetrics) {
   return async function handleSendEmail(env: EventEnvelope): Promise<void> {
     const { notificationId } = SendEmailPayloadSchema.parse(env.payload);
-    const outcome = await applySend(workerPort, mailer, notificationId);
+    // metrics.observe is an arrow closing over its counter, so the bare reference is safe.
+    const outcome = await applySend(workerPort, mailer, notificationId, metrics?.observe);
     log.info("send_email_handled", { notificationId, outcome, traceId: env.traceId });
   };
 }
