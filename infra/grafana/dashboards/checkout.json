@@ -44,6 +44,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Error ratio",
+      "description": "The `or … * 0` on the numerator is load-bearing. With no 5xx in the window the numerator is an empty vector, and empty/x is empty — so a perfectly healthy service would render \"No data\", indistinguishable from a broken metric. The zero-valued fallback carries the same labels, so a healthy service reads 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -62,7 +63,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (service) (rate(http_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(http_requests_total[5m]))",
+          "expr": "(sum by (service) (rate(http_requests_total{status=~\"5..\"}[5m])) or sum by (service) (rate(http_requests_total[5m])) * 0) / sum by (service) (rate(http_requests_total[5m]))",
           "legendFormat": "{{service}}",
           "refId": "A",
           "datasource": {
