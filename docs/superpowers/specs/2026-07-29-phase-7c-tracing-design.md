@@ -79,9 +79,11 @@ The same experiment showed the preload module is evaluated **more than once** un
 once per loader thread plus once on the main thread. A bootstrap that calls `sdk.start()`
 unconditionally would therefore register duplicate exporters and duplicate instrumentations.
 
-`tracing.ts` guards on a module-level flag stored on `globalThis`, so that repeat evaluations
-in separate module registries still see the first one's mark. A unit test asserts a second
-evaluation is a no-op.
+`tracing.ts` guards on a flag stored on `globalThis`. It must be `globalThis` and not a
+module-local boolean: the repeat evaluations happen in **separate module registries**, where a
+module-local flag is a fresh `false` every time and guards nothing. A unit test asserts a second
+evaluation is a no-op — and the reason is written here because the obvious "simplification" back
+to a module-scoped variable would pass review and silently restore the bug.
 
 **Consequence, deliberate:** a service run bare on the host — every test, every ad-hoc
 `pnpm dev` — has no `NODE_OPTIONS` and therefore exports no spans. That is the correct
@@ -96,8 +98,8 @@ enabled set is explicit, not default:
 | Instrumentation | State | Why |
 |---|---|---|
 | `http`, `express` | **on** | The sync seam: gateway → service, and the gateway's own proxy hops. |
-| `@prisma/instrumentation` | **on** | Prisma's query engine does **not** go through node-postgres, so `instrumentation-pg` sees nothing. Prisma needs its own instrumentation to emit query spans. |
-| `redis-4` | **on** | Inventory's distributed lock is a real latency source worth seeing. Note the client is node-redis (`redis@^4.7.0`, `packages/shared/src/redis.ts:1`), **not** ioredis — they need different instrumentations and the wrong one silently emits nothing. |
+| `@prisma/instrumentation@^6.19` | **on** | Prisma's query engine does **not** go through node-postgres, so `instrumentation-pg` sees nothing. Prisma needs its own instrumentation to emit query spans. **Pin the 6.x line**: latest is 7.9.1, but every service pins `@prisma/client: ^6.1.0`, and this package tracks Prisma's major — so it is an upgrade-in-lockstep dependency, not a free-floating one. |
+| `@opentelemetry/instrumentation-redis` | **on** | Inventory's distributed lock is a real latency source worth seeing. Two naming traps here, both checked against npm rather than assumed: the client is node-redis (`redis@^4.7.0`, `packages/shared/src/redis.ts:1`) and **not** ioredis, and the once-correct `instrumentation-redis-4` is now **deprecated** in favour of `instrumentation-redis`, which covers v4+. The wrong package in either direction installs cleanly and silently emits nothing. |
 | `kafkajs`, `amqplib` | **OFF** | Load-bearing decision — see A3. |
 | `fs`, `dns`, `net` | **off** | Noise. `fs` in particular buries a trace in hundreds of spans. |
 
@@ -124,7 +126,11 @@ All standard OTel env vars, no bespoke config schema:
 - `OTEL_SERVICE_NAME` — set per service in compose; becomes the Jaeger service name.
 - `OTEL_EXPORTER_OTLP_ENDPOINT` — `http://jaeger:4318`, OTLP over HTTP.
 - `OTEL_TRACES_SAMPLER` — `parentbased_always_on` by default. 7d will lower this under k6
-  load; making it an env var now means 7d needs no code change.
+  load; making it an env var now means 7d needs no code change. Note there is a **standing
+  span floor** independent of request traffic: seven outbox relays poll every 500ms and the
+  DLQ poller every 15s, so an idle stack still emits spans continuously. Task 1 should record
+  the idle span rate — it is the number 7d needs to pick a sampling ratio, and it is far
+  cheaper to measure now than under load.
 - Absent `NODE_OPTIONS`, none of this is read at all.
 
 ---
@@ -179,13 +185,26 @@ with `.partial({ userId: true })` or they would retry 3× and dead-letter foreve
 `traceparent` would do exactly that to every event in flight during the 7c deploy.
 
 Broker headers were the alternative and were rejected: this system round-trips events through
-places headers do not survive. The `Outbox` row is JSON in Postgres. The DLQ park path
-republishes the **raw value** (`kafka.ts:117`). `moveDlqOnce` replays that raw value. Putting
-the context inside the envelope makes it survive all three for free; putting it in headers
-means adding and maintaining header plumbing on each of those paths.
+three places headers do not survive, and the three differ from each other:
 
-Every `Outbox` table gains a nullable `traceparent String?` column — seven migrations, one
-per outbox-owning service (all but gateway, which has no database).
+- The `Outbox` row is **JSON in Postgres** — there is no header channel at all.
+- The Kafka DLQ park republishes the **raw bytes** (`kafka.ts:117`), so anything not inside
+  those bytes is gone.
+- `moveDlqOnce` **re-parses through the schema** — `EventEnvelopeSchema.parse(JSON.parse(...))`
+  at `rabbitmq.ts:137` — so it round-trips declared fields and drops everything else.
+
+The envelope survives all three for free. Headers survive none of them, and the third case is
+the subtle one: a header-based design would look correct right up until a message went through
+DLQ replay, which is exactly when an operator most wants the trace.
+
+`makeEnvelope` (`packages/shared/src/outbox.ts:39-49`) is the **only** constructor on the relay
+path, so its input type gains `traceparent` too. A change to the schema that misses the builder
+would leave the field declared and never populated — the failure mode this note exists to
+prevent.
+
+Every `Outbox` table gains a nullable `traceparent String?` column — **seven** migrations, one
+per outbox-owning service. Verified: hello, inventory, order, payment, catalog, notification and
+identity each declare `model Outbox`; gateway has no `prisma/` directory and no database.
 
 ### C3. Span shape across the seam
 
@@ -209,6 +228,19 @@ Three properties this buys, each of which is the point:
    the original business operation, not to a previous replay.
 3. A consumer that writes its own outbox row repeats the pattern, so the chain extends
    through the full saga without special-casing any hop.
+
+**Both brokers, not just Kafka.** The diagram shows the Kafka hop, but the Done-when's
+`…→ payment →…` leg travels over **RabbitMQ** (`ChargePayment` on the `payment.charge` work
+queue), so `rabbitmq.ts`'s `sendCommand`/`consumeCommands` get the identical treatment. The
+Rabbit path is the one most likely to be skipped precisely because it is not the one drawn.
+
+**Replay re-parents to the original, deliberately.** Because the stored row keeps the business
+span's context, a row replayed days later joins the *original* trace rather than starting a
+fresh one. This is the intended behaviour — the causal question "what did this order do" stays
+answerable — but it has a consequence worth stating: the sibling spans may already have aged out
+of Jaeger's retention, so a replayed message can land in a trace that renders nearly empty. The
+alternative (re-root on replay) loses the causal link permanently, which is the worse trade for
+a system whose whole DLQ story is "replay it later".
 
 ### C4. Failure behaviour
 
@@ -234,7 +266,9 @@ justifies it.
 
 - `4317`/`4318` (OTLP) are reached **in-network** at `jaeger:4318` and are deliberately **not
   published** to the host — same posture as the gateway's metrics port in 7b.
-- `16686` (UI) is published.
+- `16686` (UI) is published. Check it is free before assuming: this machine's unrelated
+  `eda-platform` stack already collides with the ecom stack on 5432, 9090, 4318 and 1025/8025,
+  and 7b had to remap three of those. 16686 has not been checked.
 - Prod overlay resets the UI port with `!reset []`, like every other operator-facing surface.
 - `docs/infra.md` gains the endpoint row and the `--profile app` note that already applies to
   Prometheus and Grafana.
