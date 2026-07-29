@@ -36,7 +36,6 @@ describe("rabbit consumer context", () => {
       traceparent: TP,
     });
     const ctx = consumerContextFor(env);
-    const { trace, context } = require("@opentelemetry/api");
     expect(trace.getSpanContext(ctx)!.traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
   });
 
