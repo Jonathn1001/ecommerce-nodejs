@@ -2,7 +2,8 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { ledgerPrunerPort } from "./prune-adapter";
-import { handleChargePayment } from "./consumer";
+import { handleChargePayment, setPaymentMetrics } from "./consumer";
+import { createPaymentMetrics } from "./metrics";
 import { prisma } from "./db";
 import {
   createKafka,
@@ -20,6 +21,7 @@ const CHARGE_QUEUE = "payment.charge";
 
 async function main() {
   const metrics = createMetrics("payment", { defaultMetrics: true });
+  setPaymentMetrics(createPaymentMetrics(metrics.registry));
   const kafka = createKafka("payment");
   const producer = createProducer(kafka);
   await producer.connect();

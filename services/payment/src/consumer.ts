@@ -7,8 +7,17 @@ import {
 import { prisma } from "./db";
 import { chargeOrder } from "./charge";
 import { chargeTx } from "./tx-adapters";
+import type { PaymentMetrics } from "./metrics";
 
 const log: Logger = createLogger("payment-consumer");
+
+const NOOP_PAYMENT: PaymentMetrics = { observe: () => {} };
+let payment: PaymentMetrics = NOOP_PAYMENT;
+
+// main.ts injects the real one; the no-op default keeps every existing test untouched.
+export function setPaymentMetrics(m: PaymentMetrics): void {
+  payment = m;
+}
 
 // ChargePaymentPayloadSchema (the exported contract) requires userId — every command Order
 // enqueues from now on carries it. But a command already sitting in the queue, or replayed
@@ -37,5 +46,11 @@ export async function handleChargePayment(env: EventEnvelope): Promise<void> {
       amount,
     })
   );
+  // Recorded after the transaction resolves, so a rollback counts nothing. Spelled out
+  // per outcome rather than lowercasing: DUPLICATE and ALREADY_CHARGED are idempotency
+  // short-circuits, not charge attempts, and must fall through silently.
+  if (outcome === "SUCCEEDED") payment.observe("succeeded");
+  else if (outcome === "FAILED") payment.observe("failed");
+  else if (outcome === "PROCESSING") payment.observe("processing");
   log.info("charge_handled", { orderId, outcome, traceId: env.traceId });
 }

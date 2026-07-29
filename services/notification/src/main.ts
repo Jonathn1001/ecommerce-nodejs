@@ -4,6 +4,7 @@ import { outboxPort } from "./outbox-adapter";
 import { ledgerPrunerPort } from "./prune-adapter";
 import { handleOrderEvent } from "./consumer";
 import { makeHandleSendEmail } from "./worker";
+import { createNotificationMetrics } from "./metrics";
 import { createMailer } from "./mailer";
 import { prisma } from "./db";
 import {
@@ -44,7 +45,11 @@ async function main() {
 
   // Worker: consume the notifications queue (prefetch-bounded).
   const mailer = createMailer({ host: config.SMTP_HOST, port: config.SMTP_PORT });
-  await rabbit.consumeCommands(QUEUE, makeHandleSendEmail(mailer), { maxRetries: 3 });
+  await rabbit.consumeCommands(
+    QUEUE,
+    makeHandleSendEmail(mailer, createNotificationMetrics(metrics.registry)),
+    { maxRetries: 3 }
+  );
 
   const pruner = startLedgerPruner(ledgerPrunerPort, {
     retentionDays: config.LEDGER_RETENTION_DAYS,
