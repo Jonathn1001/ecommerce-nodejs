@@ -15,6 +15,7 @@ import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { RedisInstrumentation } from "@opentelemetry/instrumentation-redis";
 import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { createLogger as createWinston, format, transports } from "winston";
+import { isMainThread } from "node:worker_threads";
 
 // Inlined rather than imported from "./logger" — see note above. Same shape/output
 // as the shared logger (structured JSON on stdout via winston).
@@ -41,22 +42,39 @@ declare global {
   var __ecomTracingStarted__: boolean | undefined;
 }
 
-// Must live on globalThis, NOT in a module-local variable. The tsx loader evaluates
-// this module more than once, in SEPARATE module registries — a module-local flag is
-// a fresh `false` each time and guards nothing, so the SDK would register duplicate
-// exporters and duplicate instrumentations.
+// Skip entirely on a non-main thread before touching any guard state. Only the
+// main thread of a process ever runs application code in this codebase (none of
+// the 8 services spawn worker_threads for request handling). tsx's own loader
+// machinery, however, uses a real worker_threads.Worker internally (its esbuild
+// transform service) — and because that worker is itself spun up from a process
+// whose NODE_OPTIONS still says --import file://tracing.ts, this module gets
+// evaluated inside it too, on a thread that will never carry a single span.
+// Skipping there is a correctness improvement, not just noise reduction: a
+// Worker's globalThis is private to that thread, so its SDK/exporter/instrumentation
+// instances would otherwise be unreachable dead weight for the process's entire
+// lifetime. If a service ever starts using worker_threads for real application
+// work, this line is exactly what to revisit (fix round 1; see task-2-report.md
+// for the probe that found tsx's transform worker logging tracing_started).
 //
-// globalThis alone is not sufficient, though: verified in Step 6 that `tsx <file>`
-// re-execs itself into a CHILD process (its own respawn-with-loader-flags pattern),
-// and NODE_OPTIONS applies to that child too — so this module evaluates a second
-// time in a genuinely separate process with its own globalThis, which no in-process
-// flag can see across. process.env, unlike globalThis, both survives this module's
-// own re-evaluation AND is inherited by that spawned child (env is copied at spawn
-// time), so it is the guard that actually covers the case this file is loaded for.
+// The remaining guard must live on globalThis, NOT a module-local variable. The
+// tsx loader evaluates this module more than once, in SEPARATE module registries
+// — a module-local flag is a fresh `false` each time and guards nothing, so the
+// SDK would register duplicate exporters and duplicate instrumentations.
+//
+// Deliberately NOT process.env: env is inherited by a spawned CHILD process, and
+// tsx respawns `tsx <file>` into exactly such a child (its own respawn-with-
+// loader-flags pattern). An env-based guard set by the parent would be seen as
+// already-true by the child — the one process that actually runs application
+// code — and skip starting its SDK there, leaving tracing silently dead in the
+// process that matters (caught in fix round 1; see task-2-report.md). Each OS
+// process that runs code must start its own SDK: under `tsx src/main.ts` that's
+// legitimately two processes (the tsx CLI's own bootstrap, then the child it
+// respawns into to actually run src/main.ts), so two "tracing_started" lines
+// per service start is the expected, correct count — not a duplicate start.
 function start(): void {
-  if (globalThis.__ecomTracingStarted__ || process.env.__ECOM_TRACING_STARTED__) return;
+  if (!isMainThread) return;
+  if (globalThis.__ecomTracingStarted__) return;
   globalThis.__ecomTracingStarted__ = true;
-  process.env.__ECOM_TRACING_STARTED__ = "true";
 
   try {
     const sdk = new NodeSDK({
@@ -74,7 +92,10 @@ function start(): void {
         /* shutdown telemetry must never delay or fail process exit */
       });
     });
-    log.info("tracing_started", { service: process.env.OTEL_SERVICE_NAME ?? "unknown" });
+    log.info("tracing_started", {
+      service: process.env.OTEL_SERVICE_NAME ?? "unknown",
+      pid: process.pid,
+    });
   } catch (e) {
     // Global constraint 1: instrumentation must never take the process down.
     log.warn("tracing_start_failed", { message: (e as Error).message });

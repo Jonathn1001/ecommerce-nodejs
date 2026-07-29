@@ -1,6 +1,35 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 describe("tracing bootstrap", () => {
+  afterEach(() => {
+    // Leave both the mock registry and the module cache clean: the next test's
+    // plain `import("../tracing")` (no resetModules of its own) must see a truly
+    // fresh, unmocked evaluation, not the cached instance built under the mock.
+    vi.doUnmock("node:worker_threads");
+    vi.resetModules();
+  });
+
+  it("does not start the SDK on a non-main thread (e.g. tsx's own transform worker)", async () => {
+    // Fix round 1: tsx's --import hook itself uses a worker_threads.Worker
+    // internally (its esbuild transform service), and because NODE_OPTIONS still
+    // points at this file, that worker evaluates it too — on a thread that will
+    // never carry a single span. A probe against the real preload mechanism
+    // (see task-2-report.md) found this module logging tracing_started from
+    // inside that worker. Starting a real SDK/exporter there is unreachable
+    // dead weight for the process's lifetime, so start() must bail out before
+    // touching any guard state when it isn't the main thread.
+    vi.doMock("node:worker_threads", () => ({ isMainThread: false, threadId: 7 }));
+    // Start from a clean slate: a prior test in this file may already have set
+    // this via a real (main-thread) import, and that must not mask a broken skip.
+    globalThis.__ecomTracingStarted__ = undefined;
+
+    vi.resetModules();
+    const mod = await import("../tracing");
+
+    expect(mod.tracingStarted()).toBe(false);
+    expect(globalThis.__ecomTracingStarted__).not.toBe(true);
+  });
+
   it("is idempotent — a second evaluation does not start a second SDK", async () => {
     const first = await import("../tracing");
     expect(first.tracingStarted()).toBe(true);
