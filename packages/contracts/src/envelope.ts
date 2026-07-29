@@ -8,6 +8,9 @@ export const EventEnvelopeSchema = z.object({
   occurredAt: z.string().datetime(),
   traceId: z.string().min(1),
   producer: z.string().min(1),
+  // Optional by design: an event minted before Phase 7c carries none, and a required
+  // field would retry-then-dead-letter every event in flight during the deploy.
+  traceparent: z.string().optional(),
   payload: z.unknown(),
 });
 
@@ -21,6 +24,7 @@ export function makeEnvelope(input: {
   payload: unknown;
   eventId?: string;
   occurredAt?: string;
+  traceparent?: string;
 }): EventEnvelope {
   return {
     eventId: input.eventId ?? uuidv4(),
@@ -29,6 +33,7 @@ export function makeEnvelope(input: {
     occurredAt: input.occurredAt ?? new Date().toISOString(),
     traceId: input.traceId,
     producer: input.producer,
+    ...(input.traceparent ? { traceparent: input.traceparent } : {}),
     payload: input.payload,
   };
 }
