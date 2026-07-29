@@ -44,6 +44,13 @@ Phase 7's Done-when has four criteria. Two are met:
   across the services, landed by 7a's Task 4. The Phase 7 prose still lists it under 7d; the
   absorption map already records it correctly. Prose corrected in §F.
 - **Alertmanager.** See §D3 — deliberate cut, not an oversight.
+- **The roadmap's "7d hygiene" backlog rows**, enumerated here rather than left ambiguous:
+  splitting `SubscriberRegistry` into its own file plus the SSE 404-test guard
+  (`roadmap.md:155`), dropping catalog's dead `ProcessedEvent` table (`roadmap.md:157`), and the
+  3b-review minor polish (`roadmap.md:160`). All three are tagged *opportunistic* in the map, none
+  is required by Phase 7's Done-when, and none is touched by the verification work. They stay in
+  the backlog with their existing rows. Named explicitly because this section claims to be stated
+  "so nobody assumes otherwise," and silence on rows the map points at this slice would break that.
 - Any business-logic change. Every pre-existing test must pass unmodified.
 
 ---
@@ -90,11 +97,29 @@ check.
 | 2 | No order both `CANCELLED` **and** carrying a `SUCCEEDED` payment | **The sharpest "double effects" check**: money taken for an order the customer was told was cancelled. Cross-service, so no constraint can enforce it. |
 | 3 | For one `orderId`, no `Reservation` rows split across `CONSUMED` and `RELEASED` | `Reservation.orderId` is only `@@index`ed, not unique (`services/inventory/prisma/schema.prisma:26,34`), so an order genuinely has one row per product line and they can diverge. Consuming a released reservation is the oversell bug 3b closed. |
 | 4 | No `Outbox` row with `sentAt IS NULL` after the relay has drained | **The "no lost effects" half.** A row stuck unsent is an event the world never saw. Nothing enforces it. |
-| 5 | DLQ depth is zero after a clean run, and exactly the injected count after C3 | Catches the mishandled-duplicate case above: an idempotent redelivery that parks instead of no-op'ing shows up here and nowhere else. |
+| 5 | DLQ depth is zero after a clean run, and exactly the injected count after C3 | Catches the mishandled-duplicate case above: an idempotent redelivery that parks instead of no-op'ing shows up here and nowhere else. **Not a SQL query — see A1a.** |
 | 6 | Every `CONFIRMED` order has a `SUCCEEDED` payment and all its reservations `CONSUMED` | The cross-service consistency the saga exists to provide, and the only invariant that requires reading more than one database. |
 
 Invariants 2 and 6 are why the checker reads all seven databases rather than being seven
 per-service assertions — they are the ones a split-brain outcome trips.
+
+### A1a. Invariant 5 is not a SQL query, and the checker has two sources
+
+Design review caught this: a parked poison message lands in a **Kafka topic** (`${topic}.dlq`,
+`packages/shared/src/kafka.ts:178-181`), not a Postgres row. No SQL can answer "DLQ depth," and
+it cannot be seeded into a fixture database the way invariants 1-4 and 6 can.
+
+The checker therefore has two sources, and this is stated up front rather than discovered during
+implementation:
+
+- **Postgres**, via `pg`, for invariants 1, 2, 3, 4 and 6.
+- **A Kafka admin client**, via `kafkajs` — already a dependency of `packages/shared`
+  (`packages/shared/package.json:24`, `^2.2.4`), so no new package — for invariant 5's Kafka DLQ
+  topics. RabbitMQ's DLQ depth is already exposed by 7b's `rabbitmq_dlq_depth` gauge and its
+  `queueDepth` helper, so the Rabbit half reuses that rather than adding an amqplib admin path.
+
+Invariant 5's test is correspondingly different from the others: it seeds a real DLQ message
+rather than a fixture row. §H reflects that.
 
 ### A2. Drain-awareness
 
@@ -110,8 +135,17 @@ and the suite would be untrustworthy in exactly the scenario it exists for.
 
 ## B. k6 — load against the SLOs
 
-`k6/checkout.js`, run through the pinned `grafana/k6` container joined to the compose network,
-so it addresses `http://gateway:8000` directly and no host port is involved.
+`k6/checkout.js`, run through **`grafana/k6:0.55.0`** — pinned, matching how 7b pinned Prometheus
+and Grafana and 7c pinned Jaeger. It is invoked ad hoc rather than added as a compose service,
+because it is a tool you run rather than something that should come up with `docker compose up`:
+
+```bash
+docker run --rm --network ecom-platform_default \
+  -v "$PWD/k6:/scripts" grafana/k6:0.55.0 run /scripts/checkout.js
+```
+
+Joining the compose network lets it address `http://gateway:8000` directly, so no host port is
+involved and the collisions that have dogged every slice on this machine do not apply.
 
 ### B1. The flow
 
@@ -142,6 +176,19 @@ that first observes a terminal status. It is **not** `http_req_duration` — the
 dominated by the relay's ≤500 ms poll interval and the broker hops, none of which appear in any
 single HTTP call. Measuring the wrong thing here would make the p99 threshold meaningless.
 
+**The poll interval is 250 ms, and it is a stated part of the measurement, not an afterthought.**
+A client-side poll can only resolve the saga's end to within one interval, so every sample
+carries up to 250 ms of positive bias — 5% of the 5 s threshold. That is tolerable; a 1 s poll,
+adding up to 20%, would not be, and could flip a compliant run to a failure on measurement noise
+alone.
+
+**Cross-validated against the metric that already exists.** 7b ships `saga_duration_seconds`, a
+histogram Order records server-side after commit with sub-millisecond precision
+(7b design §C3). The runbook has the k6 run report its own p99 **beside**
+`histogram_quantile(0.99, saga_duration_seconds_bucket)` from Prometheus for the same window. If
+the two disagree by more than the poll interval, the k6 harness is wrong — and that comparison is
+the only thing standing between a plausible number and a correct one.
+
 A threshold breach exits non-zero. That is what makes "k6 meets the SLOs" a testable claim.
 
 ### B3. Honest limits, stated in the runbook
@@ -163,6 +210,24 @@ later without its caveat.
 | C1 | `docker compose stop kafka`, ~15s, restart | The outbox relay retries rather than dropping, consumers rebound after rebalance, and no order is stranded. **This is the roadmap's Done-when case.** |
 | C2 | `docker compose stop inventory`, ~15s, restart | A mid-saga service outage: orders pile at `PENDING`, then drain. Inventory is the interesting target because its reservation has a TTL and a sweeper, so a long enough outage exercises the compensation path rather than just a delay. |
 | C3 | Publish a malformed envelope to `order.events` | The Phase 3b parse fix: a poison message parks to the DLQ and the partition **keeps moving**. Asserted by confirming later valid messages still process — the check that distinguishes "parked" from "stalled". |
+| C4 | `docker compose stop order`, sustained, restart | **The only scenario that produces gateway-visible errors** — see below. Order is proxied at `/cart` and `/orders`, so stopping it makes the gateway return 5xx on real checkout traffic. This is what drives error-budget burn and validates §D's alerts. |
+
+**C4 exists because design review found the alert-validation story broken.** The gateway proxies
+only `order`, `catalog` and `payment` (`services/gateway/src/app.ts:216-237`) — **there is no
+`/inventory` mount at all**. So:
+
+- C1 stops Kafka, but `POST /orders` (`services/order/src/app.ts:130`) is a pure local Postgres
+  transaction that defers publishing to the outbox — the request still succeeds.
+- C2 stops inventory, which the gateway never calls synchronously.
+- C3 drives no HTTP traffic whatsoever.
+
+None of them move a single gateway error counter. The original spec cited
+`app.ts:117,124,138,163` as evidence that "stopping an upstream returns 502", but those are the
+hand-rolled `/auth/*` → identity paths, and identity is never stopped by any scenario. The code
+that *does* return 5xx for a stopped proxied upstream is `services/gateway/src/proxy.ts:92-103`:
+**503** once the breaker opens, **504** on timeout, **502** while unreachable. All three match the
+`status=~"5.."` selector the burn-rate rules use, so the selector is fine — what was missing was
+any scenario that reached it.
 
 Failures are injected with `docker compose stop`/`start`. Toxiproxy was considered and rejected:
 it would require rewriting every service's broker URL to point at a proxy, touching the compose
@@ -195,9 +260,21 @@ Multi-window, multi-burn-rate, over the metrics 7b already ships:
 
 | Alert | Windows | Burn rate | Meaning |
 |---|---|---|---|
-| `CheckoutErrorBudgetFastBurn` | 5m **and** 1h | 14.4× | Budget gone in ~2 days — page-worthy |
-| `CheckoutErrorBudgetSlowBurn` | 30m **and** 6h | 6× | Budget gone in ~5 days — ticket-worthy |
-| `CheckoutLatencySLOBreach` | 30m | — | p95 over 500 ms, sustained |
+| `CheckoutErrorBudgetFastBurn` | 1m **and** 15m | 14.4× | Budget burning fast — page-worthy |
+| `CheckoutErrorBudgetSlowBurn` | 5m **and** 1h | 6× | Budget burning steadily — ticket-worthy |
+| `CheckoutLatencySLOBreach` | 5m | — | p95 over 500 ms, sustained |
+
+**The windows are scaled down from the textbook values, deliberately.** Google's canonical
+multi-window burn rate uses 5m/1h and 30m/6h, sized for a service with continuous production
+traffic. This stack is a laptop that sees traffic only while someone is running k6 or chaos. With
+the textbook windows the fast-burn alert **could never fire in any run anyone would sit through**
+— a 1h window cannot be moved by a 30-second outage — so the alerts would ship unvalidated,
+which is the exact "untested alert is decoration" outcome 7b deferred them here to avoid.
+
+Shortening to 1m/15m and 5m/1h keeps the two-window structure, which is the part worth learning,
+while making the alerts fireable — and therefore testable — within a demo. The runbook states the
+textbook values alongside, so the deviation is visible rather than looking like ignorance of the
+standard.
 
 The two-window requirement on each burn alert is the point of the pattern: a single short window
 fires on any brief blip, and a single long window is too slow to matter. Requiring both to breach
@@ -209,18 +286,22 @@ rule would be simpler and would teach nothing.
 An untested alert is decoration; that is 7b's stated reason for deferring these here, so shipping
 them unfired would defeat the deferral.
 
-**The chaos suite supplies the breach.** Stopping an upstream makes the gateway return **502**
-— verified, not assumed: `services/gateway/src/app.ts:117,124,138,163` all return 502 when an
-upstream is unreachable. That matches the `status=~"5.."` selector the burn-rate rules use, so
-the real error rate climbs past the budget without any synthetic error endpoint, and the alert is
-validated against the same failure the chaos suite already induces.
+**Scenario C4 supplies the breach** — and only C4. Stopping `order` while checkout traffic runs
+makes the gateway return 5xx from `proxy.ts:92-103` (503 open circuit / 504 timeout / 502
+unreachable, all matching `status=~"5.."`). No synthetic error endpoint is needed, and the alert
+is validated against a failure the chaos suite induces anyway.
 
 Validation asserts on Prometheus's `ALERTS{alertname="…",alertstate="firing"}` series.
 
-One consequence to design around: the fast-burn alert requires **both** a 5m and a 1h window to
-breach. A 15-second outage will not move a 1h window far enough. Alert validation therefore needs
-either a longer induced outage or rules whose windows are shortened for the validation run — the
-plan must pick one explicitly rather than discovering it when the assertion silently never fires.
+Two things the plan must honour, both discovered in review rather than during implementation:
+
+1. **The outage must outlast the long window.** With the scaled windows above, fast-burn needs
+   both 1m and 15m breaching, so C4's outage runs for **~2 minutes** with traffic flowing
+   throughout — long enough to move a 15m rate meaningfully past the 14.4× threshold. A
+   15-second blip will not do it.
+2. **Traffic must keep flowing during the outage.** An error *rate* needs a denominator. If the
+   load generator stops when requests start failing, the rate goes flat instead of climbing and
+   the alert never fires — a failure mode that looks exactly like a broken rule.
 
 ### D3. No Alertmanager — a deliberate cut
 
@@ -276,9 +357,12 @@ The lesson this phase has repeatedly paid for: **a check that cannot fail proves
 plan-supplied tests in 7c would have passed against broken implementations. Every artifact here
 gets a discrimination proof.
 
-- **Invariant checker** — unit tests over a fixture database with each violation seeded in turn.
-  Six invariants, six tests that each fail if their query is removed. This is the highest-value
+- **Invariant checker** — for invariants 1, 2, 3, 4 and 6: unit tests over a fixture database with
+  each violation seeded in turn, each failing if its query is removed. This is the highest-value
   test surface in the slice, because every other artifact trusts the checker's verdict.
+  **Invariant 5 is tested differently** — it reads a Kafka topic, not a table (§A1a), so its test
+  publishes a real message to a `.dlq` topic and asserts the checker sees it. Seeding it into a
+  fixture database is impossible, and a test that pretended otherwise would be checking nothing.
 - **Drain-wait** — a test where drain never completes, asserting the checker reports what was in
   flight and exits non-zero rather than hanging or passing.
 - **k6 thresholds** — verified by running with a deliberately impossible threshold (`p(95)<1`) and
