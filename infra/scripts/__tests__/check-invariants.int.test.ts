@@ -5,6 +5,20 @@ import { runInvariants } from "../check-invariants";
 
 const PG = process.env.PGBASE ?? "postgresql://ecom:ecom@localhost:5433";
 
+// Mirrors the checker's own OUTBOX_DATABASES (infra/scripts/check-invariants.ts) — kept as a
+// separate literal here on purpose. The whole point of Important-2's fix is a test that would
+// fail if the checker's list were wrong, so the test cannot derive its expectation from the
+// same list it's supposed to be checking.
+const OUTBOX_DATABASES = [
+  "hello",
+  "inventory",
+  "order",
+  "payment",
+  "catalog",
+  "notification",
+  "identity",
+];
+
 async function sql(db: string, text: string, params: unknown[] = []) {
   const c = new Client({ connectionString: `${PG}/${db}` });
   await c.connect();
@@ -23,10 +37,12 @@ describe("invariant checker — single-database invariants (integration)", () =>
 
   afterAll(async () => {
     await sql("order", `DELETE FROM "Order" WHERE "userId" = $1`, [`inv-${tag}`]);
-    await sql("order", `DELETE FROM "Outbox" WHERE producer = $1`, [`inv-${tag}`]);
     await sql("inventory", `DELETE FROM "Reservation" WHERE "orderId" LIKE $1`, [
       `inv-${tag}%`,
     ]);
+    for (const db of OUTBOX_DATABASES) {
+      await sql(db, `DELETE FROM "Outbox" WHERE producer = $1`, [`inv-${tag}`]);
+    }
   });
 
   it("clean system reports no violations", async () => {
@@ -34,15 +50,31 @@ describe("invariant checker — single-database invariants (integration)", () =>
     expect(v).toEqual([]);
   });
 
-  it("INV1: flags an order stuck in a non-terminal state", async () => {
+  it("INV1: flags orders stuck in AWAITING_PAYMENT and in PENDING", async () => {
+    // Both non-terminal states in CHECKS[0].sql's IN (...) list get their own seeded row.
+    // Asserting only the invariant name showed up (as the original test did) would still pass
+    // if the query narrowed to a single status — asserting each seeded id is among the
+    // reported rows is what actually exercises both arms.
+    const awaitingId = randomUUID();
+    const pendingId = randomUUID();
     await sql(
       "order",
       `INSERT INTO "Order" (id, "userId", status, "totalPrice", "createdAt", "updatedAt")
        VALUES ($1, $2, 'AWAITING_PAYMENT', 100, now(), now())`,
-      [randomUUID(), `inv-${tag}`]
+      [awaitingId, `inv-${tag}`]
+    );
+    await sql(
+      "order",
+      `INSERT INTO "Order" (id, "userId", status, "totalPrice", "createdAt", "updatedAt")
+       VALUES ($1, $2, 'PENDING', 100, now(), now())`,
+      [pendingId, `inv-${tag}`]
     );
     const v = await runInvariants({ pgBase: PG, skipDlq: true });
-    expect(v.map((x) => x.invariant)).toContain("INV1_ORDER_TERMINAL");
+    const inv1 = v.find((x) => x.invariant === "INV1_ORDER_TERMINAL");
+    expect(inv1).toBeDefined();
+    const flaggedIds = (inv1!.rows as Array<{ id: string }>).map((r) => r.id);
+    expect(flaggedIds).toContain(awaitingId);
+    expect(flaggedIds).toContain(pendingId);
   });
 
   it("INV3: flags one order whose reservations split CONSUMED and RELEASED", async () => {
@@ -59,14 +91,23 @@ describe("invariant checker — single-database invariants (integration)", () =>
     expect(v.map((x) => x.invariant)).toContain("INV3_RESERVATION_SPLIT");
   });
 
-  it("INV4: flags an outbox row left unsent", async () => {
+  // One row per outbox-owning database, not just `order` — a check that only ever exercises
+  // 1 of the 7 databases in OUTBOX_DATABASES would not notice one of the other 6 being dropped
+  // or typo'd. Each iteration is scoped to its own db, so cumulative rows left by earlier
+  // iterations (cleaned up in afterAll, not between iterations) never leak into a later
+  // iteration's assertion.
+  it.each(OUTBOX_DATABASES)("INV4: flags an outbox row left unsent in %s", async (db) => {
+    const id = randomUUID();
     await sql(
-      "order",
+      db,
       `INSERT INTO "Outbox" (id, "aggregateType", "aggregateId", type, version, "traceId", producer, payload, "occurredAt")
        VALUES ($1, 'order', $2, 'order.placed', 1, 't', $3, '{}'::jsonb, now())`,
-      [randomUUID(), `inv-${tag}`, `inv-${tag}`]
+      [id, `inv-${tag}`, `inv-${tag}`]
     );
     const v = await runInvariants({ pgBase: PG, skipDlq: true });
-    expect(v.map((x) => x.invariant)).toContain("INV4_OUTBOX_UNSENT");
+    const hit = v.find((x) => x.invariant === "INV4_OUTBOX_UNSENT" && x.database === db);
+    expect(hit).toBeDefined();
+    const flaggedIds = (hit!.rows as Array<{ id: string }>).map((r) => r.id);
+    expect(flaggedIds).toContain(id);
   });
 });
