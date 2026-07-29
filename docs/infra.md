@@ -31,6 +31,7 @@ before migrating or running the service:
 | Mailpit    | http://localhost:8025   | SMTP on 1025; see below       |
 | Prometheus | http://localhost:9090   | `/targets`; needs `--profile app` |
 | Grafana    | http://localhost:3007   | admin / `GRAFANA_PASSWORD` from `.env` |
+| Jaeger     | http://localhost:16686  | traces; needs `--profile app` |
 
 Grafana is on **3007**, not its usual 3000 — the services already occupy 3000-3006.
 Both are provisioned from disk (`infra/grafana/provisioning`), so the Prometheus
@@ -53,6 +54,12 @@ docker compose --profile app up -d
 Prometheus and Grafana are deliberately **not** in the `app` profile: monitoring the
 stack is useful while you are bringing services up one at a time, so they come up with
 infra.
+
+Traces are exported to `jaeger:4318` over the compose network; the OTLP ports
+(4317/4318) are deliberately unpublished, so nothing on the host can post spans
+directly — only the Jaeger UI on 16686 is reachable. A `traceId` from any service's
+log line is the search term to paste into the Jaeger UI to pull up that request's
+trace.
 
 **Your local `docker-compose.yml` can drift behind `docker-compose.example.yml`.**
 It is your own gitignored copy (`cp docker-compose.example.yml docker-compose.yml`
