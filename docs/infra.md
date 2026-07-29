@@ -29,7 +29,7 @@ before migrating or running the service:
 | Rabbit UI  | http://localhost:15672  | user/pass from `.env`         |
 | Redis      | localhost:6379          |                               |
 | Mailpit    | http://localhost:8025   | SMTP on 1025; see below       |
-| Prometheus | http://localhost:9090   | `/targets` lists all 8 scrapes |
+| Prometheus | http://localhost:9090   | `/targets`; needs `--profile app` |
 | Grafana    | http://localhost:3007   | admin / `GRAFANA_PASSWORD` from `.env` |
 
 Grafana is on **3007**, not its usual 3000 — the services already occupy 3000-3006.
@@ -39,6 +39,20 @@ nothing to import by hand. Prometheus scrapes each service on its **container** 
 and the gateway on `METRICS_PORT` (9464) rather than 8000 — the gateway's `/metrics`
 lives on a separate, deliberately unpublished port, so it is reachable from inside the
 compose network only.
+
+**Prometheus and Grafana start with plain `docker compose up -d`, but the eight
+things they scrape do not.** The services sit behind the `app` profile (see "First
+run" above), so an infra-only boot leaves every Prometheus target `down` and every
+dashboard panel on "No data" — which looks like a broken dashboard and is not one.
+To see data:
+
+```bash
+docker compose --profile app up -d
+```
+
+Prometheus and Grafana are deliberately **not** in the `app` profile: monitoring the
+stack is useful while you are bringing services up one at a time, so they come up with
+infra.
 
 **Your local `docker-compose.yml` can drift behind `docker-compose.example.yml`.**
 It is your own gitignored copy (`cp docker-compose.example.yml docker-compose.yml`
