@@ -36,6 +36,23 @@ describe("invariant checker — single-database invariants (integration)", () =>
   const tag = randomUUID().slice(0, 8);
 
   afterAll(async () => {
+    // Payments before orders, and the order-id list must be fetched from the `order`
+    // database first: "order" and "payment" are separate Postgres databases on the same
+    // server, so a subselect against "Order" cannot run inside a query against `payment`
+    // (no cross-database join). Fetch the tagged ids, then delete payments by id, then
+    // delete the orders — reversing the last two steps leaves payment rows behind that
+    // fail the next run's clean-baseline test.
+    const taggedOrders = await sql(
+      "order",
+      `SELECT id FROM "Order" WHERE "userId" = $1`,
+      [`inv-${tag}`]
+    );
+    const taggedOrderIds = taggedOrders.rows.map((r) => (r as { id: string }).id);
+    if (taggedOrderIds.length > 0) {
+      await sql("payment", `DELETE FROM "Payment" WHERE "orderId" = ANY($1::text[])`, [
+        taggedOrderIds,
+      ]);
+    }
     await sql("order", `DELETE FROM "Order" WHERE "userId" = $1`, [`inv-${tag}`]);
     await sql("inventory", `DELETE FROM "Reservation" WHERE "orderId" LIKE $1`, [
       `inv-${tag}%`,
@@ -109,5 +126,34 @@ describe("invariant checker — single-database invariants (integration)", () =>
     expect(hit).toBeDefined();
     const flaggedIds = (hit!.rows as Array<{ id: string }>).map((r) => r.id);
     expect(flaggedIds).toContain(id);
+  });
+
+  it("INV2: flags an order CANCELLED while its payment SUCCEEDED", async () => {
+    const orderId = randomUUID();
+    await sql(
+      "order",
+      `INSERT INTO "Order" (id, "userId", status, "totalPrice", "createdAt", "updatedAt")
+       VALUES ($1, $2, 'CANCELLED', 100, now(), now())`,
+      [orderId, `inv-${tag}`]
+    );
+    await sql(
+      "payment",
+      `INSERT INTO "Payment" (id, "orderId", amount, status, "createdAt", "updatedAt")
+       VALUES ($1, $2, 100, 'SUCCEEDED', now(), now())`,
+      [randomUUID(), orderId]
+    );
+    const v = await runInvariants({ pgBase: PG, skipDlq: true });
+    expect(v.map((x) => x.invariant)).toContain("INV2_CANCELLED_BUT_PAID");
+  });
+
+  it("INV6: flags a CONFIRMED order with no SUCCEEDED payment", async () => {
+    await sql(
+      "order",
+      `INSERT INTO "Order" (id, "userId", status, "totalPrice", "createdAt", "updatedAt")
+       VALUES ($1, $2, 'CONFIRMED', 100, now(), now())`,
+      [randomUUID(), `inv-${tag}`]
+    );
+    const v = await runInvariants({ pgBase: PG, skipDlq: true });
+    expect(v.map((x) => x.invariant)).toContain("INV6_CONFIRMED_INCOMPLETE");
   });
 });

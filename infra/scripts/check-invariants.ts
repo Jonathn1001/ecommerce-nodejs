@@ -73,5 +73,41 @@ export async function runInvariants(opts: InvariantOpts): Promise<Violation[]> {
       violations.push({ invariant: "INV4_OUTBOX_UNSENT", database: db, rows });
   }
 
+  // Cross-service: these read two databases, so they cannot be table-driven like CHECKS.
+  // Read the id sets and intersect in memory — the databases are separate servers'
+  // logical DBs with no cross-database join available.
+  const cancelled = (await query(
+    `${opts.pgBase}/order`,
+    `SELECT id FROM "Order" WHERE status = 'CANCELLED'`
+  )) as { id: string }[];
+  const confirmed = (await query(
+    `${opts.pgBase}/order`,
+    `SELECT id FROM "Order" WHERE status = 'CONFIRMED'`
+  )) as { id: string }[];
+  const succeeded = new Set(
+    (
+      (await query(
+        `${opts.pgBase}/payment`,
+        `SELECT "orderId" FROM "Payment" WHERE status = 'SUCCEEDED'`
+      )) as { orderId: string }[]
+    ).map((r) => r.orderId)
+  );
+
+  const paidButCancelled = cancelled.filter((o) => succeeded.has(o.id));
+  if (paidButCancelled.length > 0)
+    violations.push({
+      invariant: "INV2_CANCELLED_BUT_PAID",
+      database: "order+payment",
+      rows: paidButCancelled,
+    });
+
+  const confirmedUnpaid = confirmed.filter((o) => !succeeded.has(o.id));
+  if (confirmedUnpaid.length > 0)
+    violations.push({
+      invariant: "INV6_CONFIRMED_INCOMPLETE",
+      database: "order+payment",
+      rows: confirmedUnpaid,
+    });
+
   return violations;
 }
