@@ -105,6 +105,15 @@ describe("traceId derives from the active span", () => {
     expect((req as { traceId: string }).traceId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("prefers the active span's trace id over a simultaneously-present x-trace-id header", () => {
+    const HEADER_TRACE_ID = "legacy-header-should-lose";
+    const req = { header: () => HEADER_TRACE_ID, method: "GET", path: "/x" } as never;
+    const res = { setHeader: () => {} } as never;
+    withSpan(() => traceMiddleware()(req, res, () => {}));
+    expect((req as { traceId: string }).traceId).toBe(TRACE_ID);
+    expect((req as { traceId: string }).traceId).not.toBe(HEADER_TRACE_ID);
+  });
+
   it("currentTraceparent serializes the active span context", () => {
     expect(withSpan(() => currentTraceparent())).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);
   });

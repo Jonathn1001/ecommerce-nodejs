@@ -15,17 +15,21 @@ declare global {
   }
 }
 
+// The sentinel @opentelemetry/api's no-op tracer returns when no SDK/TracerProvider
+// is registered in the current process — i.e. "no real span," not a real trace id.
+const NO_ACTIVE_SPAN_TRACE_ID = "00000000000000000000000000000000";
+
 // The active span's trace id IS the traceId now, so a log line pastes straight into
 // Jaeger. With no active span — every test run, and any service started without the
 // NODE_OPTIONS preload — fall back to the old uuid so nothing that works today stops.
 function activeTraceId(): string | undefined {
   const sc = trace.getSpanContext(context.active());
-  return sc && sc.traceId !== "00000000000000000000000000000000" ? sc.traceId : undefined;
+  return sc && sc.traceId !== NO_ACTIVE_SPAN_TRACE_ID ? sc.traceId : undefined;
 }
 
 export function currentTraceparent(): string | undefined {
   const sc = trace.getSpanContext(context.active());
-  if (!sc || sc.traceId === "00000000000000000000000000000000") return undefined;
+  if (!sc || sc.traceId === NO_ACTIVE_SPAN_TRACE_ID) return undefined;
   return `00-${sc.traceId}-${sc.spanId}-${sc.traceFlags.toString(16).padStart(2, "0")}`;
 }
 
