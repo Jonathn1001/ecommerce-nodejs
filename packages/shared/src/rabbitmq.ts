@@ -155,7 +155,7 @@ export async function createRabbit(
   async function queueDepth(queue: string): Promise<number> {
     try {
       if (!pollCh) {
-        pollCh = await conn.createChannel();
+        const opened = await conn.createChannel();
         // amqplib emits 'error' on a channel-level close (e.g. checkQueue's 404 for a
         // missing queue) IN ADDITION to rejecting the pending RPC. With zero listeners,
         // Node's EventEmitter throws synchronously inside amqplib's frame-dispatch loop;
@@ -164,7 +164,18 @@ export async function createRabbit(
         // connection (every channel on it, including `ch`) instead of just this one.
         // A listener here is required for "dedicated channel" to actually contain the
         // failure; the catch below already handles the rejection.
-        pollCh.on("error", () => {});
+        opened.on("error", (e: Error) => {
+          // Clearing the handle here, not only in the catch below, is what makes an
+          // IDLE death recoverable: a broker-initiated close with no queueDepth call
+          // in flight has no pending RPC to reject, so the catch never runs and this
+          // would otherwise stay pointing at a dead channel — close() would then throw
+          // IllegalOperationError and never reach ch.close()/conn.close().
+          // Guarded on identity so a late error from a superseded channel cannot
+          // discard its replacement.
+          if (pollCh === opened) pollCh = null;
+          log.warn("poll_channel_error", { message: e.message });
+        });
+        pollCh = opened;
       }
       const info = await pollCh.checkQueue(queue);
       return info.messageCount;
@@ -177,7 +188,14 @@ export async function createRabbit(
   async function close(): Promise<void> {
     lifecycle.markClosing(); // graceful teardown must not trip the restart handler
     if (pollCh) {
-      await pollCh.close();
+      // Belt-and-braces around the listener above: the channel can still die between
+      // the check and this call. Releasing the metrics channel must never be the reason
+      // the command lane and the connection are left open.
+      try {
+        await pollCh.close();
+      } catch (e) {
+        log.warn("poll_channel_close_failed", { message: (e as Error).message });
+      }
       pollCh = null;
     }
     await ch.close();

@@ -199,6 +199,17 @@ describe("rabbitmq wrapper (integration — needs docker compose up)", () => {
       await rabbit.assertWorkQueue(queue);
       expect(await rabbit.queueDepth(`${queue}.dlq`)).toBe(0);
     });
+
+    // Regression for the shutdown leak: close() must tear the connection down even
+    // when the poll channel is already dead. The idle broker-initiated close that
+    // motivates the fix is not reachable through the public API (pollCh is closure
+    // -local), but the missing-queue path leaves the same observable state — a
+    // channel the broker has closed — so this at least pins that close() survives it.
+    it("close() still tears the connection down after the poll channel was closed by the broker", async () => {
+      const own = await createRabbit();
+      await expect(own.queueDepth(`no-such-queue-${Date.now()}`)).rejects.toThrow();
+      await expect(own.close()).resolves.toBeUndefined();
+    });
   });
 
   // NOTE: kept last deliberately — it mutates process.env.RABBITMQ_URL for the duration
