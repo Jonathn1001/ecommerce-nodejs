@@ -151,10 +151,12 @@ anything from shared.
 
 ```bash
 pnpm --filter @ecom/shared add @opentelemetry/api @opentelemetry/sdk-node \
-  @opentelemetry/auto-instrumentations-node @opentelemetry/exporter-trace-otlp-http \
-  @opentelemetry/instrumentation-redis @opentelemetry/resources \
-  @opentelemetry/semantic-conventions
+  @opentelemetry/exporter-trace-otlp-http @opentelemetry/instrumentation-http \
+  @opentelemetry/instrumentation-express @opentelemetry/instrumentation-redis \
+  @opentelemetry/resources @opentelemetry/semantic-conventions
 pnpm --filter @ecom/shared add @prisma/instrumentation@^6.19
+# Test-only: Tasks 6 and 7 assert on spans with an in-memory exporter, which lives here.
+pnpm --filter @ecom/shared add -D @opentelemetry/sdk-trace-node
 ```
 
 Verify `@prisma/instrumentation` resolved to a 6.x, not 7.x:
@@ -163,14 +165,20 @@ Verify `@prisma/instrumentation` resolved to a 6.x, not 7.x:
 - [ ] **Step 2: Write the failing test**
 
 ```ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 describe("tracing bootstrap", () => {
   it("is idempotent — a second evaluation does not start a second SDK", async () => {
     const first = await import("../tracing");
     expect(first.tracingStarted()).toBe(true);
-    // Re-import with a busted module cache, the way the tsx loader re-evaluates it.
-    const second = await import(`../tracing?reload=${Date.now()}`);
+
+    // Re-evaluate the module with a cleared registry — this is what the tsx loader
+    // does, and it is the case a module-local flag would fail to guard. Use
+    // vi.resetModules(), NOT an `import("../tracing?query")` cache-buster: vitest
+    // resolves that through its own transform pipeline and it does not reliably
+    // produce a second evaluation.
+    vi.resetModules();
+    const second = await import("../tracing");
     expect(second.tracingStarted()).toBe(true);
     expect(globalThis.__ecomTracingStarted__).toBe(true);
   });
