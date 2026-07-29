@@ -1,10 +1,16 @@
 import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
+import { trace, context, propagation, SpanKind } from "@opentelemetry/api";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
 import type { KafkaMetricsHooks } from "./metrics";
 
 const log = createLogger("kafka");
+// Resolved lazily (NOT cached at module scope) — see outbox.ts's `tracer()` for why:
+// a ProxyTracer obtained before a TracerProvider registers stays permanently unbound.
+function tracer() {
+  return trace.getTracer("@ecom/shared/kafka");
+}
 
 export function createKafka(clientId: string): Kafka {
   return new Kafka({
@@ -74,7 +80,34 @@ export function createConsumer(kafka: Kafka, groupId: string, hooks?: KafkaMetri
           try {
             const env = EventEnvelopeSchema.parse(JSON.parse(raw));
             const started = process.hrtime.bigint();
-            await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+            // Rebuild a context from the envelope's traceparent (the relay's own span,
+            // stamped in Task 6's outbox.ts — not the original business span). Never
+            // throws: a malformed value from an older or untrusted producer yields the
+            // active context, which starts a fresh trace rather than rejecting the message.
+            const parent = (() => {
+              try {
+                return env.traceparent
+                  ? propagation.extract(context.active(), {
+                      traceparent: env.traceparent,
+                    })
+                  : context.active();
+              } catch {
+                return context.active();
+              }
+            })();
+            await context.with(parent, async () => {
+              const span = tracer().startSpan(`${topic} process`, {
+                kind: SpanKind.CONSUMER,
+              });
+              // IDs only — never the payload (Global Constraint 9).
+              span.setAttribute("messaging.message.id", env.eventId);
+              span.setAttribute("messaging.destination.name", topic);
+              try {
+                await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+              } finally {
+                span.end();
+              }
+            });
             // Recording is wrapped SEPARATELY from the handler's try. Unwrapped, a throwing
             // hook would fall into the DLQ catch below and park a message whose handler
             // already succeeded.

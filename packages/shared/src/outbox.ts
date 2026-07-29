@@ -1,7 +1,17 @@
+import { trace, context, propagation, SpanKind } from "@opentelemetry/api";
 import { makeEnvelope, type EventEnvelope } from "@ecom/contracts";
 import { createLogger } from "./logger";
 
 const log = createLogger("outbox");
+// Resolved lazily (NOT cached at module scope) — trace.getTracer() returns a
+// ProxyTracer that permanently binds to whatever provider is registered at the
+// moment it's first asked for a span. Caching it in a module-level const risks
+// binding it to a no-op provider if this module is imported before a
+// TracerProvider registers (exactly what a test file that imports drainOutbox
+// before calling `new NodeTracerProvider(...).register()` would trigger).
+function tracer() {
+  return trace.getTracer("@ecom/shared/outbox");
+}
 
 export type OutboxRow = {
   id: string;
@@ -51,6 +61,46 @@ function toEnvelope(row: OutboxRow): EventEnvelope {
   });
 }
 
+// Rebuild a context from the stored traceparent. Never throws: a malformed value from an
+// older or untrusted producer yields the active context, which starts a fresh trace.
+function contextFromRow(row: OutboxRow) {
+  try {
+    return row.traceparent
+      ? propagation.extract(context.active(), { traceparent: row.traceparent })
+      : context.active();
+  } catch {
+    return context.active();
+  }
+}
+
+// Wraps a single relayed send (Kafka publish or Rabbit sendCommand) in a PRODUCER span
+// parented to the row's STORED context. The outgoing envelope's traceparent is then
+// overwritten with THIS span's own context, so the consumer parents to the relay — not
+// to the original business operation — and the polling delay shows up as the gap
+// between the business span ending and this one starting. The stored row itself is
+// never mutated: a replayed row still re-parents to the original business operation.
+async function publishWithSpan<T>(
+  row: OutboxRow,
+  spanName: string,
+  send: (envelope: EventEnvelope) => Promise<T>
+): Promise<T> {
+  const envelope = toEnvelope(row);
+  const parent = contextFromRow(row);
+  return context.with(parent, async () => {
+    const span = tracer().startSpan(spanName, { kind: SpanKind.PRODUCER });
+    try {
+      const carrier: Record<string, string> = {};
+      propagation.inject(trace.setSpan(context.active(), span), carrier);
+      const outgoing = carrier.traceparent
+        ? { ...envelope, traceparent: carrier.traceparent }
+        : envelope;
+      return await send(outgoing);
+    } finally {
+      span.end();
+    }
+  });
+}
+
 export async function drainOutbox(
   port: OutboxPort,
   producer: ProducerPort,
@@ -80,10 +130,20 @@ export async function drainOutbox(
   };
   // Lanes are independent: a Rabbit outage must not wedge the Kafka rows.
   const results = await Promise.allSettled([
-    lane(kafkaRows, (r) => producer.publish(topicFor(r.aggregateType), toEnvelope(r))),
+    lane(kafkaRows, (r) => {
+      const topic = topicFor(r.aggregateType);
+      return publishWithSpan(r, `${topic} publish`, (envelope) =>
+        producer.publish(topic, envelope)
+      );
+    }),
     lane(
       rabbitRows.map((r) => r.row),
-      (r) => commands!.sender.sendCommand(queueById.get(r.id)!, toEnvelope(r))
+      (r) => {
+        const queue = queueById.get(r.id)!;
+        return publishWithSpan(r, `${queue} send`, (envelope) =>
+          commands!.sender.sendCommand(queue, envelope)
+        );
+      }
     ),
   ]);
   for (const r of results) {
