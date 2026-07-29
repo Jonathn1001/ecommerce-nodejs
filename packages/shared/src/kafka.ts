@@ -1,13 +1,18 @@
 import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
-import { trace, context, propagation, SpanKind } from "@opentelemetry/api";
+import { trace, context, propagation, SpanKind, type Span } from "@opentelemetry/api";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
 import type { KafkaMetricsHooks } from "./metrics";
 
 const log = createLogger("kafka");
-// Resolved lazily (NOT cached at module scope) — see outbox.ts's `tracer()` for why:
-// a ProxyTracer obtained before a TracerProvider registers stays permanently unbound.
+// Resolved lazily (NOT cached at module scope). See outbox.ts's `tracer()` for the
+// full repro: under Vitest, this file's ESM `import` of @opentelemetry/api and
+// @opentelemetry/sdk-trace-node's internal CJS `require()` of it resolve to two
+// separate TraceAPI singletons (verified by object-identity comparison), so a
+// ProxyTracer obtained here before a test's NodeTracerProvider.register() runs would
+// bind to a side that never receives the delegate. Resolving at span-creation time
+// (well after any registration) avoids that. Production is unaffected.
 function tracer() {
   return trace.getTracer("@ecom/shared/kafka");
 }
@@ -96,16 +101,30 @@ export function createConsumer(kafka: Kafka, groupId: string, hooks?: KafkaMetri
               }
             })();
             await context.with(parent, async () => {
-              const span = tracer().startSpan(`${topic} process`, {
-                kind: SpanKind.CONSUMER,
-              });
-              // IDs only — never the payload (Global Constraint 9).
-              span.setAttribute("messaging.message.id", env.eventId);
-              span.setAttribute("messaging.destination.name", topic);
+              // Global Constraint 1: span creation (and the attribute calls right
+              // after it) is wrapped — a throw here must never skip the handler call
+              // below. Unwrapped, it would propagate out of this context.with(),
+              // land in the outer try's catch, and park a message whose handler was
+              // never even invoked: exactly what Global Constraint 2 forbids.
+              let span: Span | undefined;
+              try {
+                span = tracer().startSpan(`${topic} process`, {
+                  kind: SpanKind.CONSUMER,
+                });
+                // IDs only — never the payload (Global Constraint 9).
+                span.setAttribute("messaging.message.id", env.eventId);
+                span.setAttribute("messaging.destination.name", topic);
+              } catch {
+                span = undefined;
+              }
               try {
                 await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
               } finally {
-                span.end();
+                try {
+                  span?.end();
+                } catch {
+                  /* span teardown must never affect message handling */
+                }
               }
             });
             // Recording is wrapped SEPARATELY from the handler's try. Unwrapped, a throwing
