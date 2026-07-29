@@ -876,7 +876,27 @@ case "$SCENARIO" in
     # The valid order placed AFTER the poison message must still reach a terminal
     # state. That is what distinguishes "parked" from "stalled partition"; a suite
     # that only checked the DLQ count would pass against a wedged consumer.
-    assert_clean || true   # INV5 is EXPECTED to report exactly one DLQ message here
+    #
+    # This scenario expects EXACTLY ONE violation — INV5, reporting the one message
+    # we parked on purpose. It must assert that shape, not swallow the result:
+    # `assert_clean || true` would make the scenario pass no matter what happened,
+    # which is the "check that cannot fail" defect this plan's Global Constraint 1
+    # exists to prevent.
+    PGBASE="$PGBASE" npx tsx -e '
+      import { runInvariants } from "./infra/scripts/check-invariants";
+      const v = await runInvariants({ pgBase: process.env.PGBASE!, waitForDrainSeconds: 60 });
+      const names = v.map((x) => x.invariant).sort();
+      // Exactly one violation, and it is the DLQ one. Anything else — a stalled
+      // partition leaving orders non-terminal, an unsent outbox row — fails here.
+      if (names.length !== 1 || names[0] !== "INV5_DLQ_NOT_EMPTY") {
+        console.error("expected exactly [INV5_DLQ_NOT_EMPTY], got:", JSON.stringify(v, null, 2));
+        process.exit(1);
+      }
+      const depths = v[0].rows as { topic: string; depth: number }[];
+      const total = depths.reduce((n, d) => n + d.depth, 0);
+      if (total !== 1) { console.error(`expected exactly 1 parked message, got ${total}`); process.exit(1); }
+      console.log("poison parked, partition kept moving");
+    '
     ;;
 esac
 ```
