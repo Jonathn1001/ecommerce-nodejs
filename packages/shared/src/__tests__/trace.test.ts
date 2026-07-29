@@ -1,7 +1,26 @@
 import { describe, it, expect, vi } from "vitest";
 import express from "express";
 import request from "supertest";
-import { traceMiddleware, TRACE_HEADER } from "../trace";
+import { context, trace, SpanContext, TraceFlags } from "@opentelemetry/api";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { traceMiddleware, TRACE_HEADER, currentTraceparent } from "../trace";
+
+// @opentelemetry/api's default ContextManager (used whenever nothing has called
+// context.setGlobalContextManager) is a no-op: `context.with(ctx, fn)` just calls
+// `fn()` without ever making `ctx` the active context, so `context.active()` inside
+// `fn` would keep returning the empty ROOT_CONTEXT no matter what was passed to
+// `.with()`. A real ContextManager has to be registered for the "active span" tests
+// below to mean anything. Production processes get one for free from tracing.ts's
+// NodeSDK.start() (Task 2's preload); this test file has none of that, so it
+// registers its own tracer provider — test-only setup. `trace.ts` itself must stay
+// a side-effect-free library import (see Task 2's index.ts boundary note), so this
+// does NOT belong there. @opentelemetry/sdk-trace-node is already a devDependency
+// (added in Task 2 for the later relay/kafka/rabbit span tests), so nothing new
+// needs installing. Registering twice in the same process is already relied on
+// elsewhere in this suite (tracing.unit.test.ts's idempotency test re-runs
+// sdk.start() after a module reset) and is harmless: @opentelemetry/api logs and
+// ignores a duplicate registration rather than throwing.
+new NodeTracerProvider().register();
 
 // Winston's Console transport writes via `console._stdout.write(...)`, and
 // under Vitest `console._stdout` is Vitest's own capture stream, not
@@ -54,5 +73,43 @@ describe("traceMiddleware", () => {
     expect(serialized).not.toContain("user@example.com");
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("SECRET50");
+  });
+});
+
+const TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
+const SPAN_ID = "00f067aa0ba902b7";
+
+function withSpan<T>(fn: () => T): T {
+  const sc: SpanContext = {
+    traceId: TRACE_ID,
+    spanId: SPAN_ID,
+    traceFlags: TraceFlags.SAMPLED,
+    isRemote: false,
+  };
+  const ctx = trace.setSpanContext(context.active(), sc);
+  return context.with(ctx, fn);
+}
+
+describe("traceId derives from the active span", () => {
+  it("uses the active span's trace id, not a fresh uuid", () => {
+    const req = { header: () => undefined, method: "GET", path: "/x" } as never;
+    const res = { setHeader: () => {} } as never;
+    withSpan(() => traceMiddleware()(req, res, () => {}));
+    expect((req as { traceId: string }).traceId).toBe(TRACE_ID);
+  });
+
+  it("falls back to a uuid when there is no active span (every test run)", () => {
+    const req = { header: () => undefined, method: "GET", path: "/x" } as never;
+    const res = { setHeader: () => {} } as never;
+    traceMiddleware()(req, res, () => {});
+    expect((req as { traceId: string }).traceId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("currentTraceparent serializes the active span context", () => {
+    expect(withSpan(() => currentTraceparent())).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);
+  });
+
+  it("currentTraceparent is undefined with no active span", () => {
+    expect(currentTraceparent()).toBeUndefined();
   });
 });
