@@ -29,6 +29,16 @@ before migrating or running the service:
 | Rabbit UI  | http://localhost:15672  | user/pass from `.env`         |
 | Redis      | localhost:6379          |                               |
 | Mailpit    | http://localhost:8025   | SMTP on 1025; see below       |
+| Prometheus | http://localhost:9090   | `/targets` lists all 8 scrapes |
+| Grafana    | http://localhost:3007   | admin / `GRAFANA_PASSWORD` from `.env` |
+
+Grafana is on **3007**, not its usual 3000 — the services already occupy 3000-3006.
+Both are provisioned from disk (`infra/grafana/provisioning`), so the Prometheus
+datasource and the "Checkout — RED & saga" dashboard exist on first boot; there is
+nothing to import by hand. Prometheus scrapes each service on its **container** port,
+and the gateway on `METRICS_PORT` (9464) rather than 8000 — the gateway's `/metrics`
+lives on a separate, deliberately unpublished port, so it is reachable from inside the
+compose network only.
 
 **Your local `docker-compose.yml` can drift behind `docker-compose.example.yml`.**
 It is your own gitignored copy (`cp docker-compose.example.yml docker-compose.yml`

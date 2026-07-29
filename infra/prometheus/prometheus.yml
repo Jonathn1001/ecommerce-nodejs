@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: ecom-services
+    static_configs:
+      - targets:
+          # Container-network addresses, so these are each service's own PORT,
+          # not its published host port. Verified against docker-compose.example.yml.
+          - hello:3000
+          - inventory:3001
+          - order:3002
+          - payment:3003
+          - catalog:3004
+          - notification:3005
+          - identity:3006
+          # Gateway only: METRICS_PORT, not its PORT of 8000. Phase 7b puts /metrics
+          # on a separate unpublished port so it is never reachable from the host.
+          - gateway:9464

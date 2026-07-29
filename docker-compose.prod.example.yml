@@ -20,6 +20,12 @@ services:
     ports: !reset []
   mailpit:
     ports: !reset []
+  # Observability is operator-facing, not public: in this shape you reach Prometheus
+  # and Grafana through the compose network (or an SSH tunnel), never from the host.
+  prometheus:
+    ports: !reset []
+  grafana:
+    ports: !reset []
 
   hello:
     ports: !reset []
