@@ -5,6 +5,7 @@ import {
   createHealthRouter,
   createMetrics,
   getRedis,
+  currentTraceparent,
   type Metrics,
 } from "@ecom/shared";
 import { HELLO_CREATED, HelloCreatedPayloadSchema } from "@ecom/contracts";
@@ -46,6 +47,7 @@ export function createApp(deps: { metrics?: Metrics } = {}): express.Application
             type: HELLO_CREATED,
             version: 1,
             traceId: req.traceId,
+            traceparent: currentTraceparent(),
             producer: "hello",
             payload,
           },

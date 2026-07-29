@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { Prisma } from "./generated/prisma";
-import { createLogger } from "@ecom/shared";
+import { createLogger, currentTraceparent } from "@ecom/shared";
 import { prisma } from "./db";
 import { releaseRows, type ReleaseCoreTx } from "./release";
 
@@ -28,6 +28,7 @@ function sweepTx(tx: Prisma.TransactionClient, traceId: string): ReleaseCoreTx {
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "inventory",
           payload: payload as Prisma.InputJsonValue,
         },

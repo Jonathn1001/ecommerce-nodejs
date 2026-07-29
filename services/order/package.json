@@ -18,6 +18,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@types/express": "^4.17.21",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^6.0.2",

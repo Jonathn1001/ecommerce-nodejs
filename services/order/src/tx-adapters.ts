@@ -1,4 +1,5 @@
 import { Prisma } from "./generated/prisma";
+import { currentTraceparent } from "@ecom/shared";
 import type { PlaceOrderTx } from "./place-order";
 import type { TransitionTx } from "./transition";
 
@@ -40,6 +41,7 @@ export function placeOrderTx(
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "order",
           payload: payload as Prisma.InputJsonValue,
         },
@@ -86,6 +88,7 @@ export function transitionTx(
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "order",
           payload: payload as Prisma.InputJsonValue,
         },

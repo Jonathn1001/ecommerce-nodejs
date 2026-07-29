@@ -1,4 +1,5 @@
 import { Prisma } from "./generated/prisma";
+import { currentTraceparent } from "@ecom/shared";
 import type { ReserveTx } from "./reserve";
 import type { ReleaseTx } from "./release";
 import type { ConsumeTx } from "./consume";
@@ -45,6 +46,7 @@ export function reserveTx(tx: Prisma.TransactionClient, traceId: string): Reserv
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "inventory",
           payload: payload as Prisma.InputJsonValue,
         },
@@ -89,6 +91,7 @@ export function releaseTx(tx: Prisma.TransactionClient, traceId: string): Releas
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "inventory",
           payload: payload as Prisma.InputJsonValue,
         },
