@@ -10,6 +10,8 @@ export type OutboxRow = {
   type: string;
   version: number;
   traceId: string;
+  // Nullable: rows written before Phase 7c have none, and Prisma returns null not undefined.
+  traceparent?: string | null;
   producer: string;
   payload: unknown;
   occurredAt: Date;
@@ -43,6 +45,7 @@ function toEnvelope(row: OutboxRow): EventEnvelope {
     version: row.version,
     occurredAt: row.occurredAt.toISOString(),
     traceId: row.traceId,
+    ...(row.traceparent ? { traceparent: row.traceparent } : {}),
     producer: row.producer,
     payload: row.payload,
   });
