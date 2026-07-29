@@ -140,11 +140,19 @@ export async function createRabbit(
           span = undefined;
         }
         try {
-          await withRetry(() => handler(env), {
-            retries: maxRetries,
-            baseMs: 200,
-            label: `consume:${queue}`,
-          });
+          const runHandler = () =>
+            withRetry(() => handler(env), {
+              retries: maxRetries,
+              baseMs: 200,
+              label: `consume:${queue}`,
+            });
+          // The handler must run with `span` — not the extracted `parent` — active,
+          // so any spans it creates parent to THIS consumer span rather than to the
+          // upstream relay's producer span. When span creation above failed, `span`
+          // is undefined and the handler runs directly, unchanged.
+          await (span
+            ? context.with(trace.setSpan(context.active(), span), runHandler)
+            : runHandler());
           ch.ack(msg);
         } catch {
           ch.nack(msg, false, false); // handler exhausted retries -> DLX/DLQ

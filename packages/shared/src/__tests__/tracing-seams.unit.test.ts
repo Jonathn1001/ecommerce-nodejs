@@ -68,6 +68,9 @@ describe("relay producer span", () => {
 
     const span = exporter.getFinishedSpans().find((s) => s.name.includes("order.events"));
     expect(span).toBeDefined();
+    // Pin the exact name shape (Finding 2) — the acceptance evidence quotes this
+    // literally, making it a de-facto contract for downstream consumers.
+    expect(span!.name).toBe("order.events publish");
     // Parented to the stored business span…
     expect(span!.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(parentSpanIdOf(span)).toBe("00f067aa0ba902b7");
@@ -96,6 +99,7 @@ describe("relay producer span", () => {
     // span actually exists, has a well-formed trace id, and has no parent.
     const span = exporter.getFinishedSpans().find((s) => s.name.includes("order.events"));
     expect(span).toBeDefined();
+    expect(span!.name).toBe("order.events publish"); // Finding 2: pin the exact shape
     expect(span!.spanContext().traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(parentSpanIdOf(span)).toBeUndefined();
   });
@@ -186,6 +190,9 @@ describe("relay command-lane producer span", () => {
       .getFinishedSpans()
       .find((s) => s.name.includes("payment.charge"));
     expect(span).toBeDefined();
+    // Pin the exact name shape (Finding 2) — the acceptance evidence quotes this
+    // literally, making it a de-facto contract for downstream consumers.
+    expect(span!.name).toBe("payment.charge send");
     expect(span!.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(parentSpanIdOf(span)).toBe("00f067aa0ba902b7");
     expect(commanded[0].traceparent).not.toBe(STORED);
@@ -267,6 +274,9 @@ describe("kafka consumer span", () => {
       .getFinishedSpans()
       .find((s) => s.name === "order.events process");
     expect(span).toBeDefined();
+    // Pin the exact name shape (Finding 2) — the acceptance evidence quotes this
+    // literally, making it a de-facto contract for downstream consumers.
+    expect(span!.name).toBe("order.events process");
     expect(span!.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(parentSpanIdOf(span)).toBe("00f067aa0ba902b7");
   });
@@ -337,5 +347,53 @@ describe("kafka consumer span — Global Constraint 1 (span creation must not af
     // failure changed nothing about delivery (Global Constraint 1 + 2).
     expect(handled).toBe(true);
     expect(parked).toHaveLength(0);
+  });
+});
+
+// --- Finding 1 regression: the handler must run with the CONSUMER span active ---
+//
+// context.with(parent, ...) only rebuilds the extracted upstream context; it never
+// installs the freshly-created `span` as active before invoking the handler. A span
+// started INSIDE the handler is the only way to observe which context is actually
+// active there — asserting on `span` itself (as every test above does) cannot catch
+// this, because `span` is correctly parented to `parent` regardless of this bug.
+describe("kafka consumer span — Finding 1 (handler must see `span`, not `parent`, as active)", () => {
+  it("a span started inside the handler parents to the CONSUMER '... process' span, not to the extracted upstream parent", async () => {
+    const { kafka, deliver } = fakeKafka();
+    const consumer = createConsumer(kafka, "g-active");
+    await consumer.connect();
+
+    let innerSpanId: string | undefined;
+    await consumer.run(["order.events"], async () => {
+      // Simulates a Prisma/outbox span created by application code inside the handler.
+      const inner = trace.getTracer("test-inner").startSpan("inner-work");
+      innerSpanId = inner.spanContext().spanId;
+      inner.end();
+    });
+
+    const raw = JSON.stringify(
+      makeEnvelope({
+        type: "order.placed",
+        version: 1,
+        traceId: "t",
+        producer: "order",
+        payload: {},
+        traceparent: STORED,
+      })
+    );
+    await deliver(raw);
+
+    const processSpan = exporter
+      .getFinishedSpans()
+      .find((s) => s.name === "order.events process");
+    const innerSpan = exporter
+      .getFinishedSpans()
+      .find((s) => s.spanContext().spanId === innerSpanId);
+    expect(processSpan).toBeDefined();
+    expect(innerSpan).toBeDefined();
+    expect(parentSpanIdOf(innerSpan)).toBe(processSpan!.spanContext().spanId);
+    // STORED's span id — if this matched instead, the handler ran with the
+    // extracted upstream `parent` active rather than the consumer `span`.
+    expect(parentSpanIdOf(innerSpan)).not.toBe("00f067aa0ba902b7");
   });
 });

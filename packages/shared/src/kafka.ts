@@ -118,7 +118,16 @@ export function createConsumer(kafka: Kafka, groupId: string, hooks?: KafkaMetri
                 span = undefined;
               }
               try {
-                await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+                const runHandler = () =>
+                  withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+                // The handler must run with `span` — not `parent` — active, so any
+                // spans it creates (Prisma, outbox writes) parent to THIS consumer
+                // span rather than to the upstream relay's producer span. When span
+                // creation above failed, `span` is undefined and the handler runs
+                // directly, unchanged.
+                await (span
+                  ? context.with(trace.setSpan(context.active(), span), runHandler)
+                  : runHandler());
               } finally {
                 try {
                   span?.end();
