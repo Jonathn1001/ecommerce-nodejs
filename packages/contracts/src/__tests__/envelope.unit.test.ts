@@ -41,4 +41,23 @@ describe("envelope traceparent", () => {
     });
     expect(env.traceparent).toBeUndefined();
   });
+
+  // Discriminates "no key at all" from "key present with value undefined".
+  // `env.traceparent === undefined` is true either way (a missing property
+  // and a present-but-undefined property both read back as undefined), so
+  // only a key-presence check catches a regression to plain assignment
+  // (`traceparent: input.traceparent`), which is observable once this
+  // envelope is JSON-serialized through the outbox row / broker message.
+  it("has NO traceparent key at all when the caller supplies none", () => {
+    const env = makeEnvelope({
+      type: "order.placed",
+      version: 1,
+      traceId: "t",
+      producer: "test",
+      payload: {},
+    });
+    expect("traceparent" in env).toBe(false);
+    expect(Object.keys(env)).not.toContain("traceparent");
+    expect(JSON.stringify(env)).not.toContain("traceparent");
+  });
 });
