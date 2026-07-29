@@ -1,4 +1,5 @@
 import { Prisma } from "./generated/prisma";
+import { currentTraceparent } from "@ecom/shared";
 import type { SessionTx } from "./sessions";
 
 export function sessionTx(tx: Prisma.TransactionClient): SessionTx {
@@ -54,6 +55,7 @@ export function outboxEnqueue(
       aggregateId,
       type,
       traceId,
+      traceparent: currentTraceparent(),
       producer: "identity",
       payload: payload as Prisma.InputJsonValue,
     },

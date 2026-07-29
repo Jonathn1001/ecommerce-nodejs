@@ -38,6 +38,7 @@ model Outbox {
   type          String
   version       Int       @default(1)
   traceId       String
+  traceparent   String?
   producer      String
   payload       Json
   occurredAt    DateTime  @default(now())

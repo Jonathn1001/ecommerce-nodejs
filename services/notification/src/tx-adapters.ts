@@ -1,4 +1,5 @@
 import { Prisma } from "./generated/prisma";
+import { currentTraceparent } from "@ecom/shared";
 import type { DispatchTx } from "./dispatcher";
 
 export function dispatchTx(tx: Prisma.TransactionClient, traceId: string): DispatchTx {
@@ -29,6 +30,7 @@ export function dispatchTx(tx: Prisma.TransactionClient, traceId: string): Dispa
           aggregateId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "notification",
           payload: payload as Prisma.InputJsonValue,
         },

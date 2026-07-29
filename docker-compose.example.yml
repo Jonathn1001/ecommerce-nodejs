@@ -103,6 +103,18 @@ services:
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on: [prometheus]
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    ports: ["16686:16686"]   # UI only — OTLP stays in-network, like the gateway's metrics port
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:14269/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   # Application services live behind the `app` profile so `docker compose up`
   # brings up only infra by default:  docker compose --profile app up -d hello
   hello:
@@ -116,6 +128,9 @@ services:
       KAFKA_BROKERS: kafka:19092
       REDIS_URL: redis://redis:6379
       PORT: 3000
+      OTEL_SERVICE_NAME: hello
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3000:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -140,6 +155,9 @@ services:
       RESERVATION_TTL_MS: 900000
       SWEEP_INTERVAL_MS: 5000
       PORT: 3001
+      OTEL_SERVICE_NAME: inventory
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3001:3001"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -163,6 +181,9 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-ecom}:${RABBITMQ_PASSWORD:-ecom}@rabbitmq:5672
       PORT: 3002
       LOG_LEVEL: info
+      OTEL_SERVICE_NAME: order
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3002:3002"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -186,6 +207,9 @@ services:
       KAFKA_BROKERS: kafka:19092
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET}
       PORT: 3003
+      OTEL_SERVICE_NAME: payment
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3003:3003"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -207,6 +231,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom}@postgres:5432/catalog
       KAFKA_BROKERS: kafka:19092
       PORT: 3004
+      OTEL_SERVICE_NAME: catalog
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3004:3004"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -231,6 +258,9 @@ services:
       SMTP_PORT: 1025
       NOTIFY_EMAIL_DOMAIN: example.test
       PORT: 3005
+      OTEL_SERVICE_NAME: notification
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3005:3005"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -258,6 +288,9 @@ services:
       ACCESS_TTL: 15m
       REFRESH_TTL_DAYS: 7
       PORT: 3006
+      OTEL_SERVICE_NAME: identity
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["3006:3006"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -289,6 +322,9 @@ services:
       # Deliberately not published: Prometheus reaches gateway:9464 over the compose
       # network, and /metrics stays unreachable from the host.
       METRICS_PORT: 9464
+      OTEL_SERVICE_NAME: gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      NODE_OPTIONS: --import tsx --import file:///repo/packages/shared/src/tracing.ts
     ports: ["8000:8000"]
     depends_on:
       identity: { condition: service_healthy }

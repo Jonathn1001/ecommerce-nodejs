@@ -1,9 +1,33 @@
 import amqp, { type ConfirmChannel, type ChannelModel, type Channel } from "amqplib";
+import { trace, context, propagation, SpanKind, type Span } from "@opentelemetry/api";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
 
 const log = createLogger("rabbit");
+// Resolved lazily (NOT cached at module scope). See outbox.ts's `tracer()` for the
+// full repro: under Vitest, this file's ESM `import` of @opentelemetry/api and
+// @opentelemetry/sdk-trace-node's internal CJS `require()` of it resolve to two
+// separate TraceAPI singletons, so a ProxyTracer obtained here before a test's
+// NodeTracerProvider.register() runs would bind to a side that never receives the
+// delegate. Resolving at span-creation time (well after any registration) avoids
+// that. Production is unaffected.
+function tracer() {
+  return trace.getTracer("@ecom/shared/rabbitmq");
+}
+
+// Exported for the unit test: the extraction is the part that can silently regress.
+// Never throws: a malformed or missing traceparent yields the active context, which
+// starts a fresh trace rather than rejecting the message.
+export function consumerContextFor(env: EventEnvelope) {
+  try {
+    return env.traceparent
+      ? propagation.extract(context.active(), { traceparent: env.traceparent })
+      : context.active();
+  } catch {
+    return context.active();
+  }
+}
 
 // Connection-liveness state machine, split out so the restart decision is unit-testable
 // without a broker. Docker restart policies fire on process EXIT, never on an unhealthy
@@ -100,16 +124,46 @@ export async function createRabbit(
         ch.nack(msg, false, false); // malformed envelope -> DLQ; retrying can't help
         return;
       }
-      try {
-        await withRetry(() => handler(env), {
-          retries: maxRetries,
-          baseMs: 200,
-          label: `consume:${queue}`,
-        });
-        ch.ack(msg);
-      } catch {
-        ch.nack(msg, false, false); // handler exhausted retries -> DLX/DLQ
-      }
+      await context.with(consumerContextFor(env), async () => {
+        // Global Constraint 1: span creation (and the attribute calls right after it)
+        // is wrapped SEPARATELY from the retry/DLQ try below — a throw here must never
+        // skip the handler call. Unwrapped, it would propagate out of this
+        // context.with(), land in the retry/DLQ catch, and nack/DLQ a message whose
+        // handler was never even invoked: exactly what Global Constraint 2 forbids.
+        let span: Span | undefined;
+        try {
+          span = tracer().startSpan(`${queue} process`, { kind: SpanKind.CONSUMER });
+          // IDs only — never the payload (sensitive-logging / tracing hygiene).
+          span.setAttribute("messaging.message.id", env.eventId);
+          span.setAttribute("messaging.destination.name", queue);
+        } catch {
+          span = undefined;
+        }
+        try {
+          const runHandler = () =>
+            withRetry(() => handler(env), {
+              retries: maxRetries,
+              baseMs: 200,
+              label: `consume:${queue}`,
+            });
+          // The handler must run with `span` — not the extracted `parent` — active,
+          // so any spans it creates parent to THIS consumer span rather than to the
+          // upstream relay's producer span. When span creation above failed, `span`
+          // is undefined and the handler runs directly, unchanged.
+          await (span
+            ? context.with(trace.setSpan(context.active(), span), runHandler)
+            : runHandler());
+          ch.ack(msg);
+        } catch {
+          ch.nack(msg, false, false); // handler exhausted retries -> DLX/DLQ
+        } finally {
+          try {
+            span?.end();
+          } catch {
+            /* span teardown must never affect message handling */
+          }
+        }
+      });
     });
   }
 

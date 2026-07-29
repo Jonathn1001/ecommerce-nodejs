@@ -1,4 +1,5 @@
 import { Prisma } from "./generated/prisma";
+import { currentTraceparent } from "@ecom/shared";
 import type { ChargeTx } from "./charge";
 import type { ResolveTx } from "./resolve";
 
@@ -34,6 +35,7 @@ export function chargeTx(tx: Prisma.TransactionClient, traceId: string): ChargeT
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "payment",
           payload: payload as Prisma.InputJsonValue,
         },
@@ -71,6 +73,7 @@ export function resolveTx(tx: Prisma.TransactionClient, traceId: string): Resolv
           aggregateId: orderId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "payment",
           payload: payload as Prisma.InputJsonValue,
         },

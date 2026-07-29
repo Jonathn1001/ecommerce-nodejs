@@ -1,10 +1,21 @@
 import { Kafka, logLevel, type Producer, type Consumer } from "kafkajs";
+import { trace, context, propagation, SpanKind, type Span } from "@opentelemetry/api";
 import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 import { withRetry } from "./retry";
 import { createLogger } from "./logger";
 import type { KafkaMetricsHooks } from "./metrics";
 
 const log = createLogger("kafka");
+// Resolved lazily (NOT cached at module scope). See outbox.ts's `tracer()` for the
+// full repro: under Vitest, this file's ESM `import` of @opentelemetry/api and
+// @opentelemetry/sdk-trace-node's internal CJS `require()` of it resolve to two
+// separate TraceAPI singletons (verified by object-identity comparison), so a
+// ProxyTracer obtained here before a test's NodeTracerProvider.register() runs would
+// bind to a side that never receives the delegate. Resolving at span-creation time
+// (well after any registration) avoids that. Production is unaffected.
+function tracer() {
+  return trace.getTracer("@ecom/shared/kafka");
+}
 
 export function createKafka(clientId: string): Kafka {
   return new Kafka({
@@ -74,7 +85,57 @@ export function createConsumer(kafka: Kafka, groupId: string, hooks?: KafkaMetri
           try {
             const env = EventEnvelopeSchema.parse(JSON.parse(raw));
             const started = process.hrtime.bigint();
-            await withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+            // Rebuild a context from the envelope's traceparent (the relay's own span,
+            // stamped in Task 6's outbox.ts — not the original business span). Never
+            // throws: a malformed value from an older or untrusted producer yields the
+            // active context, which starts a fresh trace rather than rejecting the message.
+            const parent = (() => {
+              try {
+                return env.traceparent
+                  ? propagation.extract(context.active(), {
+                      traceparent: env.traceparent,
+                    })
+                  : context.active();
+              } catch {
+                return context.active();
+              }
+            })();
+            await context.with(parent, async () => {
+              // Global Constraint 1: span creation (and the attribute calls right
+              // after it) is wrapped — a throw here must never skip the handler call
+              // below. Unwrapped, it would propagate out of this context.with(),
+              // land in the outer try's catch, and park a message whose handler was
+              // never even invoked: exactly what Global Constraint 2 forbids.
+              let span: Span | undefined;
+              try {
+                span = tracer().startSpan(`${topic} process`, {
+                  kind: SpanKind.CONSUMER,
+                });
+                // IDs only — never the payload (Global Constraint 9).
+                span.setAttribute("messaging.message.id", env.eventId);
+                span.setAttribute("messaging.destination.name", topic);
+              } catch {
+                span = undefined;
+              }
+              try {
+                const runHandler = () =>
+                  withRetry(() => handler(env), { retries: maxRetries, baseMs: 200 });
+                // The handler must run with `span` — not `parent` — active, so any
+                // spans it creates (Prisma, outbox writes) parent to THIS consumer
+                // span rather than to the upstream relay's producer span. When span
+                // creation above failed, `span` is undefined and the handler runs
+                // directly, unchanged.
+                await (span
+                  ? context.with(trace.setSpan(context.active(), span), runHandler)
+                  : runHandler());
+              } finally {
+                try {
+                  span?.end();
+                } catch {
+                  /* span teardown must never affect message handling */
+                }
+              }
+            });
             // Recording is wrapped SEPARATELY from the handler's try. Unwrapped, a throwing
             // hook would fall into the DLQ catch below and park a message whose handler
             // already succeeded.

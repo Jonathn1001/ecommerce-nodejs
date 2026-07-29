@@ -1,4 +1,5 @@
 import { Prisma } from "./generated/prisma";
+import { currentTraceparent } from "@ecom/shared";
 import type { ProductWriteTx } from "./product";
 
 export function productTx(tx: Prisma.TransactionClient, traceId: string): ProductWriteTx {
@@ -45,6 +46,7 @@ export function productTx(tx: Prisma.TransactionClient, traceId: string): Produc
           aggregateId: productId,
           type,
           traceId,
+          traceparent: currentTraceparent(),
           producer: "catalog",
           payload: payload as Prisma.InputJsonValue,
         },

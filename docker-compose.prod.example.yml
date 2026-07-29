@@ -26,6 +26,8 @@ services:
     ports: !reset []
   grafana:
     ports: !reset []
+  jaeger:
+    ports: !reset []
 
   hello:
     ports: !reset []

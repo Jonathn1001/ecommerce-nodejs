@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { drainOutbox, type OutboxRow, type CommandChannel } from "../outbox";
-import { EventEnvelopeSchema } from "@ecom/contracts";
+import {
+  drainOutbox,
+  type OutboxRow,
+  type OutboxPort,
+  type CommandChannel,
+} from "../outbox";
+import { EventEnvelopeSchema, type EventEnvelope } from "@ecom/contracts";
 
 function fakeRow(over: Partial<OutboxRow> = {}): OutboxRow {
   return {
@@ -128,5 +133,81 @@ describe("drainOutbox — command channel routing", () => {
     );
     // the kafka row still committed; the failed rabbit row stays unsent
     expect(marked).toEqual(["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]);
+  });
+});
+
+describe("drainOutbox — traceparent pass-through", () => {
+  it("carries the row's traceparent into the relayed envelope", async () => {
+    const TP = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    const published: EventEnvelope[] = [];
+    const port: OutboxPort = {
+      async fetchUnsent() {
+        return [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            aggregateType: "order",
+            aggregateId: "o1",
+            type: "order.placed",
+            version: 1,
+            traceId: "t",
+            traceparent: TP,
+            producer: "order",
+            payload: {},
+            occurredAt: new Date(),
+            sentAt: null,
+          },
+        ];
+      },
+      async markSent() {},
+    };
+    await drainOutbox(
+      port,
+      {
+        async publish(_t, e) {
+          published.push(e);
+        },
+      },
+      () => "order.events"
+    );
+    expect(published[0].traceparent).toBe(TP);
+  });
+
+  // Prisma returns `null` (not `undefined`) for a nullable column with no value —
+  // that's the real shape of a pre-7c row, so the fake row sets it explicitly
+  // rather than omitting the key. This is what makes the test discriminate against
+  // an implementation that passes the literal `null` through to the envelope
+  // instead of omitting the `traceparent` key: `toBeUndefined()` fails on `null`.
+  it("relays a row with no traceparent (pre-7c rows) without throwing", async () => {
+    const published: EventEnvelope[] = [];
+    const port: OutboxPort = {
+      async fetchUnsent() {
+        return [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            aggregateType: "order",
+            aggregateId: "o2",
+            type: "order.placed",
+            version: 1,
+            traceId: "t",
+            traceparent: null,
+            producer: "order",
+            payload: {},
+            occurredAt: new Date(),
+            sentAt: null,
+          },
+        ];
+      },
+      async markSent() {},
+    };
+    await drainOutbox(
+      port,
+      {
+        async publish(_t, e) {
+          published.push(e);
+        },
+      },
+      () => "order.events"
+    );
+    expect(published[0].traceparent).toBeUndefined();
   });
 });
