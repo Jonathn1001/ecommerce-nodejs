@@ -2,7 +2,8 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { outboxPort } from "./outbox-adapter";
 import { ledgerPrunerPort } from "./prune-adapter";
-import { handleOrderEvent } from "./consumer";
+import { handleOrderEvent, setReservationMetrics } from "./consumer";
+import { createReservationMetrics } from "./metrics";
 import { startExpirySweeper } from "./sweeper";
 import { prisma } from "./db";
 import {
@@ -22,6 +23,7 @@ const ORDER_TOPIC = "order.events";
 
 async function main() {
   const metrics = createMetrics("inventory", { defaultMetrics: true });
+  setReservationMetrics(createReservationMetrics(metrics.registry));
   const kafka = createKafka("inventory");
   const producer = createProducer(kafka);
   await producer.connect();

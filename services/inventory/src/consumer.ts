@@ -14,8 +14,17 @@ import { reserveOrder } from "./reserve";
 import { releaseForCancel } from "./release";
 import { consumeForConfirm } from "./consume";
 import { reserveTx, releaseTx, consumeTx } from "./tx-adapters";
+import type { ReservationMetrics } from "./metrics";
 
 const log: Logger = createLogger("inventory-consumer");
+
+const NOOP_RESERVATION: ReservationMetrics = { observe: () => {} };
+let reservation: ReservationMetrics = NOOP_RESERVATION;
+
+// main.ts injects the real one; the no-op default keeps every existing test untouched.
+export function setReservationMetrics(m: ReservationMetrics): void {
+  reservation = m;
+}
 
 export async function handleOrderEvent(env: EventEnvelope): Promise<void> {
   if (env.type === ORDER_PLACED) return handlePlaced(env);
@@ -45,6 +54,7 @@ async function handlePlaced(env: EventEnvelope): Promise<void> {
         expiresAt: new Date(Date.now() + config.RESERVATION_TTL_MS),
       })
     );
+    reservation.observe(outcome);
     log.info("order_placed_handled", {
       orderId: payload.orderId,
       outcome,
