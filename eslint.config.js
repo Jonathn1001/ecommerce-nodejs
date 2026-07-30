@@ -12,5 +12,15 @@ module.exports = tseslint.config(
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
+  },
+  {
+    // k6 scripts run in k6's own runtime, not Node: __ENV, __VU and __ITER are injected
+    // globals, and the k6/* module specifiers are resolved by the binary rather than from
+    // node_modules. Declaring them here keeps `pnpm lint` covering the script instead of
+    // the script having to opt out with file-level eslint-disable comments.
+    files: ["k6/**/*.js"],
+    languageOptions: {
+      globals: { __ENV: "readonly", __VU: "readonly", __ITER: "readonly" },
+    },
   }
 );
