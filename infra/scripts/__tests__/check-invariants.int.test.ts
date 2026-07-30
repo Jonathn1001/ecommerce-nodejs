@@ -143,17 +143,51 @@ describe("invariant checker — single-database invariants (integration)", () =>
       [randomUUID(), orderId]
     );
     const v = await runInvariants({ pgBase: PG, skipDlq: true });
-    expect(v.map((x) => x.invariant)).toContain("INV2_CANCELLED_BUT_PAID");
+    // Asserting only that the invariant name showed up (as this test used to) would still pass
+    // against an implementation that fires whenever ANY cancelled order and ANY succeeded
+    // payment exist anywhere, with no id matching at all — already true on this dev DB (611
+    // preserved CANCELLED orders, plus real SUCCEEDED payments) with or without this fixture.
+    // Asserting the seeded id is among the reported rows is what actually exercises the
+    // order<->payment intersection.
+    const inv2 = v.find((x) => x.invariant === "INV2_CANCELLED_BUT_PAID");
+    expect(inv2).toBeDefined();
+    const flaggedIds = (inv2!.rows as Array<{ id: string }>).map((r) => r.id);
+    expect(flaggedIds).toContain(orderId);
   });
 
   it("INV6: flags a CONFIRMED order with no SUCCEEDED payment", async () => {
+    const noPaymentId = randomUUID();
+    const failedPaymentId = randomUUID();
     await sql(
       "order",
       `INSERT INTO "Order" (id, "userId", status, "totalPrice", "createdAt", "updatedAt")
        VALUES ($1, $2, 'CONFIRMED', 100, now(), now())`,
-      [randomUUID(), `inv-${tag}`]
+      [noPaymentId, `inv-${tag}`]
+    );
+    await sql(
+      "order",
+      `INSERT INTO "Order" (id, "userId", status, "totalPrice", "createdAt", "updatedAt")
+       VALUES ($1, $2, 'CONFIRMED', 100, now(), now())`,
+      [failedPaymentId, `inv-${tag}`]
+    );
+    // A CONFIRMED order whose only Payment row is FAILED (not SUCCEEDED) must still be flagged.
+    // A regression that checks "order has any Payment row" instead of "order has a SUCCEEDED
+    // Payment row" would sail through the no-payment-at-all case above while missing this one.
+    await sql(
+      "payment",
+      `INSERT INTO "Payment" (id, "orderId", amount, status, "createdAt", "updatedAt")
+       VALUES ($1, $2, 100, 'FAILED', now(), now())`,
+      [randomUUID(), failedPaymentId]
     );
     const v = await runInvariants({ pgBase: PG, skipDlq: true });
-    expect(v.map((x) => x.invariant)).toContain("INV6_CONFIRMED_INCOMPLETE");
+    // As with INV2, checking only that the invariant name appeared would still pass against an
+    // implementation that fires on any non-empty `confirmed` list — true today regardless of this
+    // fixture (375 pre-existing INV6 violations on this dev DB; see Known/out-of-scope below).
+    // Asserting both seeded ids are among the reported rows is what actually exercises the fix.
+    const inv6 = v.find((x) => x.invariant === "INV6_CONFIRMED_INCOMPLETE");
+    expect(inv6).toBeDefined();
+    const flaggedIds = (inv6!.rows as Array<{ id: string }>).map((r) => r.id);
+    expect(flaggedIds).toContain(noPaymentId);
+    expect(flaggedIds).toContain(failedPaymentId);
   });
 });
