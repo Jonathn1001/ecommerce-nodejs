@@ -33,6 +33,27 @@ evidence).
 contract tests (§B2). No route, handler, schema or config in any of the eight services is
 modified, so 8a cannot regress the system it renders.
 
+## Preconditions — 8a implements on top of 7d, not beside it
+
+This spec is committed on a branch off `origin/main`, which does **not** contain Phase 7d
+(PR #7, open as a draft). That is fine for a documentation commit and wrong for the
+implementation, because the two slices edit the same two files:
+
+| File | 7d does | 8a does |
+|---|---|---|
+| `vitest.config.ts` | added the `infra/**` glob | replaces it with `vitest.workspace.ts` (§E) |
+| `eslint.config.js` | added a `k6/**` block | adds an `apps/web` block (§E) |
+
+Left unstated, the likeliest conflict resolution silently drops 7d's `infra` project and
+re-creates precisely the uncovered-suite gap 7d existed to close. So:
+
+- **8a implementation starts from a base that contains 7d** — either 7d's head, or `main`
+  once #7 merges. The latter is preferred, and keeps the one-open-PR policy intact.
+- **`vitest.workspace.ts` must carry an `infra` project forward**, not just `packages`,
+  `services` and the new `apps/web`. §E's "the existing three projects" counts 7d's infra
+  glob; on this spec's own base there are only two, which is the tell that the base is wrong
+  for implementation.
+
 ## A. What the roadmap got wrong, and what replaces it
 
 ### A1. The dual ESM+CJS contracts build is not needed, and never was
@@ -107,6 +128,10 @@ type-specific attributes with per-type schemas it owns; restating them in a shar
 would create a second source of truth to keep in sync, which is the drift this section exists
 to prevent.
 
+`version` is carried in both DTOs though no 8a view renders it. It is Catalog's optimistic
+concurrency counter and the field its projection ordering keys on, so having it at the
+boundary makes a stale-cache question answerable later without a contract change.
+
 `price` is **integer minor units** — "Widget" is `900`, meaning $9.00. Formatting divides by
 100 at the presentation layer and nowhere else.
 
@@ -176,6 +201,13 @@ React Query holds server state. **No global store**: the only client state 8a ha
 current category filter, and cart state arrives in 8b. Inventing a store now would be
 speculative structure for a need that has not appeared.
 
+**The retry policy is pinned, not defaulted.** React Query retries a failed query three times
+for *every* error type. Left alone that contradicts §B3 outright: a schema mismatch — a bug —
+would be retried three times before surfacing, and a 404 would be retried for a product that
+will never exist. The query client therefore retries **network failures only**, never a
+schema mismatch and never a 4xx. This is the kind of default that silently makes a drift
+alarm slower and quieter, which is the opposite of what §B3 is for.
+
 ### C3. Views
 
 **Home** — hero, category filter chips, product grid. **Product detail** — figure, name,
@@ -185,6 +217,19 @@ for the prototype's invented `specs`.
 Every async view has three states, per the DoD: loading (skeletons matching the card
 geometry, not a spinner), error (§B3's taxonomy), and empty (a catalogue with no products is
 a real state, and after 7d's cleanup the dev database can genuinely be near-empty).
+
+**A 404 on product detail is its own case**, distinct from all three. It is reachable without
+anything being broken — a stale link, a shared URL, a product removed between the list
+rendering and the click — so it renders a "product not found" view with a route back to the
+catalogue, never a generic error and never an empty page.
+
+**Rendering `attributes` safely.** The map is `z.record(z.unknown())` (§B1), so its values are
+genuinely unknown at compile time. The table renders **primitive values only** — string,
+number, boolean — and skips anything else rather than emitting `[object Object]`. And because
+these strings originate from an API rather than from the app, **no API-sourced value is ever
+passed to `dangerouslySetInnerHTML`**; React's default escaping is the whole XSS defence here
+and nothing may opt out of it. A Content-Security-Policy belongs with 8c's nginx, which is
+where the app first gets served by something that can set headers.
 
 ## D. Design system
 
@@ -218,13 +263,15 @@ prototype's four.
 `pnpm typecheck` and `pnpm -r build` are recursive, so `apps/web` is covered **automatically**
 once it joins the workspace: CI typechecks it and builds the bundle with no workflow edit.
 
-Tests are the gap. Root `vitest.config.ts` includes only `packages/**`, `services/**` and
-`infra/**`, so `apps/web` tests would silently not run — and they need `jsdom`, which the
-existing node-environment suites must not inherit.
+Tests are the gap. Root `vitest.config.ts` includes only `packages/**`, `services/**` and —
+**once 7d is in the base, per §Preconditions** — `infra/**`. `apps/web` tests would silently
+not run, and they need `jsdom`, which the existing node-environment suites must not inherit.
 
-**A `vitest.workspace.ts` with two projects** resolves both: the existing three globs keep
-their current config verbatim, and `apps/web` gets jsdom plus an RTL setup file. One
-`pnpm vitest run` then covers everything, locally and in CI, with no new workflow step.
+**A `vitest.workspace.ts`** resolves both: every existing glob keeps its current config
+verbatim as its own project, and `apps/web` gets jsdom plus an RTL setup file. One
+`pnpm vitest run` then covers everything, locally and in CI, with no new workflow step. The
+`infra` project is explicitly part of "every existing glob" — dropping it is the failure mode
+§Preconditions exists to prevent.
 
 The rejected alternative is a bespoke `pnpm --filter @ecom/web test` CI step, which leaves
 `pnpm vitest run` quietly missing a project for anyone running it locally. That is precisely
@@ -252,7 +299,7 @@ No Playwright — 8c. Whether it runs in CI or locally stays parked, per the roa
 |---|---|---|
 | 1 | 8a is foundation + catalogue only | The dual-build question and the workspace seam are the risky parts; resolve them before UI volume |
 | 2 | Contracts consumed as source; no dual build | §A1 — the stated premise is false and the alternative regresses eight services |
-| 3 | React 19 | The umbrella says "latest at build time"; Router 7 and Query 5 both support it |
+| 3 | React 19 | The umbrella says "latest at build time". Router 7 and Query 5 are believed to support it; the plan pins and records the exact resolved versions rather than trusting this line |
 | 4 | No stock in the catalogue | §A2 — unreachable through the gateway |
 | 5 | Same-origin via proxy, not CORS | §C1 — no backend change, and 8b's cookies work |
 | 6 | Catalog asserts the shared schemas | §B2 — client-only validation does not prevent drift |
@@ -287,7 +334,10 @@ parked for 8c.
 - [ ] Every gateway response is zod-validated at the boundary; schema mismatch is a distinct,
       loud error, never an empty grid.
 - [ ] Home grid and product detail each render loading, error and empty states.
-- [ ] Design tokens match the approved prototype exactly, including dark values.
+- [ ] Design tokens are declared **once**, as CSS variables carrying the prototype's values
+      including the dark set — no hard-coded colour, radius or shadow literal anywhere in a
+      component. (Fidelity to the prototype is a review-time judgement; single-declaration is
+      the part a reviewer can actually check.)
 - [ ] `pnpm vitest run` covers `apps/web` through `vitest.workspace.ts`, with the existing
       three projects unchanged.
 - [ ] Browser talks only to same-origin paths; no CORS middleware added to the gateway; no
