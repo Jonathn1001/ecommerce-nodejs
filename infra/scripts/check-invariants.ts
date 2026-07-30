@@ -58,7 +58,7 @@ const OUTBOX_DATABASES = [
 // (order:51), catalog.events (order:61). notification.events and identity.events are
 // deliberately absent: nothing consumes them, so a DLQ for them cannot exist, and a check
 // that cannot fire proves nothing.
-const KAFKA_DLQ_TOPICS = [
+export const KAFKA_DLQ_TOPICS = [
   "hello.events.dlq",
   "order.events.dlq",
   "inventory.events.dlq",

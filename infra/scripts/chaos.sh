@@ -17,12 +17,47 @@ OUTAGE_SECONDS="${OUTAGE_SECONDS:-15}"
 : "${PRODUCT_ID:?PRODUCT_ID required — seed inventory stock first, see k6/README.md}"
 
 DRIVER=""
+STOPPED=""
+
+# Restores whatever the scenario broke, however it exits. Without this, ANY failure between
+# `stop` and `start` — a failed assertion under `set -e`, or a Ctrl-C — leaves the service
+# down and the background driver orphaned and still writing. That is not hypothetical: it
+# happened during 7d's own C4 run and the resulting stalled saga read convincingly as a lost
+# event. A scenario must leave the stack the way it found it even when it fails.
+cleanup() {
+  local code=$?
+  trap - EXIT INT TERM # a signal runs this AND then the EXIT trap; restore once, not twice
+  [ -n "$DRIVER" ] && kill "$DRIVER" 2>/dev/null || true
+  if [ -n "$STOPPED" ]; then
+    echo "cleanup: restarting $STOPPED" >&2
+    $COMPOSE start "$STOPPED" >/dev/null 2>&1 || true
+  fi
+  exit "$code"
+}
+trap cleanup EXIT INT TERM
+
 drive() {
   COUNT="${1:-20}" INTERVAL_MS="${2:-500}" PRODUCT_ID="$PRODUCT_ID" \
     npx tsx infra/scripts/drive-checkouts.ts &
   DRIVER=$!
 }
-settle() { [ -n "$DRIVER" ] && { wait "$DRIVER" 2>/dev/null || true; }; }
+# `|| true` is load-bearing: with no driver started, the bare test returns 1, and under
+# `set -e` a non-zero function return aborts the whole script.
+settle() {
+  [ -n "$DRIVER" ] && { wait "$DRIVER" 2>/dev/null || true; }
+  DRIVER=""
+  return 0
+}
+
+# Paired with cleanup() above: record what is down so it gets restored on any exit path.
+break_service() {
+  STOPPED="$1"
+  $COMPOSE stop "$1"
+}
+restore_service() {
+  $COMPOSE start "$STOPPED"
+  STOPPED=""
+}
 
 assert() {
   PGBASE="$PGBASE" npx tsx infra/scripts/assert-invariants.ts "$1"
@@ -30,6 +65,31 @@ assert() {
 
 PROM_URL="${PROM_URL:-http://localhost:9090}"
 ALERT_WAIT_SECONDS="${ALERT_WAIT_SECONDS:-180}"
+
+# Reports whether the named alert is firing right now. Exit status only.
+alert_is_firing() {
+  curl -s "$PROM_URL/api/v1/alerts" | ALERT="$1" python3 -c '
+import sys, json, os
+alerts = json.load(sys.stdin)["data"]["alerts"]
+firing = {a["labels"]["alertname"] for a in alerts if a["state"] == "firing"}
+sys.exit(0 if os.environ["ALERT"] in firing else 1)
+'
+}
+
+# PRECONDITION for the whole validation: the alert must be quiet before we break anything.
+# Burn-rate windows are 15m and 1h, so an alert left firing by an earlier run stays firing
+# well into this one — and then wait_for_alert succeeds on its first poll having proven
+# nothing at all. Observing the inactive -> firing TRANSITION is the only thing that ties the
+# alert to this outage. Same discipline as the poison scenario refusing a dirty DLQ.
+require_alert_quiet() {
+  if alert_is_firing "$1"; then
+    echo "FAIL: $1 is ALREADY firing before the outage — its window still holds a previous" >&2
+    echo "      run's errors, so this scenario cannot prove anything. Wait for it to resolve" >&2
+    echo "      (up to the 1h long window) and re-run." >&2
+    return 1
+  fi
+  echo "$1 quiet before the outage"
+}
 
 # Waits for the alert WHILE the outage is still running, rather than sampling once.
 #
@@ -48,12 +108,7 @@ ALERT_WAIT_SECONDS="${ALERT_WAIT_SECONDS:-180}"
 wait_for_alert() {
   local want="$1" deadline=$((SECONDS + ALERT_WAIT_SECONDS))
   while [ "$SECONDS" -lt "$deadline" ]; do
-    if curl -s "$PROM_URL/api/v1/alerts" | ALERT="$want" python3 -c '
-import sys, json, os
-alerts = json.load(sys.stdin)["data"]["alerts"]
-firing = {a["labels"]["alertname"] for a in alerts if a["state"] == "firing"}
-sys.exit(0 if os.environ["ALERT"] in firing else 1)
-'; then
+    if alert_is_firing "$want"; then
       echo "$want fired during the outage"
       curl -s "$PROM_URL/api/v1/alerts" | python3 -c '
 import sys, json
@@ -78,9 +133,9 @@ case "$SCENARIO" in
 kafka) # The roadmap's Done-when case: kill the broker mid-saga, lose nothing.
   drive 20 500
   sleep 3
-  $COMPOSE stop kafka
+  break_service kafka
   sleep "$OUTAGE_SECONDS"
-  $COMPOSE start kafka
+  restore_service
   settle
   assert clean
   ;;
@@ -91,9 +146,9 @@ inventory) # A mid-saga service outage: orders pile at PENDING, then drain.
   # small TTL — see the runbook.
   drive 20 500
   sleep 3
-  $COMPOSE stop inventory
+  break_service inventory
   sleep "$OUTAGE_SECONDS"
-  $COMPOSE start inventory
+  restore_service
   settle
   assert clean
   ;;
@@ -143,14 +198,16 @@ order) # The ONLY scenario that produces gateway-visible errors, and therefore t
   # wait_for_alert poll after it — the alert can need well over two minutes of sustained
   # errors before it fires, and the driver going quiet first is what flattens the rate.
   ORDER_OUTAGE_SECONDS="${ORDER_OUTAGE_SECONDS:-90}"
+  EXPECT_ALERT="${EXPECT_ALERT:-CheckoutErrorBudgetFastBurn}"
+  require_alert_quiet "$EXPECT_ALERT"
   drive 600 500
   sleep 5
-  $COMPOSE stop order
+  break_service order
   sleep "$ORDER_OUTAGE_SECONDS"
-  wait_for_alert "${EXPECT_ALERT:-CheckoutErrorBudgetFastBurn}"
+  wait_for_alert "$EXPECT_ALERT"
   # Restart before the driver is done, so recovery is observed under live traffic and the
   # final assertion covers orders placed on both sides of the outage.
-  $COMPOSE start order
+  restore_service
   settle
   assert clean
   ;;

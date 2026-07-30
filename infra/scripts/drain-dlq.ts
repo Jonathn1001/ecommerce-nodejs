@@ -7,12 +7,13 @@
 // and kafka looks broken. The poison scenario therefore cleans up after asserting, and any
 // scenario ordering works.
 import { Kafka } from "kafkajs";
+// Imported rather than re-listed: a drainer that knows about fewer topics than the checker
+// leaves messages parked that the checker keeps reporting, and the two lists would drift
+// apart the moment a service starts consuming a new topic.
+import { KAFKA_DLQ_TOPICS } from "./check-invariants";
 
 const BROKERS = (process.env.KAFKA_BROKERS ?? "localhost:9092").split(",");
-const TOPICS = (
-  process.env.DLQ_TOPICS ??
-  "hello.events.dlq,order.events.dlq,inventory.events.dlq,payment.events.dlq,catalog.events.dlq"
-).split(",");
+const TOPICS = process.env.DLQ_TOPICS?.split(",") ?? KAFKA_DLQ_TOPICS;
 
 async function main() {
   const admin = new Kafka({ clientId: "dlq-drainer", brokers: BROKERS }).admin();
