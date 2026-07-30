@@ -18,10 +18,18 @@ import {
 // were implemented correctly (or at all). These tests exercise handleEvent itself,
 // against the real transaction, to pin the property that matters.
 
+// Tag every order this file seeds so afterAll can find and delete them by a DB
+// query, not an in-memory id list — a mid-suite throw still gets cleaned up.
+// Several tests drive handleEvent with a fake PaymentSucceeded straight into the
+// order database, landing orders in CONFIRMED with no Payment row behind them at
+// all — a state the real system cannot produce. Left uncleaned, that trips
+// INV6_CONFIRMED_INCOMPLETE on every run.
+const TEST_TAG = "test-saga-metrics-int";
+
 async function seedOrder(status: string, totalPrice = 500): Promise<string> {
   const o = await prisma.order.create({
     data: {
-      userId: `u_${randomUUID()}`,
+      userId: `${TEST_TAG}-${randomUUID()}`,
       status,
       totalPrice,
       items: {
@@ -54,6 +62,18 @@ beforeEach(() => {
 describe("saga metrics recording via handleEvent (integration — needs compose up + migrated)", () => {
   afterAll(async () => {
     setSagaMetrics({ observeStep: () => {}, observeSaga: () => {} });
+    // Outbox rows are keyed by aggregateId, not userId, and do not cascade from
+    // Order (no FK) — deleted separately or they keep tripping INV4_OUTBOX_UNSENT.
+    // OrderItem does cascade (onDelete: Cascade in schema.prisma).
+    const seeded = await prisma.order.findMany({
+      where: { userId: { startsWith: TEST_TAG } },
+      select: { id: true },
+    });
+    const ids = seeded.map((o) => o.id);
+    if (ids.length > 0) {
+      await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+      await prisma.order.deleteMany({ where: { id: { in: ids } } });
+    }
     await prisma.$disconnect();
   });
 

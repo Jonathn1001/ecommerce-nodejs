@@ -13,10 +13,18 @@ const app = createApp({ sseRegistry: listener.registry });
 let server: http.Server;
 let baseUrl: string;
 
+// Tag every order this file seeds so afterAll can find and delete them by a DB
+// query, not an in-memory id list — a mid-suite throw still gets cleaned up.
+// The stream test drives handleEvent with a fake PaymentSucceeded straight into
+// the order database, landing an order in CONFIRMED with no Payment row behind
+// it — a state the real system cannot produce. Left uncleaned, that trips
+// INV6_CONFIRMED_INCOMPLETE on every run.
+const TEST_TAG = "test-order-stream-int";
+
 async function seedOrder(
   status: string,
   totalPrice = 500,
-  userId = `u_${randomUUID()}`
+  userId = `${TEST_TAG}-${randomUUID()}`
 ): Promise<{ id: string; userId: string }> {
   const o = await prisma.order.create({
     data: {
@@ -86,6 +94,18 @@ describe("order SSE stream (integration — needs compose up + migrated)", () =>
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await listener.close();
+    // Outbox rows are keyed by aggregateId, not userId, and do not cascade from
+    // Order (no FK) — deleted separately or they keep tripping INV4_OUTBOX_UNSENT.
+    // OrderItem does cascade (onDelete: Cascade in schema.prisma).
+    const seeded = await prisma.order.findMany({
+      where: { userId: { startsWith: TEST_TAG } },
+      select: { id: true },
+    });
+    const ids = seeded.map((o) => o.id);
+    if (ids.length > 0) {
+      await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+      await prisma.order.deleteMany({ where: { id: { in: ids } } });
+    }
     await prisma.$disconnect();
   });
 
