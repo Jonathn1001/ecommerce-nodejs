@@ -18,13 +18,24 @@ new NodeTracerProvider().register();
 const TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const SPAN_ID = "00f067aa0ba902b7";
 
+// Tag the aggregateId this file enqueues under so afterAll can find and delete the
+// rows by a DB query, not an in-memory id list — a mid-suite throw still gets
+// cleaned up. There is no Order row to key off here: the test calls enqueue()
+// directly with a synthetic id, so it leaves two orphan Outbox rows per run that
+// nothing will ever relay, and INV4_OUTBOX_UNSENT reports them forever.
+const TEST_TAG = "test-traceparent-int";
+const tagged = () => `${TEST_TAG}-${randomUUID()}`;
+
 describe("outbox rows capture the active traceparent (integration)", () => {
   afterAll(async () => {
+    await prisma.outbox.deleteMany({
+      where: { aggregateId: { startsWith: TEST_TAG } },
+    });
     await prisma.$disconnect();
   });
 
   it("writes the active span's context onto the row", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = tagged();
     const sc: SpanContext = {
       traceId: TRACE_ID,
       spanId: SPAN_ID,
@@ -41,7 +52,7 @@ describe("outbox rows capture the active traceparent (integration)", () => {
   });
 
   it("writes null when there is no active span, rather than throwing", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = tagged();
     await prisma.$transaction(async (tx) => {
       await placeOrderTx(tx, "t").enqueue("order.placed", orderId, {});
     });
