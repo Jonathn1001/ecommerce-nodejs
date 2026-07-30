@@ -28,6 +28,52 @@ assert() {
   PGBASE="$PGBASE" npx tsx infra/scripts/assert-invariants.ts "$1"
 }
 
+PROM_URL="${PROM_URL:-http://localhost:9090}"
+ALERT_WAIT_SECONDS="${ALERT_WAIT_SECONDS:-180}"
+
+# Waits for the alert WHILE the outage is still running, rather than sampling once.
+#
+# Polling, not a single read, because the firing time is not knowable in advance: the
+# fast-burn's long leg is a 15m rate whose denominator still contains every healthy request
+# from the preceding quarter hour, so how long the ratio takes to cross 14.4% depends on how
+# much healthy traffic came before — and then `for: 30s` adds its own delay on top. A single
+# read at outage_start + 120s missed a real firing by 33 seconds, and under `set -e` that
+# aborted the scenario before the service was restarted, leaving the stack down and a saga
+# stalled. That looked exactly like a lost event until the consumer group showed lag 1 with
+# no member attached.
+#
+# Still bounded to the outage window, never after recovery: the short leg is a 1m rate that
+# decays within about a minute of traffic going healthy, and an alert that has already
+# resolved by the time you look is indistinguishable from one that never fired.
+wait_for_alert() {
+  local want="$1" deadline=$((SECONDS + ALERT_WAIT_SECONDS))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if curl -s "$PROM_URL/api/v1/alerts" | ALERT="$want" python3 -c '
+import sys, json, os
+alerts = json.load(sys.stdin)["data"]["alerts"]
+firing = {a["labels"]["alertname"] for a in alerts if a["state"] == "firing"}
+sys.exit(0 if os.environ["ALERT"] in firing else 1)
+'; then
+      echo "$want fired during the outage"
+      curl -s "$PROM_URL/api/v1/alerts" | python3 -c '
+import sys, json
+alerts = json.load(sys.stdin)["data"]["alerts"]
+for state in ("firing", "pending"):
+    print(f"  {state}:", sorted({a["labels"]["alertname"] for a in alerts if a["state"] == state}))
+'
+      return 0
+    fi
+    sleep 5
+  done
+  echo "FAIL: $want did not fire within ${ALERT_WAIT_SECONDS}s of the outage" >&2
+  curl -s "$PROM_URL/api/v1/alerts" | python3 -c '
+import sys, json
+alerts = json.load(sys.stdin)["data"]["alerts"]
+print("  states seen:", sorted((a["labels"]["alertname"], a["state"]) for a in alerts), file=sys.stderr)
+' >&2
+  return 1
+}
+
 case "$SCENARIO" in
 kafka) # The roadmap's Done-when case: kill the broker mid-saga, lose nothing.
   drive 20 500
@@ -53,6 +99,11 @@ inventory) # A mid-saga service outage: orders pile at PENDING, then drain.
   ;;
 
 poison) # Parks without stalling the partition — the Phase 3b parse fix.
+  # The assertion below is on ABSOLUTE DLQ depth, so this scenario needs a clean start.
+  # Checking rather than pre-draining is deliberate: messages already parked before this
+  # run are a real finding, and silently erasing them would hide it. Drain deliberately
+  # with `npx tsx infra/scripts/drain-dlq.ts` once you have looked at them.
+  assert clean
   npx tsx infra/scripts/publish-poison.ts
   # The valid order placed AFTER the poison message must still reach a terminal state.
   # That is what distinguishes "parked" from "stalled partition"; a suite that only counted
@@ -65,11 +116,43 @@ poison) # Parks without stalling the partition — the Phase 3b parse fix.
   # poison message becomes two DLQ entries. Asserted as a number rather than "non-empty":
   # `assert_clean || true` would make this scenario pass no matter what happened.
   EXPECT_PARKED="${EXPECT_PARKED:-2}" assert poison
+  # Drain what we parked, then prove the stack is clean again. Without this the scenarios
+  # are silently order-dependent: the parked messages fail every later scenario's "clean"
+  # assertion, so running poison before kafka makes kafka look broken. Set KEEP_POISON=1 to
+  # leave the messages in place for inspection.
+  if [ -z "${KEEP_POISON:-}" ]; then
+    npx tsx infra/scripts/drain-dlq.ts
+    assert clean
+  fi
   ;;
 
-order) # Task 7: the only scenario that produces gateway-visible errors.
-  echo "the 'order' scenario is added in Task 7" >&2
-  exit 64
+order) # The ONLY scenario that produces gateway-visible errors, and therefore the only one
+  # that can validate the burn-rate alerts. The gateway proxies order, catalog and payment
+  # and has no /inventory mount at all, so C1's Kafka stop, C2's inventory stop and C3's
+  # poison message move no gateway error counter. Stopping order makes the gateway answer
+  # 503 (open circuit), 504 (timeout) or 502 (unreachable) from proxy.ts, all of which
+  # match status=~"5..". Both /cart and /orders are order-service routes, so every
+  # iteration produces two failures rather than one.
+  #
+  # Two properties are load-bearing, and each fails in a way that looks like a broken rule:
+  #  - The outage must OUTLAST the long window. Fast-burn needs the 1m and 15m legs
+  #    breaching together, and a 15-second blip cannot move a 15m rate.
+  #  - Traffic must KEEP FLOWING throughout. An error rate needs a denominator; a driver
+  #    that stops when requests start failing flattens the rate instead of climbing it.
+  # 600 orders at 500ms is about 300s of traffic, which must span the outage AND the
+  # wait_for_alert poll after it — the alert can need well over two minutes of sustained
+  # errors before it fires, and the driver going quiet first is what flattens the rate.
+  ORDER_OUTAGE_SECONDS="${ORDER_OUTAGE_SECONDS:-90}"
+  drive 600 500
+  sleep 5
+  $COMPOSE stop order
+  sleep "$ORDER_OUTAGE_SECONDS"
+  wait_for_alert "${EXPECT_ALERT:-CheckoutErrorBudgetFastBurn}"
+  # Restart before the driver is done, so recovery is observed under live traffic and the
+  # final assertion covers orders placed on both sides of the outage.
+  $COMPOSE start order
+  settle
+  assert clean
   ;;
 
 *)
