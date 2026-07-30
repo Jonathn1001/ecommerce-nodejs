@@ -161,6 +161,25 @@ describe("invariant checker — DLQ and drain (integration, needs kafka + rabbit
       });
       const timeout = v.find((x) => x.invariant === "DRAIN_TIMEOUT");
 
+      // PRECONDITION, diagnosed after the fact because no pre-check can cover it: "an outbox
+      // row the relay will never send" is only true while no relay is running, and the race
+      // is DURING the wait, not before it. With the compose `app` profile up, order's relay
+      // publishes the row mid-wait, inFlight legitimately reaches zero, and the drain-wait
+      // correctly reports no DRAIN_TIMEOUT. Distinguish that from a broken drain-wait by
+      // asking what happened to the row, rather than failing as "expected undefined to be
+      // defined" and sending the reader after a bug that is not there.
+      if (!timeout) {
+        const after = await sql("order", `SELECT "sentAt" FROM "Outbox" WHERE id = $1`, [
+          id,
+        ]);
+        if (after.rows.length > 0 && after.rows[0].sentAt !== null)
+          throw new Error(
+            "order's outbox relay published the seeded row during the drain-wait, so there " +
+              "was nothing left in flight to time out — stop the compose 'app' profile (or " +
+              "at least order) before running this suite"
+          );
+      }
+
       // A drain-wait that gives up silently is indistinguishable from a clean system, so
       // the count is asserted, not just the violation's presence. inFlight must be a
       // NUMBER: count(*) comes back from pg as a string, and the un-cast version would

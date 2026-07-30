@@ -123,6 +123,17 @@ describe("invariant checker — single-database invariants (integration)", () =>
        VALUES ($1, 'order', $2, 'order.placed', 1, 't', $3, '{}'::jsonb, now())`,
       [id, `inv-${tag}`, `inv-${tag}`]
     );
+    // PRECONDITION, not paranoia: this row is only "unsent" while nothing is draining it.
+    // With the compose `app` profile running, that service's outbox relay publishes it within
+    // a tick and INV4 correctly reports nothing — the assertion below then fails as a bare
+    // "expected undefined to be defined", which reads like a broken checker rather than a
+    // running relay. Fail here instead, saying which it was.
+    const still = await sql(db, `SELECT "sentAt" FROM "Outbox" WHERE id = $1`, [id]);
+    if (still.rows.length === 0 || still.rows[0].sentAt !== null)
+      throw new Error(
+        `${db}'s outbox relay drained the seeded row before the checker read it — ` +
+          `stop the compose 'app' profile (or at least ${db}) before running this suite`
+      );
     const v = await runInvariants({ pgBase: PG, skipDlq: true });
     const hit = v.find((x) => x.invariant === "INV4_OUTBOX_UNSENT" && x.database === db);
     expect(hit).toBeDefined();
