@@ -3,7 +3,9 @@ import { Client } from "pg";
 import { randomUUID } from "crypto";
 import { runInvariants } from "../check-invariants";
 
-const PG = process.env.PGBASE ?? "postgresql://ecom:ecom@localhost:5433";
+// 5432 is what docker-compose.example.yml publishes. Override with PGBASE when the stack is
+// remapped (a machine where something else already holds 5432).
+const PG = process.env.PGBASE ?? "postgresql://ecom:ecom@localhost:5432";
 
 // Mirrors the checker's own OUTBOX_DATABASES (infra/scripts/check-invariants.ts) — kept as a
 // separate literal here on purpose. The whole point of Important-2's fix is a test that would

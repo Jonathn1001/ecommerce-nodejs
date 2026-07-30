@@ -11,18 +11,27 @@ importers:
       '@eslint/js':
         specifier: ^9.17.0
         version: 9.39.5
+      '@types/amqplib':
+        specifier: ^0.10.5
+        version: 0.10.8
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
+      amqplib:
+        specifier: ^0.10.4
+        version: 0.10.9
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)
       eslint-config-prettier:
         specifier: ^9.1.0
         version: 9.1.2(eslint@9.39.5(jiti@2.7.0))
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4
       pg:
         specifier: ^8.22.0
         version: 8.22.0
