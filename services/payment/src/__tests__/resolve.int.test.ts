@@ -7,13 +7,31 @@ import { PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_REFUNDED } from "@ecom/contr
 import { signWebhookBody } from "./sign-webhook";
 
 const app = createApp({ rabbitHealth: async () => {} });
+
+// Tag every orderId this file invents so the cleanup can find and delete the rows by a
+// DB query, not an in-memory id list — a mid-suite throw still gets cleaned up.
+// Resolving a webhook or a refund enqueues an outbox row keyed by orderId, and no relay
+// runs during an integration test, so it sits unsent and INV4_OUTBOX_UNSENT reports it.
+// The cleanup is registered at file level, not inside a describe: there are two describe
+// blocks here and only the first has an afterAll, so a describe-scoped hook would leave
+// the refund block's rows behind.
+const TEST_TAG = "test-resolve-int";
+const taggedOrder = () => `${TEST_TAG}-o-${randomUUID()}`;
+
+afterAll(async () => {
+  // PaymentAttempt cascades from Payment (onDelete: Cascade in schema.prisma);
+  // Outbox has no FK to it, so it is deleted explicitly.
+  await prisma.outbox.deleteMany({ where: { aggregateId: { startsWith: TEST_TAG } } });
+  await prisma.payment.deleteMany({ where: { orderId: { startsWith: TEST_TAG } } });
+});
+
 const postWebhook = (body: object) =>
   request(app)
     .post("/webhooks/payment")
     .set("x-webhook-signature", signWebhookBody(body))
     .send(body);
 const seedProcessing = async (amount = 599): Promise<string> => {
-  const orderId = `o_${randomUUID()}`;
+  const orderId = taggedOrder();
   await prisma.payment.create({ data: { orderId, amount, status: "PROCESSING" } });
   return orderId;
 };
@@ -52,7 +70,7 @@ describe("payment webhook (integration — needs compose up + migrated)", () => 
 
   it("unknown order -> 404; malformed body -> 400", async () => {
     const r404 = await postWebhook({
-      orderId: `o_${randomUUID()}`,
+      orderId: taggedOrder(),
       outcome: "SUCCEEDED",
     });
     expect(r404.status).toBe(404);
@@ -62,7 +80,7 @@ describe("payment webhook (integration — needs compose up + migrated)", () => 
 });
 
 async function seedSucceeded(amount = 500): Promise<string> {
-  const orderId = `o_${randomUUID()}`;
+  const orderId = taggedOrder();
   await prisma.payment.create({ data: { orderId, amount, status: "SUCCEEDED" } });
   return orderId;
 }
@@ -88,7 +106,7 @@ describe("payment refund (integration)", () => {
       (await request(app).post(`/admin/payments/${proc}/refund`).send()).status
     ).toBe(409);
     expect(
-      (await request(app).post(`/admin/payments/o_${randomUUID()}/refund`).send()).status
+      (await request(app).post(`/admin/payments/${taggedOrder()}/refund`).send()).status
     ).toBe(404);
   });
 });

@@ -11,6 +11,14 @@ import { makeEnvelope, ORDER_PLACED } from "@ecom/contracts";
 // outcome, or inside the transaction callback). These tests drive handleOrderEvent
 // itself, against the real transaction, to pin that property.
 
+// Tag every id this file invents so afterAll can find and delete the rows by a DB
+// query, not an in-memory id list — a mid-suite throw still gets cleaned up. Driving
+// the real reserve path enqueues an outbox row keyed by orderId, and no relay runs
+// during an integration test, so it sits unsent and INV4_OUTBOX_UNSENT reports it.
+const TEST_TAG = "test-reservation-metrics-int";
+const taggedProduct = () => `${TEST_TAG}-p-${randomUUID()}`;
+const taggedOrder = () => `${TEST_TAG}-o-${randomUUID()}`;
+
 async function seed(productId: string, available: number) {
   await prisma.inventory.upsert({
     where: { productId },
@@ -39,12 +47,22 @@ beforeEach(() => {
 describe("reservation metrics recording via handleOrderEvent (integration — needs compose up + migrated)", () => {
   afterAll(async () => {
     setReservationMetrics({ observe: () => {} });
+    // No FKs anywhere in this schema, so the deletes are order-independent.
+    await prisma.outbox.deleteMany({
+      where: { aggregateId: { startsWith: `${TEST_TAG}-o` } },
+    });
+    await prisma.reservation.deleteMany({
+      where: { orderId: { startsWith: `${TEST_TAG}-o` } },
+    });
+    await prisma.inventory.deleteMany({
+      where: { productId: { startsWith: `${TEST_TAG}-p` } },
+    });
     await prisma.$disconnect();
   });
 
   it("RESERVED: a satisfiable order records exactly one RESERVED outcome", async () => {
-    const p1 = `p_${randomUUID()}`;
-    const orderId = `o_${randomUUID()}`;
+    const p1 = taggedProduct();
+    const orderId = taggedOrder();
     await seed(p1, 5);
 
     await handleOrderEvent(placed(orderId, [{ productId: p1, quantity: 2 }]));
@@ -53,8 +71,8 @@ describe("reservation metrics recording via handleOrderEvent (integration — ne
   });
 
   it("FAILED: insufficient stock records exactly one FAILED outcome", async () => {
-    const p1 = `p_${randomUUID()}`;
-    const orderId = `o_${randomUUID()}`;
+    const p1 = taggedProduct();
+    const orderId = taggedOrder();
     await seed(p1, 1);
 
     await handleOrderEvent(placed(orderId, [{ productId: p1, quantity: 3 }]));
@@ -63,8 +81,8 @@ describe("reservation metrics recording via handleOrderEvent (integration — ne
   });
 
   it("DUPLICATE: a redelivered event records DUPLICATE on the second delivery only", async () => {
-    const p1 = `p_${randomUUID()}`;
-    const orderId = `o_${randomUUID()}`;
+    const p1 = taggedProduct();
+    const orderId = taggedOrder();
     await seed(p1, 5);
     const env = placed(orderId, [{ productId: p1, quantity: 1 }]);
 
@@ -77,8 +95,8 @@ describe("reservation metrics recording via handleOrderEvent (integration — ne
   });
 
   it("a transaction that rolls back (DB-level failure, not a business FAILED) records nothing", async () => {
-    const p1 = `p_${randomUUID()}`;
-    const orderId = `o_${randomUUID()}`;
+    const p1 = taggedProduct();
+    const orderId = taggedOrder();
     await seed(p1, 5);
 
     // Simulate the transaction itself rejecting (e.g. a connection drop or a

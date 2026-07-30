@@ -8,6 +8,13 @@ import { prisma } from "../db";
 
 const app = createApp();
 
+// Tag the EMAIL rather than the user id: the id is minted by the service, so the test
+// never chooses it and cannot tag it. afterAll resolves the tag to ids with a DB query,
+// which is also why a mid-suite throw still gets cleaned up. Registering enqueues a
+// user_registered outbox row keyed by the new user's id, and no relay runs during an
+// integration test, so it sits unsent and INV4_OUTBOX_UNSENT reports it.
+const TEST_TAG = "test-jwks-int";
+
 describe("JWKS", () => {
   it("publishes the active public key with a kid that matches the token header", async () => {
     const res = await request(app).get("/.well-known/jwks.json").expect(200);
@@ -41,11 +48,23 @@ describe("JWKS", () => {
       });
     });
     afterAll(async () => {
+      // RefreshToken cascades from User (onDelete: Cascade in schema.prisma); Outbox has no
+      // FK to it, so it is deleted explicitly, keyed by the user ids the tag resolves to.
+      // The upserted USER Role is deliberately left alone — the service depends on it.
+      const seeded = await prisma.user.findMany({
+        where: { email: { startsWith: TEST_TAG } },
+        select: { id: true },
+      });
+      const ids = seeded.map((u) => u.id);
+      if (ids.length > 0) {
+        await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+        await prisma.user.deleteMany({ where: { id: { in: ids } } });
+      }
       await prisma.$disconnect();
     });
 
     it("carries a kid the JWKS actually publishes, not just a hand-signed one", async () => {
-      const email = `jwks_${randomUUID()}@example.test`;
+      const email = `${TEST_TAG}-${randomUUID()}@example.test`;
       await request(app)
         .post("/auth/register")
         .send({ email, password: "hunter2hunter2", name: "T" })

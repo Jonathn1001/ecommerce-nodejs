@@ -7,8 +7,28 @@ import { CATALOG_PRICE_CHANGED } from "@ecom/contracts";
 
 const app = createApp();
 
+// Tag the product NAME rather than the id: the id is minted by the service, so the test
+// never chooses it and cannot tag it. afterAll resolves the tag to ids with a DB query,
+// which is also why a mid-suite throw still gets cleaned up. Creating and repricing a
+// product enqueues product_created / product_updated / price_changed outbox rows, and no
+// relay runs during an integration test, so they sit unsent and INV4_OUTBOX_UNSENT
+// reports every one.
+const TEST_TAG = "test-price-lock-int";
+const taggedName = () => `${TEST_TAG}-${randomUUID()}`;
+
 describe("catalog price lock (integration — needs compose up + migrated)", () => {
   afterAll(async () => {
+    // Comment cascades from Product (onDelete: Cascade in schema.prisma); Outbox has no
+    // FK to it, so it is deleted explicitly, keyed by the product ids the tag resolves to.
+    const seeded = await prisma.product.findMany({
+      where: { name: { startsWith: TEST_TAG } },
+      select: { id: true },
+    });
+    const ids = seeded.map((p) => p.id);
+    if (ids.length > 0) {
+      await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+      await prisma.product.deleteMany({ where: { id: { in: ids } } });
+    }
     await prisma.$disconnect();
   });
 
@@ -25,7 +45,7 @@ describe("catalog price lock (integration — needs compose up + migrated)", () 
       .post("/products")
       .send({
         type: "ELECTRONICS",
-        name: `p_${randomUUID()}`,
+        name: taggedName(),
         price: 100,
         attributes: { manufacturer: "m", model: "x", color: "black" },
       })
@@ -64,7 +84,7 @@ describe("catalog price lock (integration — needs compose up + migrated)", () 
       .post("/products")
       .send({
         type: "ELECTRONICS",
-        name: `p_${randomUUID()}`,
+        name: taggedName(),
         price: 100,
         attributes: { manufacturer: "m", model: "x", color: "black" },
       })
