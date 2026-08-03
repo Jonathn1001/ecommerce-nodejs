@@ -135,7 +135,12 @@ Per the umbrella's §Phase 8 design (stack, flows, design language, DoD locked t
    same-origin **`/api/*`** prefix the dev proxy strips, with **Catalog asserting its own
    responses against the shared schemas**; home/product views with loading/error/empty
    states. Stock is **not** shown — it lives in Inventory, which the gateway does not mount.
-2. **8b — Auth + cart + checkout:** cookie login/register, CSRF on mutations, protected routes, cart, place order.
+2. **8b — Auth + cart + checkout:** cookie login/register through the gateway (register returns
+   no tokens, so it lands on a prefilled sign-in), CSRF on every mutation, protected routes with
+   a return-to, the server cart joined against the catalogue for names, and place order. The
+   session is derived from `GET /cart`, **not** from the readable CSRF cookie — that cookie
+   outlives an expired refresh token, and refreshing on an anonymous 401 would bounce a visitor
+   off the public catalogue. Frontend only: no service production code changed.
 3. **8c — Order-pipeline tracker + polish:** SSE tracker (the signature element, per the approved prototype), polling fallback, order history, a11y + `prefers-reduced-motion`, Playwright e2e, Dockerfile + prod profile.
 
 **Risks:** ~~dual-build breaking the consuming services~~ — withdrawn in 8a, so the risk is
