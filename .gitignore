@@ -13,6 +13,9 @@ node_modules
 *audit.json
 
 # --- monorepo additions ---
+# agent scratch: plan ledgers, task briefs, review packages. Local working notes only.
+.scratch/
+.superpowers/
 dist/
 docker-compose.yml
 **/generated/

@@ -138,8 +138,8 @@ describe("order cart/order API satisfies the shared contracts", () => {
     // UNPRICED (422), so seed one directly, exactly as the existing suites do.
     await prisma.catalogReadModel.upsert({
       where: { productId },
-      create: { productId, price: 900, version: 1 },
-      update: { price: 900, version: 1 },
+      create: { productId, name: "contract widget", price: 900, version: 1 },
+      update: { name: "contract widget", price: 900, version: 1 },
     });
     await request(app)
       .post("/cart/items")
@@ -169,8 +169,8 @@ describe("order cart/order API satisfies the shared contracts", () => {
     const productId = `p_${randomUUID()}`;
     await prisma.catalogReadModel.upsert({
       where: { productId },
-      create: { productId, price: 500, version: 1 },
-      update: { price: 500, version: 1 },
+      create: { productId, name: "contract widget", price: 500, version: 1 },
+      update: { name: "contract widget", price: 500, version: 1 },
     });
     await request(app)
       .post("/cart/items")
@@ -1323,7 +1323,9 @@ it("changes a quantity with PATCH, not a repeated POST", async () => {
     cart: { userId: "u1", items: [{ productId: "p1", quantity: 2 }] },
   });
   vi.spyOn(productsApi, "listProducts").mockResolvedValue([product()]);
-  const set = vi.spyOn(cartApi, "setQuantity").mockResolvedValue(undefined);
+  const set = vi
+    .spyOn(cartApi, "setQuantity")
+    .mockResolvedValue({ productId: "p1", quantity: 3 });
   const add = vi.spyOn(cartApi, "addItem");
   renderCart();
   await screen.findByText("Widget");
