@@ -13,17 +13,27 @@ export function Login() {
   const [email, setEmail] = useState(state?.email ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const res = await login(email, password);
-    if (res.status === 401) return setError("That email or password is wrong.");
-    if (res.status === 429)
-      return setError("Too many attempts. Wait a minute and try again.");
-    if (!res.ok) return setError("Could not sign in. Try again.");
-    await invalidate();
-    navigate(state?.from ?? "/", { replace: true });
+    setPending(true);
+    try {
+      const res = await login(email, password);
+      if (res.status === 401) return setError("That email or password is wrong.");
+      if (res.status === 429)
+        return setError("Too many attempts. Wait a minute and try again.");
+      if (!res.ok) return setError("Could not sign in. Try again.");
+      await invalidate();
+      navigate(state?.from ?? "/", { replace: true });
+    } catch {
+      // authRequest wraps a genuine network failure in NetworkError; either way, a rejected
+      // promise here must not be an unhandled one and the submit button must recover.
+      setError("Could not reach the server. Check your connection.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -44,8 +54,16 @@ export function Login() {
         required
       />
       {error ? <p className="text-sm text-[color:var(--color-fail)]">{error}</p> : null}
-      <Button type="submit">Sign in</Button>
-      <Link to="/register" className="datum text-sm underline">
+      <Button type="submit" disabled={pending}>
+        Sign in
+      </Button>
+      {/* Carry `from` through the register detour so add-to-cart -> login -> register ->
+          login still returns to the product instead of dropping back to "/". */}
+      <Link
+        to="/register"
+        state={{ from: state?.from }}
+        className="datum text-sm underline"
+      >
         Create an account
       </Link>
     </form>

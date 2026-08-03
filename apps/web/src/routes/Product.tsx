@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
-import { HttpError } from "../api/errors";
+import { HttpError, UnauthenticatedError } from "../api/errors";
 import { getProduct } from "../api/products";
 import { addItem } from "../api/cart";
 import { Badge } from "../components/Badge";
@@ -39,8 +39,20 @@ export function Product() {
       navigate("/login", { state: { from: location.pathname } });
       return;
     }
-    await addItem(productId, 1);
-    await invalidate();
+    try {
+      await addItem(productId, 1);
+      await invalidate();
+    } catch (e) {
+      // The cached session said authenticated, but the refresh token died in between (mid
+      // session, not on this click) and request() gave up after its one retry. Catch up with
+      // the server's decision instead of letting the click land as an unhandled rejection.
+      if (e instanceof UnauthenticatedError) {
+        await invalidate();
+        navigate("/login", { state: { from: location.pathname } });
+        return;
+      }
+      throw e;
+    }
   }
 
   if (isPending) return <Skeleton />;
@@ -70,7 +82,10 @@ export function Product() {
         <h1 className="text-3xl">{data.name}</h1>
         <Price minorUnits={data.price} />
         <div>
-          <Button onClick={() => void add(data.id)}>Add to cart</Button>
+          {/* A fast click on a cold load must not read a still-loading probe as anonymous. */}
+          <Button disabled={session.isPending} onClick={() => void add(data.id)}>
+            Add to cart
+          </Button>
         </div>
         <dl className="border-t border-[color:var(--color-line)]">
           {primitiveEntries(data.attributes).map(([k, v]) => (

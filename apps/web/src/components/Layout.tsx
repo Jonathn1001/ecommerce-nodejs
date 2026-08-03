@@ -9,8 +9,17 @@ export function Layout() {
   const navigate = useNavigate();
   const count = (data?.cart?.items ?? []).reduce((n, i) => n + i.quantity, 0);
 
+  // Logout sits behind the 10/min auth limiter, so a 429 is reachable and leaves the cookies
+  // in place — invalidating and navigating home on that response would show a signed-out
+  // header for a session the server never ended. A network failure must not become an
+  // unhandled rejection either, so both are caught and treated as "nothing happened".
   async function signOut() {
-    await logout();
+    try {
+      const res = await logout();
+      if (!res.ok) return;
+    } catch {
+      return;
+    }
     await invalidate();
     navigate("/");
   }

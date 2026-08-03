@@ -45,3 +45,13 @@ it("redirects to login when there is no session", async () => {
   renderGuarded();
   expect(await screen.findByText("sign in please")).toBeInTheDocument();
 });
+
+// The whole reason the PENDING branch exists: redirecting during load would flash a
+// signed-in user to /login on every cold start, before the probe has had a chance to answer.
+it("shows the skeleton while the probe is pending, and redirects nowhere", async () => {
+  vi.spyOn(session, "probeSession").mockReturnValue(new Promise(() => {}));
+  renderGuarded();
+  expect(await screen.findByTestId("skeleton")).toBeInTheDocument();
+  expect(screen.queryByText("sign in please")).not.toBeInTheDocument();
+  expect(screen.queryByText("the cart")).not.toBeInTheDocument();
+});
