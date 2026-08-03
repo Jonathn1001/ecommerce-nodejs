@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { HttpError } from "../api/errors";
 import { getProduct } from "../api/products";
+import { addItem } from "../api/cart";
 import { Badge } from "../components/Badge";
+import { Button } from "../components/Button";
 import { ErrorState } from "../components/ErrorState";
 import { Price } from "../components/Price";
 import { Silhouette } from "../components/Silhouette";
 import { Skeleton } from "../components/Skeleton";
+import { useInvalidateSession, useSession } from "../hooks/useSession";
 
 // attributes values are `unknown` by contract. Render primitives; skip everything else rather
 // than emitting "[object Object]". Values are API-sourced strings, so they go through React's
@@ -23,6 +26,22 @@ export function Product() {
     queryKey: ["product", id],
     queryFn: () => getProduct(id),
   });
+  const navigate = useNavigate();
+  const location = useLocation();
+  const session = useSession();
+  const invalidate = useInvalidateSession();
+
+  // The cart is keyed by userId server-side — there is no anonymous cart to fill. Send the
+  // visitor to sign in and bring them back here, rather than hiding the button and making the
+  // catalogue read as a brochure.
+  async function add(productId: string) {
+    if (!session.data?.authenticated) {
+      navigate("/login", { state: { from: location.pathname } });
+      return;
+    }
+    await addItem(productId, 1);
+    await invalidate();
+  }
 
   if (isPending) return <Skeleton />;
 
@@ -50,6 +69,9 @@ export function Product() {
         <Badge>{data.type}</Badge>
         <h1 className="text-3xl">{data.name}</h1>
         <Price minorUnits={data.price} />
+        <div>
+          <Button onClick={() => void add(data.id)}>Add to cart</Button>
+        </div>
         <dl className="border-t border-[color:var(--color-line)]">
           {primitiveEntries(data.attributes).map(([k, v]) => (
             <div
