@@ -128,11 +128,22 @@ Effectively greenfield (legacy is a stub). The **RabbitMQ showcase** phase.
 Per the umbrella's §Phase 8 design (stack, flows, design language, DoD locked there).
 
 **Slices**
-1. **8a — Foundation + catalogue:** **contracts dual ESM+CJS build FIRST, CI-gated** (exports map; gate = ALL consuming services — by then hello/inventory/order/payment/catalog/notification/identity/gateway — stay green); `apps/web` (Vite + React + TS + Tailwind) into `pnpm-workspace.yaml`; gateway client with zod boundary validation; home/product views with loading/error/empty states.
+1. **8a — Foundation + catalogue:** `apps/*` into `pnpm-workspace.yaml` with
+   `packages/contracts` consumed as TypeScript source (**the dual ESM+CJS build originally
+   specified here was withdrawn in 8a — see that child spec §A1**); `apps/web` (Vite + React
+   + TS + Tailwind); gateway client with zod boundary validation, reaching the gateway over a
+   same-origin **`/api/*`** prefix the dev proxy strips, with **Catalog asserting its own
+   responses against the shared schemas**; home/product views with loading/error/empty
+   states. Stock is **not** shown — it lives in Inventory, which the gateway does not mount.
 2. **8b — Auth + cart + checkout:** cookie login/register, CSRF on mutations, protected routes, cart, place order.
 3. **8c — Order-pipeline tracker + polish:** SSE tracker (the signature element, per the approved prototype), polling fallback, order history, a11y + `prefers-reduced-motion`, Playwright e2e, Dockerfile + prod profile.
 
-**Risks:** dual-build breaking the consuming services → do it first, contract tests against both outputs; EventSource + cookie via proxy → de-risked in 6b, verify the fallback; tracker design bar → prototype is the reference, component tests per saga-state rendering.
+**Risks:** ~~dual-build breaking the consuming services~~ — withdrawn in 8a, so the risk is
+gone with it; instead, contracts drifting from what Catalog actually serves → **Catalog
+asserts its own responses against the shared schemas**, so drift fails a backend test beside
+the change that caused it; EventSource + cookie via proxy → de-risked in 6b, verify the
+fallback; tracker design bar → prototype is the reference, component tests per saga-state
+rendering.
 
 **Parked for child specs:** React 18 vs 19 (umbrella: latest at build time); SSE frame DTO shape in contracts; Playwright in CI vs local-only. Note: the CI `quality` job auto-globs only `services/*` — `apps/web` needs hand-wiring + a Playwright lane.
 
@@ -166,7 +177,7 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | Compose: mailpit | **5** |
 | Compose: prometheus / grafana / jaeger | **7** |
 | Per-service compose `app` entries + hand-added CI integration steps | every phase (part of its DoD) |
-| Contracts dual ESM+CJS build | **8** (8a, first slice, CI-gated) |
+| ~~Contracts dual ESM+CJS build~~ — **withdrawn in 8a**; contracts stays TypeScript source | — |
 | Gateway timeouts + circuit breaker (umbrella §Resilience) | **6** (6b) |
 | `x-user-id` → verified-identity retrofit across existing services | **6** (6b) |
 | Dedup-pattern guidance in `shared` (ProcessedEvent vs Redis `markProcessed`) | **5** (5a decides + documents) |

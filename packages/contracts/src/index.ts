@@ -5,3 +5,4 @@ export * from "./events/inventory";
 export * from "./events/payment";
 export * from "./events/catalog";
 export * from "./events/identity";
+export * from "./http/catalog";

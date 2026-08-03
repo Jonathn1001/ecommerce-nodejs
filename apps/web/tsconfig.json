@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // `globals: true` in vitest.config.ts means vi/it/expect are ambient — without
+    // "vitest/globals" here every test file fails `pnpm typecheck` on unresolved names.
+    "types": ["vite/client", "vitest/globals"]
+  },
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "vitest.setup.ts"]
+}
