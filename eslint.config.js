@@ -22,5 +22,13 @@ module.exports = tseslint.config(
     languageOptions: {
       globals: { __ENV: "readonly", __VU: "readonly", __ITER: "readonly" },
     },
+  },
+  {
+    // The storefront runs in a browser with JSX, neither of which the service configs cover.
+    files: ["apps/web/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: { ecmaFeatures: { jsx: true } },
+      globals: { window: "readonly", document: "readonly", fetch: "readonly" },
+    },
   }
 );
