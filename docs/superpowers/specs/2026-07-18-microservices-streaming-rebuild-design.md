@@ -348,9 +348,17 @@ build time. Playwright (frontend e2e) joins the Testing inventory above.
 
 **Storefront Definition of Done**
 - [ ] Talks only to the Gateway; DTOs imported from `contracts`; responses zod-validated.
-- [ ] `apps/*` added to `pnpm-workspace.yaml`; `packages/contracts` builds **dual
-      ESM+CJS** so the ESM/Vite app can import the (CJS) contracts cleanly.
-- [ ] Env-based config (Gateway URL); zero secrets in the bundle.
+- [ ] `apps/*` added to `pnpm-workspace.yaml`. `packages/contracts` is consumed as
+      **TypeScript source** via its `main: src/index.ts`, exactly as all eight services
+      consume it in dev and production (see each service Dockerfile's "NO tsc build step"
+      comment). **A dual ESM+CJS build was specified here and withdrawn in 8a**: nothing in
+      the repo imports `contracts/dist`, so the stated reason — "so the ESM/Vite app can
+      import the (CJS) contracts cleanly" — did not hold.
+- [ ] Env-based config (Gateway URL) at the **proxy layer** — Vite's dev server and 8c's
+      nginx — so no gateway host and zero secrets enter the bundle. The browser calls
+      same-origin **`/api/*`**, which the proxy strips before forwarding; 8a rooted those
+      paths at `/products` first and found the API prefix shadowing the storefront's own
+      `/products/:id` page, so a hard refresh returned JSON instead of the app.
 - [ ] Loading / error / empty state for every async view.
 - [ ] Auth: login/register via Identity; JWT in an **httpOnly Secure SameSite
       cookie** (never in JS); **CSRF token** on mutations; protected routes.
