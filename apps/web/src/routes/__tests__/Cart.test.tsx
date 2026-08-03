@@ -2,8 +2,10 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { makeQueryClient } from "../../api/queryClient";
+import { HttpError } from "../../api/errors";
 import * as productsApi from "../../api/products";
 import * as cartApi from "../../api/cart";
+import * as ordersApi from "../../api/orders";
 import * as session from "../../api/session";
 import { Cart } from "../Cart";
 
@@ -87,4 +89,20 @@ it("shows an empty state for an empty cart", async () => {
   vi.spyOn(productsApi, "listProducts").mockResolvedValue([]);
   renderCart();
   expect(await screen.findByText(/cart is empty/i)).toBeInTheDocument();
+});
+
+it.each([
+  [400, /cart is empty/i],
+  [422, /no price yet/i],
+])("explains a %i from checkout instead of a generic error", async (status, pattern) => {
+  vi.spyOn(session, "probeSession").mockResolvedValue({
+    authenticated: true,
+    cart: { userId: "u1", items: [{ productId: "p1", quantity: 1 }] },
+  });
+  vi.spyOn(productsApi, "listProducts").mockResolvedValue([product()]);
+  vi.spyOn(ordersApi, "placeOrder").mockRejectedValue(new HttpError(status));
+  renderCart();
+  await screen.findByText("Widget");
+  fireEvent.click(screen.getByRole("button", { name: /place order/i }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(pattern);
 });

@@ -1,7 +1,11 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router";
 import { listProducts } from "../api/products";
 import { removeItem, setQuantity } from "../api/cart";
+import { describeCheckoutFailure, placeOrder } from "../api/orders";
 import { useInvalidateSession, useSession } from "../hooks/useSession";
+import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { Price } from "../components/Price";
@@ -11,6 +15,8 @@ export function Cart() {
   const invalidate = useInvalidateSession();
   const session = useSession();
   const products = useQuery({ queryKey: ["products"], queryFn: listProducts });
+  const navigate = useNavigate();
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   if (session.isPending || products.isPending) return <Skeleton />;
   if (session.error) return <ErrorState error={session.error} />;
@@ -30,6 +36,19 @@ export function Cart() {
     if (quantity <= 0) await removeItem(productId);
     else await setQuantity(productId, quantity);
     await invalidate();
+  }
+
+  async function checkout() {
+    setCheckoutError(null);
+    try {
+      const placed = await placeOrder();
+      // POST /orders clears the cart inside the same transaction that writes the order, so
+      // the badge is stale the moment this returns.
+      await invalidate();
+      navigate(`/orders/${placed.orderId}`);
+    } catch (e) {
+      setCheckoutError(describeCheckoutFailure(e));
+    }
   }
 
   return (
@@ -72,6 +91,12 @@ export function Cart() {
         </span>
         <Price minorUnits={estimate} />
       </p>
+      {checkoutError ? (
+        <p role="alert" className="text-sm text-[color:var(--color-fail)]">
+          {checkoutError}
+        </p>
+      ) : null}
+      <Button onClick={() => void checkout()}>Place order</Button>
     </div>
   );
 }
