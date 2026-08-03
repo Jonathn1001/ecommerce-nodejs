@@ -44,16 +44,16 @@ Verified by reading the services, not assumed from the roadmap.
 
 | Capability | Endpoint | Owner |
 |---|---|---|
-| Register | `POST /auth/register` | gateway → identity |
+| Register | `POST /auth/register` → 201 `{userId}`, **no tokens**; 409 on duplicate email | gateway → identity |
 | Login | `POST /auth/login` → sets cookies, returns `{ok:true}` | gateway → identity |
 | Refresh | `POST /auth/refresh` → cookie in, cookies out | gateway → identity |
 | Logout | `POST /auth/logout` → clears cookies | gateway → identity |
 | Read cart | `GET /cart` → `{userId, items:[{productId, quantity}]}` | order |
-| Add item | `POST /cart/items` | order |
+| Add item | `POST /cart/items` → 201 `{productId}` | order |
 | Change quantity | `PATCH /cart/items/:productId` | order |
 | Remove item | `DELETE /cart/items/:productId` | order |
 | Place order | `POST /orders` → 201 `{orderId, status, totalPrice, items[]}` | order |
-| Read order | `GET /orders/:id` → 404 for someone else's | order |
+| Read order | `GET /orders/:id` → `{id, userId, status, totalPrice, items[], createdAt}`; 404 for someone else's | order |
 
 Two behaviours worth stating because they are easy to invert: `POST /cart/items`
 **increments** an existing line (`update: { quantity: { increment } }`), so adding the same
@@ -81,6 +81,22 @@ payload is the cart the header badge needs anyway — one request answers both q
 expired access token resolves itself inside that request through §B2's refresh, so the answer
 that comes back is already correct.
 
+**The probe must not drag an anonymous visitor into the refresh path.** `GET /cart` is
+`authRequired` at the gateway, so a logged-out visitor gets 401 — and §B2 turns every 401 into
+a refresh, which would fail and route them to `/login`. Left there, loading the public
+catalogue would bounce an anonymous user to a login form and burn two of the ten permitted
+auth requests per minute doing it. That regresses the thing 8a shipped.
+
+Two rules close it:
+
+1. **No `XSRF-TOKEN` cookie means no session to refresh.** Skip the refresh entirely and
+   resolve "logged out". This reads the cookie as a *negative* signal, which is sound: the
+   gateway only ever sets it alongside a session. It does not contradict the paragraph above,
+   which refuses to trust its *presence* as proof of one.
+2. **A failed refresh on the session probe resolves to "logged out", not a redirect.**
+   Redirecting is the response to an unauthenticated *protected route or mutation*, never to
+   the question "is anyone logged in?".
+
 Adding `GET /auth/me` would be the conventional choice and is a reasonable 8c change if order
 history wants a display name. It is not worth breaking this slice's frontend-only property.
 
@@ -97,7 +113,10 @@ Signature becomes `request<T>(path, schema, init?)`. Three additions:
 - **CSRF.** On `POST`/`PATCH`/`DELETE`, read `XSRF-TOKEN` and send it as `X-CSRF-Token`. The
   gateway's guard compares the two and rejects a mismatch with 403. If the cookie is absent
   there is no session at all, which is a client-side fact — raise the typed error immediately
-  rather than spending a round trip to be told.
+  rather than spending a round trip to be told. The exempt list is
+  `/auth/(login|register|refresh)` and the payment webhook, so **`/auth/logout` is not exempt**
+  and needs the header like any other mutation — the one call where a reader is likely to
+  assume otherwise.
 - **401 handling.** See B2.
 
 ### B2. One refresh at a time, and exactly one retry
@@ -122,7 +141,24 @@ server made.
 **The test asserts the number of refresh calls, not just the eventual outcome.** An
 implementation that refreshes per-request passes every outcome-shaped assertion.
 
-### B3. Auth errors are not the generic taxonomy
+### B3. Registering does not sign you in
+
+`POST /auth/register` returns 201 `{userId}` and **no tokens**, and the gateway does not set
+cookies on that path — unlike login, which does. A user who registers is therefore still
+anonymous, and any flow that assumes otherwise will send them straight into a 401.
+
+**After a successful register, land on the login form with the email prefilled.** The
+alternative, firing a follow-up `POST /auth/login` with the credentials still in memory, is
+smoother but spends a second of the ten-per-minute auth budget, adds a failure mode with
+nothing useful to say when it fails ("registered, but could not sign in"), and keeps a
+password in memory past the point it was needed. Prefilling costs one field and leaves the
+user in a state they can see and act on.
+
+**409 `email already registered`** is the likeliest registration failure and belongs on the
+email field, not in the generic error state — the same argument §D1 makes for `cart is empty`.
+It also wants a link to sign in instead.
+
+### B4. Auth errors are not the generic taxonomy
 
 8a's three errors stay. 8b adds the distinction between *unauthenticated* (no session, or one
 that could not be refreshed → go to `/login`) and *rejected credentials* (a 401 from
@@ -155,7 +191,9 @@ the catalogue.
 
 The cart page joins against `listProducts()`, which 8a already fetches for Home, React Query
 already caches, and which returns the entire catalogue in one response — so the join costs no
-extra request. A product absent from that list (deleted since it was added) **degrades to its
+extra request. `/products` is mounted `authOptional`, so that join keeps working while logged
+out and while a session is expiring, which matters because the same join renders the order
+confirmation. A product absent from that list (deleted since it was added) **degrades to its
 id**; it does not blank the row or crash the page. That case is reachable without anything
 being broken.
 
@@ -191,7 +229,12 @@ in one click.
 ### D2. Confirmation
 
 201 routes to `/orders/:id`, which renders the order's items at their captured `unitPrice`,
-the total, and the status as returned. Product names come from the same catalogue join as the
+the total, and the status as returned.
+
+**Checkout invalidates the cart query.** `POST /orders` clears the cart *inside the same
+transaction* that writes the order, so the server cart is empty the moment the call returns.
+Without invalidation the header badge keeps showing the old count until something else
+refetches — a stale number on the screen immediately after the action that emptied it. Product names come from the same catalogue join as the
 cart, with the same id fallback — an order outlives the product it references.
 
 ### D3. Status is static in 8b
@@ -211,8 +254,22 @@ reload. That is acceptable for one slice and is the first thing 8c fixes.
 
 ## E. Contracts and drift
 
-`packages/contracts/src/http/order.ts` gains `CartSchema`, `CartItemSchema`, `OrderSchema` and
-`OrderItemSchema`, exported from the package index.
+`packages/contracts/src/http/order.ts` gains `CartSchema`, `CartItemSchema`, `OrderItemSchema`,
+`PlacedOrderSchema` and `OrderDetailSchema`, exported from the package index.
+
+**Two order schemas, because Order returns two shapes** — the same situation 8a met with the
+catalogue (§B1 there), and it must not be modelled as one:
+
+| | `POST /orders` (201) | `GET /orders/:id` (200) |
+|---|---|---|
+| identifier | `orderId` | `id` |
+| `userId` | absent | present |
+| `createdAt` | absent | present |
+| `status`, `totalPrice`, `items[]` | present | present |
+
+A single schema forces either an optional identifier — which defeats the point, since a
+missing id would parse clean — or a rename that one of the two endpoints will fail. Both
+schemas share `OrderItemSchema` (`productId`, `quantity`, `unitPrice`).
 
 As in 8a, **the Order service asserts its own responses against them** in a new integration
 test. A client that validates alone discovers drift in a browser; a backend that validates
@@ -236,6 +293,13 @@ Component tests (jsdom, Testing Library) for:
 5. The cart joins names from the catalogue and degrades to the id for a missing product.
 6. `cart is empty` and `unpriced product` each render their own recovery, not the error state.
 7. A rejected login stays on the form; an unauthenticated session redirects.
+8. **An anonymous visitor loading a public page issues no `POST /auth/refresh` at all** and is
+   not redirected — the regression §A1 exists to prevent.
+9. A successful register lands on the login form with the email prefilled; a 409 shows on the
+   email field with a link to sign in.
+10. Both order schemas parse their own endpoint's real response, and `PlacedOrderSchema`
+    rejects a `GET /orders/:id` body (and vice versa) — proof the two shapes were not
+    collapsed.
 
 Plus the Order contract test in §E.
 
@@ -256,6 +320,9 @@ mutations.
 | 3 | No `GET /auth/me` | §A1 — not worth breaking the frontend-only property |
 | 4 | Gate add-to-cart behind login | §C1 — no anonymous cart exists to fill |
 | 5 | Single-flight refresh, retry once | §B2 — reuse detection and a 10/min limit |
+| 5a | No `XSRF-TOKEN` ⇒ skip refresh, resolve logged-out | §A1 — otherwise anonymous browsing redirects to `/login` |
+| 5b | Register lands on the login form, email prefilled | §B3 — register returns no tokens; auto-login buys little and can fail mutely |
+| 5c | Two order schemas, not one | §E — `POST` and `GET` genuinely differ, including the id's key |
 | 6 | Cart total is an estimate, labelled | §C3 — pricing is authoritative only at place time |
 | 7 | Catalogue join for names, id fallback | §C2 — cart and order carry no names |
 | 8 | Static status; no polling | §D3 — liveness is 8c's subject, whole |
@@ -265,15 +332,17 @@ mutations.
 
 ## H. Definition of Done
 
-- [ ] Register, login and logout work end-to-end against the real gateway.
+- [ ] Register, login and logout work end-to-end against the real gateway, with register
+      landing on the prefilled login form.
 - [ ] Protected routes redirect when unauthenticated and return after login.
+- [ ] **Anonymous browsing of the catalogue triggers no refresh and no redirect.**
 - [ ] Cart add / quantity change / remove, each invalidating the cart query.
 - [ ] Checkout places an order and routes to a confirmation view.
 - [ ] `cart is empty` and `unpriced product` each have their own recovery path.
 - [ ] Concurrent 401s produce exactly one refresh, asserted by call count.
 - [ ] No token, secret or gateway URL in the bundle; the browser calls only `/api/*`.
-- [ ] `CartSchema` / `OrderSchema` in contracts, asserted by Order's own test, proven to fail
-      on a renamed field.
+- [ ] `CartSchema`, `PlacedOrderSchema` and `OrderDetailSchema` in contracts, asserted by
+      Order's own test, proven to fail on a renamed field.
 - [ ] `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm -r build` all clean.
 - [ ] Browser pass walked and recorded.
 
@@ -281,6 +350,11 @@ mutations.
 
 - Order status is static until 8c.
 - The cart total can differ from the charged total when a price changes mid-session (§C3).
+  **8b does not warn when it does.** Detecting the divergence means carrying the estimate
+  across the checkout mutation into the confirmation view — state plumbing for a case that
+  needs a price to change inside one session. The cart labels its own total as an estimate and
+  the confirmation shows the authoritative one, which is honest without the extra machinery.
+  Worth revisiting if 8c's order history makes the estimate worth persisting anyway.
 - No guest cart (§C1).
 - CSRF tokens remain unbound to a session — a Phase 6 limitation, unchanged here.
 - The auth rate limit is 10/min per IP, which a developer hammering login can hit.
