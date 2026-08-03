@@ -7,6 +7,15 @@ import { ORDER_PLACED } from "@ecom/contracts";
 
 const app = createApp();
 
+// Tag every caller this file checks out as, so afterAll can find and delete their
+// orders by a DB query, not an in-memory id list — a mid-suite throw still gets
+// cleaned up. These orders are placed through the real route, so they are
+// legitimate PENDING rows with a real unsent OrderPlaced outbox entry; nothing
+// advances or relays them during an integration test, so they sit there tripping
+// INV1_ORDER_TERMINAL and INV4_OUTBOX_UNSENT at two per run.
+const TEST_TAG = "test-order-int";
+const tagged = () => `${TEST_TAG}-${randomUUID()}`;
+
 async function seedPrice(productId: string, price: number) {
   await prisma.catalogReadModel.upsert({
     where: { productId },
@@ -23,11 +32,23 @@ async function addToCart(userId: string, productId: string, quantity: number) {
 
 describe("order checkout (integration — needs docker compose up + migrated)", () => {
   afterAll(async () => {
+    // Outbox rows are keyed by aggregateId, not userId, and do not cascade from
+    // Order (no FK) — deleted separately or they keep tripping INV4_OUTBOX_UNSENT.
+    // OrderItem does cascade (onDelete: Cascade in schema.prisma).
+    const seeded = await prisma.order.findMany({
+      where: { userId: { startsWith: TEST_TAG } },
+      select: { id: true },
+    });
+    const ids = seeded.map((o) => o.id);
+    if (ids.length > 0) {
+      await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+      await prisma.order.deleteMany({ where: { id: { in: ids } } });
+    }
     await prisma.$disconnect();
   });
 
   it("POST /orders prices the cart, writes a PENDING order + items + OrderPlaced outbox, clears the cart", async () => {
-    const userId = `u_${randomUUID()}`;
+    const userId = tagged();
     const p1 = `p_${randomUUID()}`;
     const p2 = `p_${randomUUID()}`;
     await seedPrice(p1, 100);
@@ -54,7 +75,7 @@ describe("order checkout (integration — needs docker compose up + migrated)", 
   });
 
   it("422 UNPRICED leaves no order, no outbox, and the cart intact", async () => {
-    const userId = `u_${randomUUID()}`;
+    const userId = tagged();
     const pOK = `p_${randomUUID()}`;
     const pBad = `p_${randomUUID()}`; // never priced
     await seedPrice(pOK, 100);
@@ -70,13 +91,13 @@ describe("order checkout (integration — needs docker compose up + migrated)", 
   });
 
   it("400 when the cart is empty", async () => {
-    const userId = `u_${randomUUID()}`;
+    const userId = tagged();
     const res = await request(app).post("/orders").set("x-user-id", userId);
     expect(res.status).toBe(400);
   });
 
   it("GET /orders/:id returns the order; 404 when unknown", async () => {
-    const userId = `u_${randomUUID()}`;
+    const userId = tagged();
     const pid = `p_${randomUUID()}`;
     await seedPrice(pid, 300);
     await addToCart(userId, pid, 2);

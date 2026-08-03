@@ -10,6 +10,16 @@ import {
   type EventEnvelope,
 } from "@ecom/contracts";
 
+// Tag every orderId this file invents so afterAll can find and delete the rows by a
+// DB query, not an in-memory id list — a mid-suite throw still gets cleaned up.
+// Charging enqueues a PaymentSucceeded/PaymentFailed outbox row keyed by orderId, and
+// no relay runs during an integration test, so it sits unsent and INV4_OUTBOX_UNSENT
+// reports it. The Payment rows go too: they carry orderIds that exist in no order
+// database, which is not a violation today but does inflate the SUCCEEDED set that
+// INV2 and INV6 intersect against.
+const TEST_TAG = "test-charge-int";
+const taggedOrder = () => `${TEST_TAG}-o-${randomUUID()}`;
+
 function chargeCmd(orderId: string, amount: number, userId: string): EventEnvelope {
   return makeEnvelope({
     type: CHARGE_PAYMENT,
@@ -38,11 +48,17 @@ const userIdOf = async (orderId: string) =>
 
 describe("payment charge consumer (integration — needs docker compose up + migrated)", () => {
   afterAll(async () => {
+    // PaymentAttempt cascades from Payment (onDelete: Cascade in schema.prisma);
+    // Outbox has no FK to it, so it is deleted explicitly.
+    await prisma.outbox.deleteMany({
+      where: { aggregateId: { startsWith: TEST_TAG } },
+    });
+    await prisma.payment.deleteMany({ where: { orderId: { startsWith: TEST_TAG } } });
     await prisma.$disconnect();
   });
 
   it("charges a success amount -> Payment SUCCEEDED + one PaymentSucceeded outbox + one attempt", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = taggedOrder();
     const userId = `u_${randomUUID()}`;
     await handleChargePayment(chargeCmd(orderId, 500, userId));
     expect(await statusOf(orderId)).toBe("SUCCEEDED");
@@ -53,7 +69,7 @@ describe("payment charge consumer (integration — needs docker compose up + mig
   });
 
   it("declines a ...01 amount -> Payment FAILED + one PaymentFailed outbox", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = taggedOrder();
     const userId = `u_${randomUUID()}`;
     await handleChargePayment(chargeCmd(orderId, 101, userId));
     expect(await statusOf(orderId)).toBe("FAILED");
@@ -61,7 +77,7 @@ describe("payment charge consumer (integration — needs docker compose up + mig
   });
 
   it("dedupes a redelivered command -> one payment, one ProcessedEvent", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = taggedOrder();
     const cmd = chargeCmd(orderId, 500, `u_${randomUUID()}`);
     await handleChargePayment(cmd);
     await handleChargePayment(cmd); // same eventId
@@ -72,7 +88,7 @@ describe("payment charge consumer (integration — needs docker compose up + mig
   });
 
   it("re-sent command (new eventId, same order) -> still one payment (ALREADY_CHARGED)", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = taggedOrder();
     const userId = `u_${randomUUID()}`;
     await handleChargePayment(chargeCmd(orderId, 500, userId));
     await handleChargePayment(chargeCmd(orderId, 500, userId)); // different eventId
@@ -84,7 +100,7 @@ describe("payment charge consumer (integration — needs docker compose up + mig
   // DLQ the command forever, leaving its order stuck in AWAITING_PAYMENT) — it tolerates
   // the missing field and stores userId as null instead.
   it("a legacy command with no userId is charged normally, storing userId as null", async () => {
-    const orderId = `o_${randomUUID()}`;
+    const orderId = taggedOrder();
     await handleChargePayment(legacyChargeCmd(orderId, 500));
     expect(await statusOf(orderId)).toBe("SUCCEEDED");
     expect(await userIdOf(orderId)).toBeNull();

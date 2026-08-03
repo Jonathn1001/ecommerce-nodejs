@@ -1,0 +1,47 @@
+groups:
+  - name: checkout-slo
+    rules:
+      # Windows are scaled DOWN from the textbook 5m/1h and 30m/6h. Those are sized
+      # for continuous production traffic; this stack only sees load while someone is
+      # running k6 or chaos, so a 1h window could never be moved by any outage anyone
+      # would sit through — the alerts would ship unvalidated, which is the exact
+      # "untested alert is decoration" outcome 7b deferred them here to avoid.
+      # The two-window structure, which is the part worth learning, is preserved.
+      #
+      # Every expression is scoped to service="gateway" and excludes /readyz. The
+      # gateway is the only user-facing surface (it proxies order, catalog and payment),
+      # so it is the only place a "checkout" error budget means anything. Measured
+      # unscoped, the denominator is dominated by traffic no customer makes: at idle this
+      # stack serves 1.695 req/s of which the gateway is 0.095, the other 94% being other
+      # services' health probes. Those probes always succeed, so leaving them in silently
+      # desensitises the alert, and by an amount that changes whenever a healthcheck
+      # interval changes. /readyz is excluded for the same reason on the gateway itself.
+      - alert: CheckoutErrorBudgetFastBurn
+        expr: |
+          (sum(rate(http_requests_total{service="gateway",route!="/readyz",status=~"5.."}[1m])) / sum(rate(http_requests_total{service="gateway",route!="/readyz"}[1m]))) > (14.4 * 0.01)
+          and
+          (sum(rate(http_requests_total{service="gateway",route!="/readyz",status=~"5.."}[15m])) / sum(rate(http_requests_total{service="gateway",route!="/readyz"}[15m]))) > (14.4 * 0.01)
+        for: 30s
+        labels: { severity: page }
+        annotations:
+          summary: "Checkout error budget burning fast (14.4x)"
+
+      - alert: CheckoutErrorBudgetSlowBurn
+        expr: |
+          (sum(rate(http_requests_total{service="gateway",route!="/readyz",status=~"5.."}[5m])) / sum(rate(http_requests_total{service="gateway",route!="/readyz"}[5m]))) > (6 * 0.01)
+          and
+          (sum(rate(http_requests_total{service="gateway",route!="/readyz",status=~"5.."}[1h])) / sum(rate(http_requests_total{service="gateway",route!="/readyz"}[1h]))) > (6 * 0.01)
+        for: 2m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Checkout error budget burning steadily (6x)"
+
+      # 0.5 is an actual bucket boundary on http_request_duration_seconds, so
+      # histogram_quantile needs no interpolation at the threshold itself — the one place
+      # in this slice where a quantile comparison is exact rather than bucket-limited.
+      - alert: CheckoutLatencySLOBreach
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="gateway",route!="/readyz"}[5m]))) > 0.5
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Checkout p95 latency over the 500ms SLO"

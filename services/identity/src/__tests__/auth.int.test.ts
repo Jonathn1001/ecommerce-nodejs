@@ -13,7 +13,13 @@ import { createApp } from "../app";
 import { config } from "../config";
 import { prisma } from "../db";
 
-const email = () => `u_${randomUUID()}@example.test`;
+// Tag the EMAIL rather than the user id: the id is minted by the service, so the test
+// never chooses it and cannot tag it. afterAll resolves the tag to ids with a DB query,
+// which is also why a mid-suite throw still gets cleaned up. Registering enqueues a
+// user_registered outbox row keyed by the new user's id, and no relay runs during an
+// integration test, so it sits unsent and INV4_OUTBOX_UNSENT reports it.
+const TEST_TAG = "test-auth-int";
+const email = () => `${TEST_TAG}-${randomUUID()}@example.test`;
 
 describe("identity auth (integration — needs compose up + migrated + seeded)", () => {
   let app: express.Application;
@@ -28,6 +34,18 @@ describe("identity auth (integration — needs compose up + migrated + seeded)",
     });
   });
   afterAll(async () => {
+    // RefreshToken cascades from User (onDelete: Cascade in schema.prisma); Outbox has no
+    // FK to it, so it is deleted explicitly, keyed by the user ids the tag resolves to.
+    // The seeded USER Role is deliberately left alone — the service itself depends on it.
+    const seeded = await prisma.user.findMany({
+      where: { email: { startsWith: TEST_TAG } },
+      select: { id: true },
+    });
+    const ids = seeded.map((u) => u.id);
+    if (ids.length > 0) {
+      await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+      await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    }
     await prisma.$disconnect();
   });
 

@@ -13,10 +13,19 @@ import {
   type EventEnvelope,
 } from "@ecom/contracts";
 
+// Tag every order this file seeds so afterAll can find and delete them by a DB
+// query, not an in-memory id list — a mid-suite throw still gets cleaned up.
+// These tests drive handleEvent with a fake PaymentSucceeded straight into the
+// order database, so several land in CONFIRMED with no Payment row behind them
+// at all — a state the real system cannot produce (payment always goes through
+// the payment service first). Left uncleaned, that trips INV6_CONFIRMED_INCOMPLETE
+// on every run.
+const TEST_TAG = "test-consumer-int";
+
 async function seedOrder(status: string, totalPrice = 500): Promise<string> {
   const o = await prisma.order.create({
     data: {
-      userId: `u_${randomUUID()}`,
+      userId: `${TEST_TAG}-${randomUUID()}`,
       status,
       totalPrice,
       items: {
@@ -44,6 +53,18 @@ const userIdOf = async (id: string) =>
 
 describe("order payment-leg consumer (integration — needs compose up + migrated)", () => {
   afterAll(async () => {
+    // Outbox rows are keyed by aggregateId, not userId, and do not cascade from
+    // Order (no FK) — deleted separately or they keep tripping INV4_OUTBOX_UNSENT.
+    // OrderItem does cascade (onDelete: Cascade in schema.prisma).
+    const seeded = await prisma.order.findMany({
+      where: { userId: { startsWith: TEST_TAG } },
+      select: { id: true },
+    });
+    const ids = seeded.map((o) => o.id);
+    if (ids.length > 0) {
+      await prisma.outbox.deleteMany({ where: { aggregateId: { in: ids } } });
+      await prisma.order.deleteMany({ where: { id: { in: ids } } });
+    }
     await prisma.$disconnect();
   });
 
