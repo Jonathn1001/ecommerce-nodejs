@@ -20,6 +20,9 @@ const AddItemSchema = z.object({
 });
 const SetQtySchema = z.object({ quantity: z.number().int().min(0) });
 
+// A ceiling, not a page size: `GET /orders` returns a plain array and has no cursor.
+const ORDER_LIST_LIMIT = 50;
+
 // The caller's identity is the x-user-id header, which ONLY the gateway may set: it strips
 // any client-supplied copy before injecting the value it verified from the JWT (Phase 6).
 // Direct access to this port is closed in the prod compose profile.
@@ -176,6 +179,33 @@ export function createApp(
       });
     } catch {
       log.error("order_place_failed", { traceId: req.traceId });
+      res.status(500).json({ error: "internal error" });
+    }
+  });
+
+  // Caller-scoped history. Capped rather than paginated: a documented ceiling beats half a
+  // pagination, and adding a cursor later widens the response instead of breaking it.
+  app.get("/orders", async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(400).json({ error: "missing x-user-id" });
+    try {
+      const orders = await prisma.order.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: ORDER_LIST_LIMIT,
+        include: { _count: { select: { items: true } } },
+      });
+      res.json(
+        orders.map((o) => ({
+          id: o.id,
+          status: o.status,
+          totalPrice: o.totalPrice,
+          itemCount: o._count.items,
+          createdAt: o.createdAt.toISOString(),
+        }))
+      );
+    } catch {
+      log.error("order_list_failed", { traceId: req.traceId });
       res.status(500).json({ error: "internal error" });
     }
   });

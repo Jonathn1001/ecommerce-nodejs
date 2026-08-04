@@ -44,6 +44,20 @@ export const PlacedOrderSchema = z.object({
 });
 export type PlacedOrder = z.infer<typeof PlacedOrderSchema>;
 
+// The history row. `itemCount` rather than the lines themselves: a list of 50 orders does not
+// need every line, and `GET /orders/:id` already serves them to the page that does.
+export const OrderSummarySchema = z.object({
+  id: z.string(),
+  status: OrderStatusSchema,
+  totalPrice: z.number().int(),
+  itemCount: z.number().int(),
+  createdAt: z.string(),
+});
+export type OrderSummary = z.infer<typeof OrderSummarySchema>;
+
+export const OrderListSchema = z.array(OrderSummarySchema);
+export type OrderList = z.infer<typeof OrderListSchema>;
+
 export const OrderDetailSchema = z.object({
   id: z.string(),
   userId: z.string(),
