@@ -9,7 +9,13 @@ export class NetworkError extends Error {
 }
 
 export class HttpError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    // Parsed only when the response declared JSON, and only on a best-effort basis: a
+    // truncated or non-JSON error payload must not turn one failure into two. Everything still
+    // branches on `status` — `body` only ever adds detail to a message.
+    readonly body?: unknown
+  ) {
     super(`the gateway answered ${status}`);
     this.name = "HttpError";
   }

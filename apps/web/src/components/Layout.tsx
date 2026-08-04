@@ -26,6 +26,14 @@ export function Layout() {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
+      {/* Visible only when focused: one header is shared by every route, so without this a
+          keyboard user tabs the whole nav again on every navigation. */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:border-[color:var(--color-line-strong)] focus:bg-[color:var(--color-surface)] focus:px-3 focus:py-2"
+      >
+        Skip to content
+      </a>
       <header className="mb-8 flex items-center justify-between">
         <Link to="/" className="text-lg font-medium">
           Storefront
@@ -35,7 +43,12 @@ export function Layout() {
             Cart ({count})
           </Link>
           {data?.authenticated ? (
-            <Button onClick={signOut}>Sign out</Button>
+            <>
+              <Link to="/orders" className="datum text-sm">
+                Orders
+              </Link>
+              <Button onClick={signOut}>Sign out</Button>
+            </>
           ) : (
             <Link to="/login" className="datum text-sm underline">
               Sign in
@@ -43,7 +56,9 @@ export function Layout() {
           )}
         </nav>
       </header>
-      <Outlet />
+      <main id="main">
+        <Outlet />
+      </main>
     </div>
   );
 }

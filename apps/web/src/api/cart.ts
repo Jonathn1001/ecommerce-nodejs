@@ -4,9 +4,10 @@ import { request } from "./request";
 import { API } from "./refresh";
 import { HttpError } from "./errors";
 
-// Every mutation answers 200 with a small JSON body — none of them is 204, so parsing is
-// safe. Schemas rather than z.unknown(): a mutation that silently starts answering something
-// else should fail here, not three screens later.
+// Every mutation answers a small JSON body — POST /cart/items answers 201, PATCH and DELETE
+// answer 200, and none of them is 204, so parsing is always safe. Schemas rather than
+// z.unknown(): a mutation that silently starts answering something else should fail here, not
+// three screens later.
 const AddedSchema = z.object({ productId: z.string() });
 const SetSchema = z.object({ productId: z.string(), quantity: z.number().int() });
 

@@ -47,3 +47,18 @@ services:
     environment:
       COOKIE_SECURE: "true" # cookies only over https once a TLS terminator is in front
     ports: ["8000:8000"]
+
+  # The storefront, defined only here: dev keeps the Vite dev server, because HMR is the reason
+  # it exists and containerising dev trades it for nothing. A service introduced by an overlay
+  # is still created, so no change to the base file is needed.
+  #
+  # Published, because it is the human entry point. The gateway keeps its own published port:
+  # the payment provider's webhook is an inbound call that does not pass through nginx.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on: [gateway]
+    ports: ["8080:80"]
+    restart: unless-stopped
+    profiles: ["app"]

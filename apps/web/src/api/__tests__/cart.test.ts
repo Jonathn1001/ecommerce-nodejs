@@ -1,5 +1,5 @@
-import { setQuantity } from "../cart";
-import { HttpError } from "../errors";
+import { getCart, setQuantity } from "../cart";
+import { HttpError, SchemaMismatchError } from "../errors";
 
 function setCsrf(value: string | null) {
   document.cookie = value
@@ -38,4 +38,16 @@ it("still rejects on a non-404 error", async () => {
   const err = await setQuantity("p1", 3).catch((e) => e);
   expect(err).toBeInstanceOf(HttpError);
   expect((err as HttpError).status).toBe(500);
+});
+
+// Non-strict schemas let an additive server field pass silently, so drift only surfaced when
+// something downstream depended on the field nobody had noticed. Order asserts these same
+// schemas against its own responses, so strictness fails a backend test beside the change that
+// caused it.
+it("rejects a cart response carrying an unknown field", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () => json({ userId: "u1", items: [], surprise: true }))
+  );
+  await expect(getCart()).rejects.toBeInstanceOf(SchemaMismatchError);
 });

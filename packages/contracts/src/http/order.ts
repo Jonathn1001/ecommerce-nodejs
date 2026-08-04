@@ -2,18 +2,25 @@ import { z } from "zod";
 
 // The cart and order READ API the storefront consumes. Distinct from the event payloads in
 // ../events/order, which describe what the saga publishes, not what a browser fetches.
-export const CartItemSchema = z.object({
-  productId: z.string(),
-  quantity: z.number().int(),
-});
+// Strict: an additive server field must fail loudly. Order asserts its own cart responses
+// against these same schemas, so drift breaks a backend test beside the change that caused it
+// rather than surfacing months later in a client that quietly ignored the new field.
+export const CartItemSchema = z
+  .object({
+    productId: z.string(),
+    quantity: z.number().int(),
+  })
+  .strict();
 export type CartItem = z.infer<typeof CartItemSchema>;
 
 // No names and no prices — the cart carries ids and quantities only, so any UI must join
 // against the catalogue to render a line.
-export const CartSchema = z.object({
-  userId: z.string(),
-  items: z.array(CartItemSchema),
-});
+export const CartSchema = z
+  .object({
+    userId: z.string(),
+    items: z.array(CartItemSchema),
+  })
+  .strict();
 export type Cart = z.infer<typeof CartSchema>;
 
 // Integer MINOR UNITS, and the price CAPTURED at placement — not today's catalogue price.
@@ -43,6 +50,20 @@ export const PlacedOrderSchema = z.object({
   items: z.array(OrderItemSchema),
 });
 export type PlacedOrder = z.infer<typeof PlacedOrderSchema>;
+
+// The history row. `itemCount` rather than the lines themselves: a list of 50 orders does not
+// need every line, and `GET /orders/:id` already serves them to the page that does.
+export const OrderSummarySchema = z.object({
+  id: z.string(),
+  status: OrderStatusSchema,
+  totalPrice: z.number().int(),
+  itemCount: z.number().int(),
+  createdAt: z.string(),
+});
+export type OrderSummary = z.infer<typeof OrderSummarySchema>;
+
+export const OrderListSchema = z.array(OrderSummarySchema);
+export type OrderList = z.infer<typeof OrderListSchema>;
 
 export const OrderDetailSchema = z.object({
   id: z.string(),

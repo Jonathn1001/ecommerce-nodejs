@@ -199,3 +199,42 @@ it("shows the real empty state, not stale lines plus a contradicting alert, afte
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /place order/i })).not.toBeInTheDocument();
 });
+
+// Deferred out of 8b: the stepper's floor. Decrementing the last unit removes the line via
+// DELETE rather than PATCHing a zero — the stepper must not clamp at 1 and strand it.
+it("removes the line when the last unit is decremented", async () => {
+  vi.spyOn(session, "probeSession").mockResolvedValue({
+    authenticated: true,
+    cart: { userId: "u1", items: [{ productId: "p1", quantity: 1 }] },
+  });
+  vi.spyOn(productsApi, "listProducts").mockResolvedValue([product()]);
+  const remove = vi.spyOn(cartApi, "removeItem").mockResolvedValue({ productId: "p1" });
+  const set = vi.spyOn(cartApi, "setQuantity");
+  renderCart();
+  await screen.findByText("Widget");
+  fireEvent.click(screen.getByRole("button", { name: /decrease/i }));
+  expect(remove).toHaveBeenCalledWith("p1");
+  expect(set).not.toHaveBeenCalled();
+});
+
+// Also deferred out of 8b: the estimate is a sum across lines, not the first line's price.
+it("estimates a multi-line cart as the sum of its lines", async () => {
+  vi.spyOn(session, "probeSession").mockResolvedValue({
+    authenticated: true,
+    cart: {
+      userId: "u1",
+      items: [
+        { productId: "p1", quantity: 2 },
+        { productId: "p2", quantity: 1 },
+      ],
+    },
+  });
+  vi.spyOn(productsApi, "listProducts").mockResolvedValue([
+    product(),
+    product({ id: "p2", name: "Gadget", price: 250 }),
+  ]);
+  renderCart();
+  await screen.findByText("Gadget");
+  // 900 × 2 + 250 = 2050
+  expect(screen.getByText("$20.50")).toBeInTheDocument();
+});

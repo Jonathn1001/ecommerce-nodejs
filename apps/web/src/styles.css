@@ -79,3 +79,35 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/* The active step breathes. It is a class, not an inline style, so the reduced-motion rule
+   below can remove it without the component branching on a media query. */
+@keyframes tracker-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.tracker-pulse {
+  animation: tracker-pulse 1.4s ease-in-out infinite;
+}
+
+/* Removed, not substituted — no slower pulse, no cross-fade. The step still reads as active
+   through aria-current, its glyph, its colour and its spelled-out condition. */
+@media (prefers-reduced-motion: reduce) {
+  .tracker-pulse {
+    animation: none;
+  }
+}
+
+/* --color-focus existed from 8a and nothing referenced it, so the app was relying on whatever
+   ring the browser happened to draw. Keyboard focus is the one affordance a mouse user never
+   sees and a keyboard user cannot work without. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

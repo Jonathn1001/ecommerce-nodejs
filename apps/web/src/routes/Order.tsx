@@ -1,16 +1,29 @@
 import { useQuery } from "@tanstack/react-query";
+import type { OrderStatus } from "@ecom/contracts";
 import { Link, useParams } from "react-router";
 import { HttpError } from "../api/errors";
 import { getOrder } from "../api/orders";
 import { listProducts } from "../api/products";
 import { Badge } from "../components/Badge";
 import { ErrorState } from "../components/ErrorState";
+import { OrderTracker } from "../components/OrderTracker";
 import { Price } from "../components/Price";
 import { Skeleton } from "../components/Skeleton";
+import { POLL_INTERVAL_MS, useOrderStream } from "../hooks/useOrderStream";
+
+const isTerminal = (s?: OrderStatus) => s === "CONFIRMED" || s === "CANCELLED";
 
 export function Order() {
   const { id = "" } = useParams();
-  const order = useQuery({ queryKey: ["order", id], queryFn: () => getOrder(id) });
+  const { polling, failedAt } = useOrderStream(id);
+  const order = useQuery({
+    queryKey: ["order", id],
+    queryFn: () => getOrder(id),
+    // The fallback transport has to stop itself: in polling mode no frame will ever arrive to
+    // announce the terminal state, so the query is what notices the order settled.
+    refetchInterval: (q) =>
+      polling && !isTerminal(q.state.data?.status) ? POLL_INTERVAL_MS : false,
+  });
   const products = useQuery({ queryKey: ["products"], queryFn: listProducts });
 
   if (order.isPending) return <Skeleton />;
@@ -33,9 +46,11 @@ export function Order() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl">Order placed</h1>
+        {/* Not "Order placed": this page is also where history lands. */}
+        <h1 className="text-2xl">Order</h1>
         <Badge>{order.data.status}</Badge>
       </div>
+      <OrderTracker status={order.data.status} failedAt={failedAt} />
       <ul className="flex flex-col gap-2">
         {order.data.items.map((i) => (
           <li
