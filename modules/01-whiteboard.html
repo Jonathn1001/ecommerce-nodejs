@@ -1,0 +1,320 @@
+  <section class="module" id="module-1">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 1</span>
+        <h1 class="module-title">Whiteboard it in five minutes</h1>
+        <p class="module-subtitle">
+          Every system-design round starts the same way: &ldquo;walk me through something you
+          built.&rdquo; This is the version that survives follow-up questions.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The 90-second opener</h2>
+        <p>
+          Lead with the <strong>problem shape</strong>, not the tech list. Naming Kafka in
+          sentence one invites &ldquo;why Kafka?&rdquo; before you have earned the right to
+          answer it.
+        </p>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎙️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Say this</strong>
+            <p>
+              &ldquo;An e-commerce checkout where placing an order has to reserve stock and take
+              payment — two writes that live in different services with different databases.
+              There is no distributed transaction, so the interesting problem is: how do you keep
+              those consistent when the second step fails? I solved it with a choreographed saga
+              plus compensating actions, and the hard parts were exactly-once semantics,
+              concurrent stock reservation, and knowing whether it actually worked in
+              production.&rdquo;
+            </p>
+          </div>
+        </div>
+
+        <p>
+          That paragraph plants three flags an interviewer can pull on — saga, concurrency,
+          observability — and every one of them is a topic you have real code for.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The box diagram, and what each box owes you</h2>
+
+        <div class="arch-diagram">
+          <div class="arch-zone arch-zone-browser">
+            <h4 class="arch-zone-label">Edge</h4>
+            <div class="arch-component" data-desc="Gateway — AuthN via RS256 JWT verified against JWKS by kid, AuthZ from a TTL-cached grants snapshot, CSRF double-submit, rate limits (10/min on /auth, 300/min general), per-upstream circuit breaker. No database: it holds policy, never truth.">
+              <div class="arch-icon">🚪</div>
+              <span>Gateway</span>
+            </div>
+            <div class="arch-component" data-desc="Storefront — React SPA. Talks only to the gateway over a same-origin /api prefix, so cookies stay SameSite=Lax and no CORS is needed. Live order state arrives over SSE.">
+              <div class="arch-icon">🖥️</div>
+              <span>Storefront</span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">Services — DB per service</h4>
+            <div class="arch-component" data-desc="Identity — RS256 signing key held here alone, opaque refresh tokens hashed at rest, rotation with family-scoped reuse detection. Publishes JWKS so the gateway can verify without sharing secrets.">
+              <div class="arch-icon">🪪</div>
+              <span>Identity</span>
+            </div>
+            <div class="arch-component" data-desc="Order — the saga coordinator by state, not by orchestration. Owns carts, orders, the order state machine, and a read-model projection of catalog prices so it can price an order without a synchronous call.">
+              <div class="arch-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="arch-component" data-desc="Inventory — reservations, consumption, release. Holds the only lock that matters for oversell, and a sweeper that reclaims reservations abandoned by dead sagas.">
+              <div class="arch-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="arch-component" data-desc="Payment — simulated gateway with deterministic outcomes by amount, an async webhook path that parks in PROCESSING, and HMAC-verified callbacks. Emits results; never decides order state.">
+              <div class="arch-icon">💳</div>
+              <span>Payment</span>
+            </div>
+            <div class="arch-component" data-desc="Catalog — products, prices, discounts. Emits price_changed under a real SELECT FOR UPDATE so concurrent PATCHes cannot suppress or duplicate the event.">
+              <div class="arch-icon">🗂️</div>
+              <span>Catalog</span>
+            </div>
+            <div class="arch-component" data-desc="Notification — consumes order.confirmed, writes a Notification row and a SendEmail command in ONE transaction, worker renders and sends. Nothing in checkout waits on it.">
+              <div class="arch-icon">✉️</div>
+              <span>Notification</span>
+            </div>
+          </div>
+          <div class="arch-zone arch-zone-external">
+            <h4 class="arch-zone-label">Infrastructure</h4>
+            <div class="arch-component" data-desc="Kafka — event backbone. Facts, past tense, fan-out to independent consumer groups, retained after read.">
+              <div class="arch-icon">📌</div>
+              <span>Kafka</span>
+            </div>
+            <div class="arch-component" data-desc="RabbitMQ — commands and tasks. Single-consumer work, DLQ for poison messages, prefetch for back-pressure.">
+              <div class="arch-icon">📥</div>
+              <span>RabbitMQ</span>
+            </div>
+            <div class="arch-component" data-desc="Postgres — one instance, one database per service, no cross-database queries. Redis for distributed locks, cache and idempotency keys.">
+              <div class="arch-icon">🗄️</div>
+              <span>Postgres · Redis</span>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc">Click a box — each one has a defensible reason to exist</div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The follow-up you will get, and the answer that lands</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">Q</div>
+            <div class="step-body">
+              <strong>&ldquo;Why microservices for a shop?&rdquo;</strong>
+              The honest answer scores higher than the enthusiastic one: <em>&ldquo;For a real
+              shop of this size, I would not. This was built to exercise the pattern. What the
+              split genuinely buys is failure isolation — email being down cannot fail checkout —
+              and a hard security boundary, because Payment has no credentials for the customer
+              table. What it costs is that nothing is instantaneous and one request leaves
+              footprints in five services.&rdquo;</em>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">Q</div>
+            <div class="step-body">
+              <strong>&ldquo;Why not two-phase commit?&rdquo;</strong>
+              <em>&ldquo;2PC needs a coordinator holding locks across services for the length of
+              the slowest participant, and any participant that dies in the prepared state blocks
+              the others. Payment can take seconds. I traded atomicity for availability and
+              accepted eventual consistency with compensating actions.&rdquo;</em>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">Q</div>
+            <div class="step-body">
+              <strong>&ldquo;Where is the single point of failure?&rdquo;</strong>
+              <em>&ldquo;The gateway, deliberately — it is the only reachable entry point, which
+              is what makes verified identity headers trustworthy downstream. In this shape it is
+              one process with a circuit breaker per upstream; in production it would be
+              horizontally scaled behind a load balancer, which it can be because it holds no
+              state beyond a TTL-cached permissions snapshot.&rdquo;</em> That property — no per-request state — is what makes it <span class="term" data-definition="Horizontally scalable means adding capacity by running more identical instances rather than a bigger machine. It requires the component to hold no per-request state locally, which is why stateless and horizontally scalable are usually said together.">horizontally scalable</span>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">One request, end to end</h2>
+        <p>
+          Interviewers ask you to trace a write. Step through this until you can narrate it with
+          no diagram in front of you.
+        </p>
+
+        <div class="flow-animation" data-steps='[
+          {"highlight":"flow-actor-1","label":"POST /orders arrives at the gateway. JWT verified against JWKS by kid; CSRF header compared to the cookie; rate limiter checked. Inbound identity headers are STRIPPED and re-injected verified."},
+          {"highlight":"flow-actor-2","label":"Order prices the cart from its OWN read model — no synchronous call to Catalog, so Catalog being down does not fail checkout.","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-2","label":"ONE transaction: write the order PENDING, write an order.placed row to the outbox, clear the cart. Atomic by construction."},
+          {"highlight":"flow-actor-3","label":"A polling relay reads the outbox and publishes to Kafka. This is the dual-write problem solved — the DB write and the publish cannot diverge.","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-4","label":"Inventory consumes order.placed, reserves stock under a lock, emits inventory.reserved. Its own consumption is deduped by a processed-event ledger.","packet":true,"from":"actor-3","to":"actor-4"},
+          {"highlight":"flow-actor-2","label":"Order applies the event via a compare-and-set: PENDING to AWAITING_PAYMENT, and enqueues ChargePayment in the SAME transaction as the status change.","packet":true,"from":"actor-4","to":"actor-2"},
+          {"highlight":"flow-actor-5","label":"Payment consumes the command from RabbitMQ — single consumer, so the charge happens once — and emits succeeded or failed back onto Kafka.","packet":true,"from":"actor-2","to":"actor-5"},
+          {"highlight":"flow-actor-2","label":"Order settles CONFIRMED or CANCELLED, pg_notify fires on commit, and the browser SSE stream pushes the new state with no polling.","packet":true,"from":"actor-5","to":"actor-2"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">🚪</div>
+              <span>Gateway</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">📌</div>
+              <span>Kafka</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-5">
+              <div class="flow-actor-icon">💳</div>
+              <span>Payment</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+          <div class="flow-step-label" id="flow-label">Click &ldquo;Next Step&rdquo; — narrate each one out loud</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The one snippet worth memorising</h2>
+        <p>
+          If they ask &ldquo;show me the most important twenty lines,&rdquo; this is the write
+          that makes the whole design hold together.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-keyword">await</span> tx.<span class="code-function">enqueue</span>(ORDER_PLACED, orderId, {</span>
+<span class="code-line">    orderId,</span>
+<span class="code-line">    <span class="code-property">userId</span>: p.userId,</span>
+<span class="code-line">    <span class="code-property">items</span>: p.items.<span class="code-function">map</span>((i) =&gt; ({ <span class="code-property">productId</span>: i.productId, <span class="code-property">quantity</span>: i.quantity })),</span>
+<span class="code-line">  });</span>
+<span class="code-line">  <span class="code-keyword">return</span> { <span class="code-property">outcome</span>: <span class="code-string">"PLACED"</span>, orderId };</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;The event is written as a row, inside the same transaction as the order.&rdquo;</strong> That single decision removes the dual-write problem — Module 3.</p>
+              <p class="tl"><strong>&ldquo;It carries the ids, not the prices.&rdquo;</strong> Order priced the line itself from its own read model; sending a price would let a consumer disagree about money.</p>
+              <p class="tl"><strong>&ldquo;<code>tx</code> is a port, not Prisma.&rdquo;</strong> The domain function takes an interface, so the business rule is unit-testable with no database — the same shape as the state machine.</p>
+              <p class="tl"><em>Expect:</em> &ldquo;what publishes it, then?&rdquo; A polling relay with publisher confirms, marking rows sent only after the broker acknowledges.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/place-order.ts</code>
+            <span class="badge-desc">47 lines. Read it before any interview where you plan to mention this project.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Numbers to have ready</h2>
+        <p>
+          Vague answers read as second-hand. These are measured, not estimated — Module 6 covers
+          how.
+        </p>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">saga p99 &lt; 5s</code>
+            <span class="badge-desc">The end-to-end SLO, enforced as a k6 threshold, not a hope.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">http p95 &lt; 500ms</code>
+            <span class="badge-desc">Edge latency for synchronous calls.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">10 / min</code>
+            <span class="badge-desc">Rate limit on <code>/auth/*</code>. 300/min everywhere else.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">15m / 7d</code>
+            <span class="badge-desc">Access-token and refresh-token lifetimes.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">6 invariants</code>
+            <span class="badge-desc">Checked across 7 databases and both brokers by a script that exits non-zero.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module1">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="This is the answer that separates a candidate who read a blog post from one who shipped it. Naming the coordinator-blocking problem and the availability tradeoff shows you understand WHY the industry moved to sagas, not just that it did."
+               data-explanation-wrong="Both other answers are true statements but they are not the reason. 2PC is avoided because a coordinator holds locks across services and a participant that dies while prepared blocks everyone — an availability problem, not a tooling one.">
+            <h3 class="quiz-question">&ldquo;Why didn&rsquo;t you use a distributed transaction?&rdquo; — which answer is strongest?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Postgres does not support transactions across databases</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>2PC holds locks across services for the duration of the slowest participant, and a participant that dies while prepared blocks the rest — I traded atomicity for availability</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Sagas are the modern best practice for microservices</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Interviewers are testing judgement, not enthusiasm. Saying 'I would not do this for a real shop this size' and then naming what the split actually buys is the answer of someone who has paid the cost."
+               data-explanation-wrong="Careful — arguing that microservices are simply better is the answer that invites a painful follow-up about operational cost, and you will lose it. Lead with the tradeoff.">
+            <h3 class="quiz-question">&ldquo;Would you build it this way again?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Yes — microservices scale better and teams can deploy independently</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Not at this size. The split bought failure isolation and a hard security boundary; it cost latency, operational surface, and debuggability. I would start with a modular monolith and split at a measured seam</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>No — it was a mistake and I would use a monolith</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module1')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module1')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the topic the whole design exists to solve, and the one they will drill hardest —
+          consistency without a transaction.
+        </p>
+      </div>
+
+    </div>
+  </section>

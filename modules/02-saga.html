@@ -1,0 +1,291 @@
+  <section class="module" id="module-2">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 2</span>
+        <h1 class="module-title">Consistency without a transaction</h1>
+        <p class="module-subtitle">
+          The saga question has a shallow answer everyone gives and a deep one almost nobody
+          does. The deep one is about who owns the state machine.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Choreography vs orchestration — pick a side and defend it</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">💃</div>
+            <h4 class="pattern-title">Choreography — what this system does</h4>
+            <p class="pattern-desc">
+              Each service reacts to events. <strong>Buys:</strong> no central bottleneck; adding
+              a consumer needs no change upstream. <strong>Costs:</strong> the process exists in
+              nobody&rsquo;s code — you reconstruct it from traces.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🎼</div>
+            <h4 class="pattern-title">Orchestration</h4>
+            <p class="pattern-desc">
+              One coordinator calls each step. <strong>Buys:</strong> the workflow is readable in
+              one file, timeouts and retries are centralised. <strong>Costs:</strong> the
+              coordinator becomes a dependency of everything and a deployment bottleneck.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">The nuance that scores</strong>
+            <p>
+              &ldquo;I chose choreography, but Order is still effectively the coordinator —
+              because it owns the <em>state machine</em>. Every service emits facts; only Order
+              decides what a fact means for the order. That is the middle ground: distributed
+              execution, centralised interpretation. Pure choreography, where each service also
+              infers its own view of the process, is where these systems become
+              unreasonable.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The state machine, and why it is eleven lines</h2>
+        <p>
+          Interviewers love asking &ldquo;where does the business process live?&rdquo; Point at
+          one pure function with no I/O in it.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"PENDING"</span> &amp;&amp; eventType === INVENTORY_RESERVED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"AWAITING_PAYMENT"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"PENDING"</span> &amp;&amp; eventType === INVENTORY_RESERVATION_FAILED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"CANCELLED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"AWAITING_PAYMENT"</span> &amp;&amp; eventType === PAYMENT_SUCCEEDED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"CONFIRMED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"AWAITING_PAYMENT"</span> &amp;&amp; eventType === PAYMENT_FAILED) <span class="code-keyword">return</span> <span class="code-string">"CANCELLED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">return</span> <span class="code-keyword">null</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;It is a transition table keyed on (current state, event).&rdquo;</strong> Not scattered <code>if</code>s across consumers — one function, zero dependencies, trivially unit-testable.</p>
+              <p class="tl"><strong>&ldquo;Illegal transitions return null.&rdquo;</strong> A late or duplicate event finds no matching row and becomes a no-op instead of corrupting state — idempotency by construction, not by a flag.</p>
+              <p class="tl"><strong>&ldquo;And the table doubles as a proof.&rdquo;</strong> AWAITING_PAYMENT is reachable only via INVENTORY_RESERVED, so the status itself is evidence the reservation succeeded. The storefront tracker renders four saga steps from four statuses because of exactly this.</p>
+              <p class="tl"><em>Follow-up they will ask:</em> &ldquo;what about a compensating event arriving out of order?&rdquo; — the guard on <code>current</code> is what makes that safe.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/transition.ts</code>
+            <span class="badge-desc">Pure domain core over a tx port — no Prisma, no config, no broker.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Compensation is not rollback — say it in those words</h2>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">1</div>
+            <div>
+              <strong>A rollback un-happens a change.</strong> Only a database can do that, and
+              only within its own boundary.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">2</div>
+            <div>
+              <strong>A compensation is a new, opposite action</strong> — release the
+              reservation, refund the charge. It is visible, it takes time, and it can itself
+              fail.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">3</div>
+            <div>
+              <strong>So every forward step needs its inverse designed at the same time.</strong>
+              &ldquo;What is the compensating action?&rdquo; is the question to ask about any new
+              saga step — including in the interview, out loud.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">4</div>
+            <div>
+              <strong>Some steps have no inverse.</strong> An email cannot be unsent. Those belong
+              at the END of a saga, after the last thing that can fail — which is exactly why
+              Notification consumes <code>order.confirmed</code> and nothing waits on it.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The failure path, narrated</h2>
+        <p>Play this through — it is the sequence they will ask you to walk.</p>
+
+        <div class="chat-window" id="chat-module2">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>Order 41 written PENDING. <code>order.placed</code> in the outbox, same transaction. Nothing reserved, nothing charged — no compensation owed yet.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="inventory" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">🏷️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Inventory</span>
+                <p>Reserved 1 unit under a lock. <strong>First anchor set</strong> — from here, any failure owes a release.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>CAS: PENDING → AWAITING_PAYMENT. <code>ChargePayment</code> enqueued in the <em>same</em> transaction as the status change — so the two can never disagree.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="payment" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-3)">💳</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-3)">Payment</span>
+                <p>Declined. I emit <code>payment.failed</code> and stop. I do <strong>not</strong> tell Inventory anything — I have no idea a reservation exists.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>AWAITING_PAYMENT + PAYMENT_FAILED → CANCELLED. Emit <code>order.cancelled</code>. That event <em>is</em> the compensation trigger.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="5" data-sender="inventory" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">🏷️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Inventory</span>
+                <p>Released. And if that event had been lost, a sweeper reclaims reservations whose sagas never finished — compensation with a safety net.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-typing" style="display:none">
+            <div class="chat-avatar" id="typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next Message</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🪤</div>
+          <div class="callout-content">
+            <strong class="callout-title">The trap in that sequence</strong>
+            <p>
+              Notice Payment never learns a reservation exists. If an interviewer suggests
+              &ldquo;have Payment call Inventory on failure,&rdquo; the answer is: that couples
+              two services that share nothing, and it breaks the moment a third step needs
+              compensating. The <span class="term" data-definition="A compensation trigger is the single event that tells every service holding state for a failed process to undo its part. Publishing one event rather than calling each participant keeps the number of couplings linear instead of quadratic.">compensation trigger</span>
+              belongs to whoever owns the state machine.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module2">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Ordering a saga so that irreversible steps come last is a design rule you can state in one sentence, and it is the answer to a whole family of interview questions about email, shipping and third-party calls."
+               data-explanation-wrong="Retrying an unsendable email or wrapping it in a transaction does not address the real issue: the step has no inverse, so its POSITION in the saga is the only lever you have.">
+            <h3 class="quiz-question">A step in your saga has no possible compensating action — say, sending a physical shipment. Where does it go?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Anywhere, as long as you retry it until it succeeds</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Last — after every step that can still fail, so nothing downstream can force an undo you cannot perform</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>First, so you find out early whether it works</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right — and naming the mechanism matters: the transition table returns null for (CONFIRMED, PAYMENT_SUCCEEDED) because no such row exists, so the duplicate is a no-op without needing a dedupe table at all. Say 'idempotent by state machine, plus a processed-event ledger as defence in depth'."
+               data-explanation-wrong="Assuming the broker will not redeliver is the single most common wrong answer in this area. At-least-once is the default in both Kafka and RabbitMQ, and 'exactly-once' end-to-end does not exist without idempotent consumers.">
+            <h3 class="quiz-question">&ldquo;What happens if <code>payment.succeeded</code> is delivered twice?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>It cannot be — the broker guarantees exactly-once delivery</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The order is already CONFIRMED, so the transition table has no matching rule and returns null — the second delivery is a no-op, with a processed-event ledger as a second layer</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>It confirms twice and sends two emails, which is acceptable</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly. This is the strongest form of the answer because it names the tradeoff in both directions and shows you know where the design actually sits — distributed execution, centralised interpretation."
+               data-explanation-wrong="Both extremes are defensible in an interview, but only if you can say what they cost. The answer that scores names WHERE the coordination actually lives in your design.">
+            <h3 class="quiz-question">&ldquo;Is your saga choreographed or orchestrated?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Choreographed — services react to events, which is more decoupled</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Choreographed execution, but the state machine is centralised in Order — services emit facts, one service decides what they mean. That keeps the process readable without making a coordinator a runtime dependency</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Orchestrated — Order drives the whole flow</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the delivery-semantics questions — dual writes, at-least-once, ordering, and the
+          word &ldquo;exactly-once&rdquo; you should never say without qualifying it.
+        </p>
+      </div>
+
+    </div>
+  </section>

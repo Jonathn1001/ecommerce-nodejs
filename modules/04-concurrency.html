@@ -1,0 +1,239 @@
+  <section class="module" id="module-4">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 4</span>
+        <h1 class="module-title">Read-then-write, and the bugs it hides</h1>
+        <p class="module-subtitle">
+          One shape causes most &ldquo;impossible&rdquo; production bugs. Interviewers probe for
+          it because it is invisible under low load and inevitable under high.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The shape</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">Read a value.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">Decide something based on it.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">Write the result back.</div>
+          </div>
+        </div>
+
+        <p>
+          Two copies running at once both complete step 1 before either reaches step 3. Both
+          decide against the same stale value. Engineers call the window between the check and
+          the act
+          <span class="term" data-definition="TOCTOU — time-of-check to time-of-use. The gap between verifying a condition and acting on it, during which another process can invalidate what you checked. Say the acronym in an interview; it is the precise name for this class of bug.">TOCTOU</span>.
+        </p>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">🎰</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why it survives testing</strong>
+            <p>
+              Under test there is one request at a time, so the window never opens. It appears
+              first in production, at the worst moment — a flash sale, a retry storm — and
+              presents as data that &ldquo;cannot happen&rdquo;: negative stock, two payments,
+              two live tokens in one family.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Three fixes, and when each is right</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔐</div>
+            <h4 class="pattern-title">Compare-and-set</h4>
+            <p class="pattern-desc">
+              <code>UPDATE … WHERE status = &lt;what I read&gt;</code>. Zero rows affected means
+              you lost the race. <strong>Best when</strong> losing is legitimate and should be a
+              silent no-op — exactly the saga case.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔒</div>
+            <h4 class="pattern-title">Pessimistic row lock</h4>
+            <p class="pattern-desc">
+              <code>SELECT … FOR UPDATE</code> serialises the readers. <strong>Best when</strong>
+              contention is high and retrying is expensive — stock, balances, counters.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🧬</div>
+            <h4 class="pattern-title">Atomic upsert with a version guard</h4>
+            <p class="pattern-desc">
+              <code>ON CONFLICT DO UPDATE … WHERE EXCLUDED.version &gt; version</code>. One
+              statement, no read at all. <strong>Best for</strong> projections applying
+              out-of-order events.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🗣️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Say the isolation level out loud</strong>
+            <p>
+              &ldquo;Postgres defaults to <span class="term" data-definition="READ COMMITTED is Postgres default isolation level: a statement sees only data committed before it started, and two transactions can read the same row while each stays unaware of the other until commit. It permits the read-then-write race described here.">READ COMMITTED</span>, so two transactions can both read the
+              same row and neither sees the other until commit. SERIALIZABLE would catch it, but
+              it costs retries under contention — I preferred a targeted CAS to a global
+              isolation change.&rdquo; That sentence tells an interviewer you know the tradeoff
+              exists.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">CAS, in the saga</h2>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// Compare-and-set: `expected` is the status we read above. A lost CAS means another</span></span>
+<span class="code-line">  <span class="code-comment">// event legitimately advanced this order, so this one must emit nothing.</span></span>
+<span class="code-line">  <span class="code-keyword">const</span> moved = <span class="code-keyword">await</span> tx.<span class="code-function">setStatus</span>(p.orderId, next, order.status);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (!moved) <span class="code-keyword">return</span> <span class="code-string">"NO_OP"</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;The third argument is the guard.&rdquo;</strong> The write only lands if the row still holds the status we based our decision on.</p>
+              <p class="tl"><strong>&ldquo;Losing is not an error.&rdquo;</strong> It means another event advanced the order first, legitimately — so we emit nothing rather than retrying, which would double-emit.</p>
+              <p class="tl"><em>The follow-up:</em> &ldquo;is this reachable?&rdquo; Honest answer: not today, because Payment emits one deterministic result per order and one consumer group processes a partition serially. It is defence against a future second producer — and I would rather have it than discover the gap during an incident.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The sharpest example: claim before you mint</h2>
+        <p>
+          Refresh-token rotation. Two concurrent rotations of the same token both read
+          <code>revokedAt === null</code>. Without a claim, both mint — and a thief racing the
+          honest client never trips reuse detection.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// Claim the row FIRST. Under READ COMMITTED two concurrent rotations of the same token</span></span>
+<span class="code-line">  <span class="code-comment">// both read revokedAt === null; whichever revoke commits second matches zero rows. Without</span></span>
+<span class="code-line">  <span class="code-comment">// this check both would mint, leaving two live tokens in one family — and a thief racing</span></span>
+<span class="code-line">  <span class="code-comment">// the honest client would never trip reuse-detection, which is the whole point of the</span></span>
+<span class="code-line">  <span class="code-comment">// mechanism. The loser rolls back (the caller throws) and gets a 401.</span></span>
+<span class="code-line">  <span class="code-keyword">const</span> claimed = <span class="code-keyword">await</span> tx.<span class="code-function">revokeOne</span>(row.id, now, <span class="code-keyword">true</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (claimed === <span class="code-number">0</span>) <span class="code-keyword">return</span> { <span class="code-property">outcome</span>: <span class="code-string">"RACE"</span>, <span class="code-property">userId</span>: row.userId };</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHY THIS IS AN INTERVIEW ANSWER</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>It is a race with a security consequence, not just a data one.</strong> That distinction is what makes it memorable to an interviewer.</p>
+              <p class="tl"><strong>The order of operations carries the whole fix:</strong> revoke first, mint second. Reversed, the mechanism silently stops detecting theft while every test still passes.</p>
+              <p class="tl"><strong>The return value is the race detector.</strong> <code>revokeOne</code> returns rows affected — zero means someone else claimed it, so this caller must fail rather than proceed.</p>
+              <p class="tl"><em>Volunteer the tradeoff:</em> a 10-second grace window treats an honest double-submit from two tabs as legitimate instead of logging the real user out. It deliberately narrows detection by ten seconds.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/identity/src/sessions.ts</code>
+            <span class="badge-desc">Rotation, family-scoped reuse detection, grace window — a pure function over a tx port.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module4">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right — and note the shape of a strong answer: name the class (TOCTOU / read-then-write), name the isolation level that permits it, then give the fix. Three sentences, no hand-waving."
+               data-explanation-wrong="Neither a bigger machine nor a queue addresses the cause. Two transactions read the same value under READ COMMITTED; the fix must make the check and the write one atomic step.">
+            <h3 class="quiz-question">Under load, a shop oversells its last unit. The code reads stock, checks it is positive, then writes the decrement. Diagnose it in interview language.</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The database is overloaded — scale it up and add a read replica</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Read-then-write TOCTOU under READ COMMITTED — fix with SELECT FOR UPDATE on the stock row, or a conditional UPDATE … WHERE quantity &gt;= n and check rows affected</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Events arrived out of order — add a queue to serialise all checkouts</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly. 'Rows affected' is the race detector, and treating a lost race as a legitimate no-op rather than an error is what keeps the saga from double-emitting."
+               data-explanation-wrong="Retrying a lost CAS re-reads the NEW state and would apply an event that no longer belongs — that is how you get a double confirmation. Throwing turns a normal outcome into an alert.">
+            <h3 class="quiz-question">Your compare-and-set updates zero rows. What should the code do?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Retry the whole operation until it succeeds</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Treat it as a no-op — someone else advanced the state legitimately, so emit nothing and return</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Throw an error so the message is retried by the broker</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Right. Version-guarded atomic upsert is the standard answer for projections, and 'ON CONFLICT DO UPDATE WHERE EXCLUDED.version > version' is the concrete SQL that proves you have written one."
+               data-explanation-wrong="Reading first to decide whether to insert or update reintroduces the exact TOCTOU you are trying to avoid — and ignoring order means a stale event can overwrite a newer one.">
+            <h3 class="quiz-question">A read-model projection receives product updates that can arrive out of order. How do you apply them?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Check whether the row exists, then insert or update accordingly</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A single atomic upsert guarded by version — ON CONFLICT DO UPDATE … WHERE EXCLUDED.version &gt; version — so a stale event is a no-op and no read is needed</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Always apply the latest received event, since order rarely matters in practice</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module4')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module4')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the edge — tokens, rotation, CSRF, breakers, and the two real security bugs a
+          review caught before they shipped.
+        </p>
+      </div>
+
+    </div>
+  </section>

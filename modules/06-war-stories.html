@@ -1,0 +1,328 @@
+  <section class="module" id="module-6">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 6</span>
+        <h1 class="module-title">The behavioural round, with receipts</h1>
+        <p class="module-subtitle">
+          &ldquo;Tell me about a hard bug&rdquo; is a test of how you think, not what broke. Each
+          story below has the same shape: symptom, wrong hypothesis, what proved it, what
+          changed permanently.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The shape of a good answer</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">S</div>
+            <div class="step-body"><strong>Symptom</strong> — what a user or a graph actually showed. Not the cause; you did not know it yet.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">H</div>
+            <div class="step-body"><strong>Hypothesis you rejected</strong> — this is the part that signals seniority. Anyone can narrate a fix; naming what you ruled out and how shows method.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">E</div>
+            <div class="step-body"><strong>Evidence</strong> — the specific observation that settled it. A log line, a metric, a byte count.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">C</div>
+            <div class="step-body"><strong>Change that outlives the fix</strong> — the test, the alert, the rule. A story that ends at &ldquo;then I fixed it&rdquo; ends one beat early.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Story 1 — &ldquo;every test passed and the feature did nothing&rdquo;</h2>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">THE INCIDENT</span>
+            <pre><code><span class="code-line"><span class="code-comment">// Distributed tracing shipped. Six tests, all green.</span></span>
+<span class="code-line"><span class="code-comment">// Jaeger showed nothing at all.</span></span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// The SDK guard was keyed on process.env — which is</span></span>
+<span class="code-line"><span class="code-comment">// INHERITED at spawn. tsx respawns into a child, so the</span></span>
+<span class="code-line"><span class="code-comment">// parent started the SDK and the child — where the app</span></span>
+<span class="code-line"><span class="code-comment">// actually runs — skipped it.</span></span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">HOW TO TELL IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>Symptom:</strong> &ldquo;Tracing was merged, tests green, and Jaeger had no spans.&rdquo;</p>
+              <p class="tl"><strong>Rejected:</strong> &ldquo;I assumed a collector or sampling misconfiguration and spent time there. Wrong — the SDK was never running in the process that mattered.&rdquo;</p>
+              <p class="tl"><strong>Evidence:</strong> &ldquo;The acceptance check we were using — &lsquo;the SDK logs exactly once&rsquo; — was the <em>signature of the bug</em>. It logged once because only the parent ran it.&rdquo;</p>
+              <p class="tl"><strong>Change:</strong> &ldquo;Every test in that area now has to fail when the wiring is removed. Six plan-supplied tests would have passed against a broken implementation; that rule is what surfaced them.&rdquo;</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Five more, compressed</h2>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">🧊</div>
+            <div>
+              <strong>&ldquo;Works locally, frozen in production.&rdquo;</strong>
+              A live stream advanced perfectly in dev and never moved behind nginx. Cause:
+              <code>proxy_buffering</code> is on by default — sensible for a page, fatal for a
+              stream. <em>Lesson to state:</em> the packaged shape has failure modes the dev shape
+              cannot have, so it needs its own acceptance run.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">📦</div>
+            <div>
+              <strong>&ldquo;Correct code, 404 in production.&rdquo;</strong>
+              A new endpoint worked in tests and 404&rsquo;d through the gateway. The running
+              container predated the route. <em>Lesson:</em> first question in any
+              works-here-not-there bug is whether the running artifact contains the change.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🎲</div>
+            <div>
+              <strong>&ldquo;A flaky test that was not flaky.&rdquo;</strong>
+              Two browser walks failed intermittently and always at the same click. Not
+              randomness — they were racing an asynchronous read-model projection, and a
+              correct 422 came back. <em>Lesson:</em> intermittent plus always-the-same-place
+              means a race, and a race has a signal you can wait on instead of a sleep.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🗑️</div>
+            <div>
+              <strong>&ldquo;A recovery tool that destroyed data.&rdquo;</strong>
+              The dead-letter replay used a no-ack read: a crash between reading and republishing
+              destroyed the only copy of a message that could not be regenerated. Fixed to ack
+              only after the publish confirms. <em>Lesson:</em> recovery paths need the same
+              durability review as the write path — they run precisely when things are already
+              broken.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">🤫</div>
+            <div>
+              <strong>&ldquo;CI was green and doing nothing.&rdquo;</strong>
+              A shell loop used <code>if ! case … esac; then</code>, and POSIX suspends
+              <code>errexit</code> inside a condition context — so a failed migration no longer
+              aborted the job. <em>Lesson:</em> `set -e` is not a guarantee; verify by making a
+              step fail on purpose and watching the pipeline go red.
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🧵</div>
+          <div class="callout-content">
+            <strong class="callout-title">The thread through all six</strong>
+            <p>
+              Every one was found by <em>running the system</em> — in a browser, in the packaged
+              build, against real infrastructure — and every one had a green test suite over it.
+              If you take a single sentence into an interview from this course, take that one.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">&ldquo;How do you know it works?&rdquo;</h2>
+        <p>
+          The question that separates people who shipped from people who coded. Four layers, each
+          answering a different question.
+        </p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📊</div>
+            <h4 class="pattern-title">SLOs with real numbers</h4>
+            <p class="pattern-desc">
+              Saga p99 &lt; 5s, HTTP p95 &lt; 500ms — expressed as k6 thresholds, so a load run
+              exits non-zero when the objective is missed.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔥</div>
+            <h4 class="pattern-title">Burn-rate alerts</h4>
+            <p class="pattern-desc">
+              Alert on the <span class="term" data-definition="Burn rate is how fast you are consuming the error budget an SLO allows. Alerting on burn rate rather than raw error count separates a brief blip from a sustained outage, which is what keeps pagers quiet at 3am.">burn rate</span> of error budget consumption, not on raw error count — which is
+              what stops a 3am page for a one-minute blip.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">💣</div>
+            <h4 class="pattern-title">Chaos scenarios</h4>
+            <p class="pattern-desc">
+              Kill a broker, kill a service, publish a poison message — then assert the system
+              converges and the right alert fires.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">✅</div>
+            <h4 class="pattern-title">Invariant checker</h4>
+            <p class="pattern-desc">
+              Six properties across seven databases and both brokers — no order stuck
+              non-terminal, no unsent outbox row, no reservation both consumed and released. Exit
+              code, not a dashboard.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">The finding worth quoting</strong>
+            <p>
+              &ldquo;Latency alerts do not catch hard outages. An open circuit answers in
+              single-digit milliseconds, so during a chaos run availability collapsed while the
+              latency alert never fired. Availability and latency need separate alerts — I found
+              that by breaking the system on purpose, not by reasoning about it.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module6">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right. Naming the hypothesis you rejected and the evidence that settled it is what makes a debugging story credible — it demonstrates method rather than luck."
+               data-explanation-wrong="A blow-by-blow of everything you tried reads as thrashing, and jumping straight to the cause makes it sound like you already knew. The structure interviewers reward is: symptom, rejected hypothesis, decisive evidence, permanent change.">
+            <h3 class="quiz-question">&ldquo;Tell me about the hardest bug you have debugged.&rdquo; What must the answer contain?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A detailed chronology of everything you tried</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The symptom, a hypothesis you ruled out and how, the evidence that settled it, and the change that stops the class of bug recurring</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The root cause stated up front, then the one-line fix</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly — and this generalises: any test written against a stub you authored can only confirm your own assumption. Assert on the observable contract, or verify by removing the implementation and watching it fail."
+               data-explanation-wrong="More coverage of the same kind multiplies the same blind spot, and code review rarely catches a stub that matches the author's mental model — because the reviewer usually shares it.">
+            <h3 class="quiz-question">Your tests pass against a broken implementation because the stub was written to match your assumption. What is the systemic fix?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Increase test coverage until the gap closes</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Assert against the real observable contract, and prove each test fails when the wiring it covers is removed</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Require a second reviewer on all test changes</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Right. An open circuit or a rate limiter returns fast, so latency looks healthy while availability is gone. Saying this shows you have actually watched a system fail rather than only instrumented one."
+               data-explanation-wrong="Both other answers describe real practices, but neither explains why a latency-only alerting strategy misses a total outage — which is the insight the question is fishing for.">
+            <h3 class="quiz-question">Why is a latency alert insufficient on its own?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because percentiles are hard to compute accurately across instances</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because a hard outage is fast — an open circuit or a rate limiter answers in milliseconds, so availability collapses while latency looks excellent</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because latency should be measured client-side rather than server-side</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module6')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module6')">Try Again</button>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The vocabulary sheet</h2>
+        <p>Use these words precisely. Precision is most of what &ldquo;senior&rdquo; sounds like.</p>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">saga · compensating action</code>
+            <span class="badge-desc">Local steps with inverses, standing in for a transaction that cannot exist. Not &ldquo;rollback&rdquo;.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">choreography vs orchestration</code>
+            <span class="badge-desc">React to events vs be told what to do. This system: choreographed execution, centralised state machine.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">dual-write problem · transactional outbox</code>
+            <span class="badge-desc">Two systems, one commit needed. Turns atomicity into delivery.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">at-least-once · idempotent consumer</code>
+            <span class="badge-desc">The realistic delivery guarantee, and the property that makes it safe. Exactly-once effects, not delivery.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">TOCTOU · compare-and-set · SELECT FOR UPDATE</code>
+            <span class="badge-desc">The race, the optimistic fix, the pessimistic fix.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">READ COMMITTED</code>
+            <span class="badge-desc">Postgres&rsquo;s default, and the reason two readers can both see a stale row.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">refresh rotation · reuse detection · family</code>
+            <span class="badge-desc">Rotate, detect replay of a rotated token, revoke one chain rather than one user.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">JWKS · kid</code>
+            <span class="badge-desc">Publish public keys, select by key id, rotate without redeploying verifiers.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">circuit breaker · back-pressure · DLQ</code>
+            <span class="badge-desc">Stop calling the dead, limit what you accept, park what you cannot process.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">SLO · error budget · burn rate</code>
+            <span class="badge-desc">The target, the allowance, and the speed you are spending it — alert on the third.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">read model · projection · eventual consistency</code>
+            <span class="badge-desc">A local copy fed by events, and the gap you must design around rather than wish away.</span>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎓</div>
+          <div class="callout-content">
+            <strong class="callout-title">Final rehearsal</strong>
+            <p>
+              Pick any three terms above and explain each in two sentences: what it is, and what
+              it costs. If the second sentence is hard, that is the topic to revisit — an
+              interviewer will find it before you do.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>

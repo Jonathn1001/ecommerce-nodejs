@@ -1,0 +1,263 @@
+  <section class="module" id="module-3">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 3</span>
+        <h1 class="module-title">Delivery semantics, and the dual-write problem</h1>
+        <p class="module-subtitle">
+          &ldquo;How do you guarantee the message gets sent?&rdquo; is a trick question. The
+          honest answer starts by rejecting the premise.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The dual-write problem, stated properly</h2>
+        <p>
+          You must save a row <em>and</em> publish an event. Two systems, no shared transaction.
+          Whichever you do first has a window where the other fails.
+        </p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">💀</div>
+            <h4 class="pattern-title">Save, then publish</h4>
+            <p class="pattern-desc">
+              Crash in between: the order exists and <strong>nobody downstream ever hears about
+              it</strong>. Silent, permanent, and invisible until a customer complains.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">👻</div>
+            <h4 class="pattern-title">Publish, then save</h4>
+            <p class="pattern-desc">
+              Crash in between: consumers act on an order that <strong>does not exist</strong>.
+              Stock reserved for a phantom.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">📮</div>
+            <h4 class="pattern-title">Transactional outbox</h4>
+            <p class="pattern-desc">
+              Write the event <em>as a row</em> in the same transaction as the order. A relay
+              polls the table and publishes. Now there is one write, and delivery becomes a
+              retry problem instead of a correctness problem.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">The sentence to memorise</strong>
+            <p>
+              &ldquo;The outbox converts an <em>atomicity</em> problem, which is unsolvable across
+              two systems, into a <em>delivery</em> problem, which retries solve. The cost is
+              at-least-once semantics and a polling delay — so every consumer has to be
+              idempotent, which they need to be anyway.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">One outbox, two transports — the routing is the design</h2>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">    <span class="code-comment">// Atomic command emission: the ChargePayment outbox row commits with the</span></span>
+<span class="code-line">    <span class="code-comment">// status change; the relay routes it to RabbitMQ payment.charge.</span></span>
+<span class="code-line">    <span class="code-keyword">await</span> tx.<span class="code-function">enqueue</span>(CHARGE_PAYMENT, p.orderId, {</span>
+<span class="code-line">      <span class="code-property">orderId</span>: p.orderId,</span>
+<span class="code-line">      <span class="code-property">userId</span>: order.userId,</span>
+<span class="code-line">      <span class="code-property">amount</span>: order.totalPrice,</span>
+<span class="code-line">    });</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;One outbox table, two destinations, routed purely by row type.&rdquo;</strong> Commands go to RabbitMQ, events to Kafka. No second table, no migration to add a transport.</p>
+              <p class="tl"><strong>&ldquo;The command commits with the state change.&rdquo;</strong> An order cannot be AWAITING_PAYMENT with no charge queued, or vice versa — the classic partial-failure bug, closed by construction.</p>
+              <p class="tl"><strong>&ldquo;The relay uses <span class="term" data-definition="Publisher confirms are a broker acknowledgement that a published message is safely stored. Without them a publish call can return successfully while the message is lost in flight, so the relay would mark a row sent that never arrived.">publisher confirms</span>.&rdquo;</strong> It marks a row sent only after the broker acknowledges, so a lost publish is retried rather than silently dropped.</p>
+              <p class="tl"><strong>&ldquo;And the two lanes are isolated.&rdquo;</strong> A Rabbit outage must not stop Kafka publishing — the tick settles both independently and catches per-lane errors.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Kafka or RabbitMQ — the answer is about the message, not the tool</h2>
+
+        <div class="dnd-container" id="dnd-module3">
+          <div class="dnd-chips">
+            <div class="dnd-chip" draggable="true" data-answer="kafka">Kafka (event log)</div>
+            <div class="dnd-chip" draggable="true" data-answer="rabbit">RabbitMQ (work queue)</div>
+          </div>
+          <div class="dnd-zones">
+            <div class="dnd-zone" data-correct="kafka">
+              <p class="dnd-zone-label">&ldquo;<code>payment.succeeded</code>&rdquo; — a fact, past tense, multiple independent readers, replayable from an offset</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="rabbit">
+              <p class="dnd-zone-label">&ldquo;<code>ChargePayment</code>&rdquo; — an instruction, one worker must do it exactly once, needs a DLQ when it cannot be done</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+          </div>
+          <button class="btn" onclick="checkDnD('dnd-module3')">Check</button>
+          <button class="btn" onclick="resetDnD('dnd-module3')">Reset</button>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">consumer group</code>
+            <span class="badge-desc">Kafka fan-out unit. Order&rsquo;s catalog projection runs in a <em>separate</em> group from its saga consumer, so one lagging does not stall the other.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">partition key</code>
+            <span class="badge-desc">Ordering is guaranteed per partition only. Keying by <code>orderId</code> keeps one order&rsquo;s events in sequence; there is no global order and you should say so.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">prefetch</code>
+            <span class="badge-desc">RabbitMQ <span class="term" data-definition="Back-pressure is limiting how much work you accept so a fast producer cannot overwhelm a slow consumer. In a queue it means capping unacknowledged messages per consumer; without it one slow worker pulls the whole queue into memory.">back-pressure</span> — cap unacked messages per consumer (10 here) or one slow worker buffers the whole queue into memory.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">DLQ</code>
+            <span class="badge-desc">Where poison messages park after bounded retries, instead of blocking the queue or vanishing.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">&ldquo;Do you have exactly-once?&rdquo;</h2>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Never answer yes</strong>
+            <p>
+              &ldquo;No — nobody does, end to end. Kafka&rsquo;s exactly-once applies within
+              Kafka, to a read-process-write inside one cluster. The moment a side effect leaves
+              that boundary — a charge, an email, a row in another database — you are back to
+              at-least-once. So I made consumers idempotent instead: exactly-once
+              <em>effects</em>, not exactly-once delivery.&rdquo;
+            </p>
+          </div>
+        </div>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>Processed-event ledger.</strong> Each consumer records the event ids it has
+              handled and drops repeats. Pruned on a schedule so it does not grow forever — an
+              interviewer will ask about retention, so mention it before they do.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Natural idempotency where possible.</strong> A unique constraint on
+              <code>Payment.orderId</code> makes a double charge impossible at the database level
+              — belt and braces with the ledger.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>State-machine idempotency.</strong> The illegal transition returns null, so
+              a duplicate cannot advance an order twice even if both other layers were removed.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <strong>Ordering of the two.</strong> Mark-processed-first vs act-first is a real
+              choice: Inventory marks first so a crash mid-handler cannot double-consume a
+              reservation, and the sweeper covers the case where marking succeeded but the act
+              did not.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module3">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right, and the phrase to use is 'the dual-write problem'. Interviewers listen for whether you know that this failure is invisible — no error is thrown, the order simply exists in a world where nothing downstream heard about it."
+               data-explanation-wrong="A retry or a try/catch cannot help: the process is gone. The only fix is to make the event part of the same atomic write as the data.">
+            <h3 class="quiz-question">A service writes a row, then publishes an event, and crashes in between. What is this called and what is the fix?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A race condition — fix it with a retry loop around the publish</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The dual-write problem — fix it with a transactional outbox, so the event is a row in the same commit and a relay publishes it</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A deadlock — fix it by publishing first</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly. Per-partition ordering with a key is the precise answer, and volunteering 'there is no global ordering' before they ask shows you have actually operated one of these."
+               data-explanation-wrong="Kafka gives no global ordering across partitions, and a single partition would serialise the entire system. The answer lives in the partition key.">
+            <h3 class="quiz-question">&ldquo;How do you guarantee events for one order are processed in order?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Kafka preserves global ordering across the topic</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Key by orderId so all of one order&rsquo;s events land on the same partition — ordering is per-partition, and there is no global ordering</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Use a single partition so everything is sequential</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Right. A DLQ that nobody watches is a silent data-loss queue. Depth as a metric with an alert is the operational half of the pattern, and it is the half candidates forget."
+               data-explanation-wrong="Retrying forever blocks the queue behind the poison message; dropping it loses data silently. The pattern is bounded retry, then park, then ALERT.">
+            <h3 class="quiz-question">A message fails processing every time. What is the complete answer?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Retry with exponential backoff until it eventually succeeds</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Bounded retries, then park it in a DLQ — and export DLQ depth as a metric with an alert, because an unwatched DLQ is silent data loss</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Log the error and acknowledge the message so the queue keeps moving</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the bug class that appears in every senior interview — two things reading the same
+          value before either writes.
+        </p>
+      </div>
+
+    </div>
+  </section>

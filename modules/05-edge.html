@@ -1,0 +1,256 @@
+  <section class="module" id="module-5">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 5</span>
+        <h1 class="module-title">The edge: tokens, trust, and two bugs that nearly shipped</h1>
+        <p class="module-subtitle">
+          Auth questions reward precision. &ldquo;We use JWTs&rdquo; is a non-answer; the
+          interesting part is what happens when one is stolen.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Two tokens, two jobs</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🎫</div>
+            <h4 class="pattern-title">Access token — 15 minutes</h4>
+            <p class="pattern-desc">
+              RS256 JWT, verified by the gateway with Identity&rsquo;s <em>public</em> key. Fast,
+              stateless, and <strong>impossible to revoke</strong> — which is exactly why it is
+              short-lived.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔑</div>
+            <h4 class="pattern-title">Refresh token — 7 days</h4>
+            <p class="pattern-desc">
+              <strong>Opaque</strong>, not a JWT. Stored as a sha256 hash so a database leak
+              yields nothing usable. Revocable, because it is a row.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">The answer that shows you have thought about it</strong>
+            <p>
+              &ldquo;Asymmetric signing means only Identity can mint a token, but every service
+              can verify one — no shared secret to leak. The gateway fetches the public keys from
+              a
+              <span class="term" data-definition="JWKS — JSON Web Key Set. An endpoint publishing the public keys a service signs with, each tagged with a key id (kid). Verifiers fetch and cache it, so keys can rotate without redeploying anyone.">JWKS</span>
+              endpoint and picks by <code>kid</code>, so keys rotate without redeploying anything.
+              It keeps the last good set if a fetch returns malformed JSON, because a bad deploy
+              upstream should not lock every user out.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">&ldquo;What if a refresh token is stolen?&rdquo;</h2>
+        <p>
+          This is the question. Rotation alone is not an answer — rotation plus
+          <strong>reuse detection</strong> is.
+        </p>
+
+        <div class="flow-animation" data-steps='[
+          {"highlight":"flow-actor-6","label":"Every refresh mints a new token and revokes the old one. Tokens form a chain, and the chain has a family id."},
+          {"highlight":"flow-actor-7","label":"An attacker steals token N and uses it. It is still valid, so they get token N+1 — no alarm yet. Rotation alone has not saved you.","packet":true,"from":"actor-6","to":"actor-7"},
+          {"highlight":"flow-actor-6","label":"Later the real user refreshes with their copy of token N. But N was already rotated — presenting a revoked token is the signal.","packet":true,"from":"actor-7","to":"actor-6"},
+          {"highlight":"flow-actor-6","label":"Reuse detected: revoke the whole FAMILY. Both the attacker and the user are logged out of this chain; other devices, which have their own families, keep working."},
+          {"highlight":"flow-actor-8","label":"The tradeoff, volunteered before they ask: a 10-second grace window treats an honest double-submit from two tabs as legitimate, deliberately narrowing detection by ten seconds.","packet":true,"from":"actor-6","to":"actor-8"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-6">
+              <div class="flow-actor-icon">🪪</div>
+              <span>Identity</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-7">
+              <div class="flow-actor-icon">🕵️</div>
+              <span>Attacker</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-8">
+              <div class="flow-actor-icon">⚖️</div>
+              <span>Tradeoff</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet-5"></div>
+          <div class="flow-step-label" id="flow-label-5">Step through the theft scenario</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🔍</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why family-scoped, not user-scoped</strong>
+            <p>
+              Revoking every session for the user would log them out of their phone because their
+              laptop was compromised — punishing the victim on every device. One chain, one
+              family, one blast radius.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The gateway&rsquo;s five jobs</h2>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">strip, then inject</code>
+            <span class="badge-desc">Inbound <code>x-user-id</code> headers are removed <em>unconditionally</em> before verified ones are added. Otherwise anyone could claim to be anyone — and downstream services trust that header completely.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">httpOnly cookies + double-submit CSRF</code>
+            <span class="badge-desc">The JWT never touches JavaScript, so XSS cannot read it. A readable CSRF cookie must be echoed in a header — an attacker&rsquo;s site can send the cookie but cannot read it to set the header.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">authz from a cached snapshot</code>
+            <span class="badge-desc">Permissions are a TTL-cached table, not a call per request. The cost is staleness bounded by the TTL, which you should state as a number.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">circuit breaker per upstream</code>
+            <span class="badge-desc">One breaker per service, not per mount — so /products failing tells /comments nothing. Open circuit answers 503 immediately instead of queueing.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">SSE exempt from the breaker</code>
+            <span class="badge-desc">A timeout would kill a healthy long-lived stream after seconds. Knowing which traffic must bypass your own resilience machinery is a senior-level detail.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Two bugs a review caught — both worth telling</h2>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🔓</div>
+            <div>
+              <strong>Case-varied paths bypassed authentication.</strong>
+              The rules table matched <code>/products</code> case-sensitively, but Express matches
+              mounts case-insensitively and the upstream services did too. So
+              <code>POST /Products</code> skipped <em>both</em> the permission check and
+              authentication while still reaching Catalog. Fixed with case-insensitive patterns
+              plus <code>case sensitive routing</code> at the app level — two layers, because one
+              of them is a table a human maintains.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🚧</div>
+            <div>
+              <strong>A proxy library upgrade silently broke every route.</strong>
+              http-proxy-middleware v3 dropped the legacy <code>req.url = req.originalUrl</code>
+              patch, so every <code>app.use()</code>-mounted route forwarded the
+              <em>mount-stripped</em> path — the upstream saw <code>/abc</code> instead of
+              <code>/orders/abc</code> and 404&rsquo;d the entire proxied surface. The test suite
+              was green because the stub had been written to match the broken shape. Tests now
+              assert the exact upstream path.
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">💬</div>
+          <div class="callout-content">
+            <strong class="callout-title">How to tell the second one</strong>
+            <p>
+              &ldquo;The lesson was not about that library. It was that my test asserted against
+              a stub I had written to match my own assumption — so it could only ever confirm it.
+              Now the assertion is on the exact path the upstream receives, which is a fact about
+              the contract rather than about my mental model.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module5">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Rotation alone gives the attacker a fresh token and no alarm; the detection comes from the VICTIM later presenting a token that was already rotated. Family-scoped revocation is what keeps the blast radius to one chain."
+               data-explanation-wrong="Rotation on its own does not detect anything — the thief simply rotates too. And shortening lifetimes only narrows the window; it never tells you a theft occurred.">
+            <h3 class="quiz-question">&ldquo;How would you know a refresh token had been stolen?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Rotate on every refresh — a stolen token stops working after the next rotation</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Rotation plus reuse detection: an already-rotated token being presented proves the chain leaked, so revoke the whole family — the alarm comes from the victim, not the thief</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Shorten the refresh lifetime to an hour</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Downstream services accept the identity header as fact, so the gateway stripping it unconditionally is the entire basis of that trust. Candidates who miss this have usually never run services behind a gateway."
+               data-explanation-wrong="Validating or logging the header is not enough — the only safe rule is to discard whatever arrived and inject a value you derived yourself from a verified token.">
+            <h3 class="quiz-question">Your gateway forwards <code>x-user-id</code> to services that trust it completely. What must it do with an inbound <code>x-user-id</code> from the client?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Validate that it matches the token, and reject the request if not</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Strip it unconditionally, then inject the value derived from the verified token — never trust the client&rsquo;s copy at all</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Log it for auditing and pass it through</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly — and the reason is worth stating: the attacker's page can cause the cookie to be SENT, but same-origin policy stops it being READ, so it cannot construct the matching header."
+               data-explanation-wrong="A CSRF token is not about secrecy from the user or about signing. It works because a cross-site attacker can trigger a request carrying cookies but cannot read those cookies to mirror one into a header.">
+            <h3 class="quiz-question">Why does double-submit CSRF actually work?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The token is signed, so the server can verify it was issued by us</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A cross-site attacker can make the browser send the cookie but cannot read it, so they cannot mirror it into the required header</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The token expires quickly, so a stolen one is useless</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Last: the behavioural round. Six incidents, in the form that answers &ldquo;tell me
+          about a time&hellip;&rdquo;
+        </p>
+      </div>
+
+    </div>
+  </section>
