@@ -55,3 +55,32 @@ it("retries network failures but never schema mismatches or 4xx", () => {
   expect(retry(0, new HttpError(404))).toBe(false);
   expect(retry(5, new NetworkError("x"))).toBe(false); // bounded
 });
+
+// Order deliberately puts the offending productId in its 422 body, and until 8c the body was
+// discarded with the response — so checkout could only say "one of these products".
+it("attaches a JSON error body to HttpError", async () => {
+  mockFetch(
+    async () =>
+      new Response(JSON.stringify({ error: "unpriced", productId: "p9" }), {
+        status: 422,
+        headers: { "content-type": "application/json" },
+      })
+  );
+  const err = (await request("/orders", schema).catch((e) => e)) as HttpError;
+  expect(err.status).toBe(422);
+  expect(err.body).toEqual({ error: "unpriced", productId: "p9" });
+});
+
+// Best-effort: an HTML error page or a truncated payload must not turn one failure into two.
+it("leaves the body undefined when the error payload is not JSON", async () => {
+  mockFetch(
+    async () =>
+      new Response("<html>502</html>", {
+        status: 502,
+        headers: { "content-type": "text/html" },
+      })
+  );
+  const err = (await request("/orders", schema).catch((e) => e)) as HttpError;
+  expect(err.status).toBe(502);
+  expect(err.body).toBeUndefined();
+});

@@ -35,6 +35,18 @@ async function send(path: string, init: RequestInit_): Promise<Response> {
   });
 }
 
+// Read only what the server said is JSON, and never let reading it throw: the caller is
+// already handling a failure, and a second one raised from the error path would replace a
+// precise status with a parse error.
+async function readErrorBody(res: Response): Promise<unknown> {
+  if (!res.headers.get("content-type")?.includes("application/json")) return undefined;
+  try {
+    return await res.json();
+  } catch {
+    return undefined;
+  }
+}
+
 export async function request<T>(
   path: string,
   schema: ZodType<T>,
@@ -64,7 +76,7 @@ export async function request<T>(
     if (res.status === 401) throw new UnauthenticatedError();
   }
 
-  if (!res.ok) throw new HttpError(res.status);
+  if (!res.ok) throw new HttpError(res.status, await readErrorBody(res));
 
   let body: unknown;
   try {

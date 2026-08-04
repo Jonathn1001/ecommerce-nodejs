@@ -76,7 +76,7 @@ export function Cart() {
         // refetch lands on the real EmptyState instead of stale lines and a live "Place order"
         // button rendering above an alert that contradicts them.
         await invalidate();
-        setCheckoutError(describeCheckoutFailure(e));
+        setCheckoutError(describeCheckoutFailure(e, (id) => byId.get(id)?.name));
         return;
       }
       setCheckoutError(describeCheckoutFailure(e));
