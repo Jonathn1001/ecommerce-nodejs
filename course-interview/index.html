@@ -1,0 +1,1744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interview Prep — What This System Taught Us</title>
+
+  <!-- Google Fonts: Bricolage Grotesque · DM Sans · JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+
+  <style>
+    :root {
+      --color-accent:       #2A7B9B;
+      --color-accent-hover: #1F6280;
+      --color-accent-light: #E4F2F7;
+      --color-accent-muted: #5A9DB8;
+    }
+  </style>
+
+  <script src="main.js" defer></script>
+</head>
+<body>
+
+  <nav class="nav" id="nav">
+    <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    <div class="nav-inner">
+      <span class="nav-title">Interview Prep — What This System Taught Us</span>
+      <div class="nav-dots" id="nav-dots" role="tablist">
+        <button class="nav-dot" data-target="module-1" data-tooltip="Whiteboard it in 5 minutes" role="tab" aria-label="Module 1: Whiteboard it in five minutes"></button>
+        <button class="nav-dot" data-target="module-2" data-tooltip="Distributed transactions" role="tab" aria-label="Module 2: Distributed transactions"></button>
+        <button class="nav-dot" data-target="module-3" data-tooltip="Messaging semantics" role="tab" aria-label="Module 3: Messaging semantics"></button>
+        <button class="nav-dot" data-target="module-4" data-tooltip="Concurrency &amp; correctness" role="tab" aria-label="Module 4: Concurrency and correctness"></button>
+        <button class="nav-dot" data-target="module-5" data-tooltip="Auth &amp; the edge" role="tab" aria-label="Module 5: Auth and the edge"></button>
+        <button class="nav-dot" data-target="module-6" data-tooltip="War stories, STAR form" role="tab" aria-label="Module 6: War stories in STAR form"></button>
+      </div>
+    </div>
+  </nav>
+
+  <main id="main">
+  <section class="module" id="module-1">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 1</span>
+        <h1 class="module-title">Whiteboard it in five minutes</h1>
+        <p class="module-subtitle">
+          Every system-design round starts the same way: &ldquo;walk me through something you
+          built.&rdquo; This is the version that survives follow-up questions.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The 90-second opener</h2>
+        <p>
+          Lead with the <strong>problem shape</strong>, not the tech list. Naming Kafka in
+          sentence one invites &ldquo;why Kafka?&rdquo; before you have earned the right to
+          answer it.
+        </p>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎙️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Say this</strong>
+            <p>
+              &ldquo;An e-commerce checkout where placing an order has to reserve stock and take
+              payment — two writes that live in different services with different databases.
+              There is no distributed transaction, so the interesting problem is: how do you keep
+              those consistent when the second step fails? I solved it with a choreographed saga
+              plus compensating actions, and the hard parts were exactly-once semantics,
+              concurrent stock reservation, and knowing whether it actually worked in
+              production.&rdquo;
+            </p>
+          </div>
+        </div>
+
+        <p>
+          That paragraph plants three flags an interviewer can pull on — saga, concurrency,
+          observability — and every one of them is a topic you have real code for.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The box diagram, and what each box owes you</h2>
+
+        <div class="arch-diagram">
+          <div class="arch-zone arch-zone-browser">
+            <h4 class="arch-zone-label">Edge</h4>
+            <div class="arch-component" data-desc="Gateway — AuthN via RS256 JWT verified against JWKS by kid, AuthZ from a TTL-cached grants snapshot, CSRF double-submit, rate limits (10/min on /auth, 300/min general), per-upstream circuit breaker. No database: it holds policy, never truth.">
+              <div class="arch-icon">🚪</div>
+              <span>Gateway</span>
+            </div>
+            <div class="arch-component" data-desc="Storefront — React SPA. Talks only to the gateway over a same-origin /api prefix, so cookies stay SameSite=Lax and no CORS is needed. Live order state arrives over SSE.">
+              <div class="arch-icon">🖥️</div>
+              <span>Storefront</span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">Services — DB per service</h4>
+            <div class="arch-component" data-desc="Identity — RS256 signing key held here alone, opaque refresh tokens hashed at rest, rotation with family-scoped reuse detection. Publishes JWKS so the gateway can verify without sharing secrets.">
+              <div class="arch-icon">🪪</div>
+              <span>Identity</span>
+            </div>
+            <div class="arch-component" data-desc="Order — the saga coordinator by state, not by orchestration. Owns carts, orders, the order state machine, and a read-model projection of catalog prices so it can price an order without a synchronous call.">
+              <div class="arch-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="arch-component" data-desc="Inventory — reservations, consumption, release. Holds the only lock that matters for oversell, and a sweeper that reclaims reservations abandoned by dead sagas.">
+              <div class="arch-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="arch-component" data-desc="Payment — simulated gateway with deterministic outcomes by amount, an async webhook path that parks in PROCESSING, and HMAC-verified callbacks. Emits results; never decides order state.">
+              <div class="arch-icon">💳</div>
+              <span>Payment</span>
+            </div>
+            <div class="arch-component" data-desc="Catalog — products, prices, discounts. Emits price_changed under a real SELECT FOR UPDATE so concurrent PATCHes cannot suppress or duplicate the event.">
+              <div class="arch-icon">🗂️</div>
+              <span>Catalog</span>
+            </div>
+            <div class="arch-component" data-desc="Notification — consumes order.confirmed, writes a Notification row and a SendEmail command in ONE transaction, worker renders and sends. Nothing in checkout waits on it.">
+              <div class="arch-icon">✉️</div>
+              <span>Notification</span>
+            </div>
+          </div>
+          <div class="arch-zone arch-zone-external">
+            <h4 class="arch-zone-label">Infrastructure</h4>
+            <div class="arch-component" data-desc="Kafka — event backbone. Facts, past tense, fan-out to independent consumer groups, retained after read.">
+              <div class="arch-icon">📌</div>
+              <span>Kafka</span>
+            </div>
+            <div class="arch-component" data-desc="RabbitMQ — commands and tasks. Single-consumer work, DLQ for poison messages, prefetch for back-pressure.">
+              <div class="arch-icon">📥</div>
+              <span>RabbitMQ</span>
+            </div>
+            <div class="arch-component" data-desc="Postgres — one instance, one database per service, no cross-database queries. Redis for distributed locks, cache and idempotency keys.">
+              <div class="arch-icon">🗄️</div>
+              <span>Postgres · Redis</span>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc">Click a box — each one has a defensible reason to exist</div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The follow-up you will get, and the answer that lands</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">Q</div>
+            <div class="step-body">
+              <strong>&ldquo;Why microservices for a shop?&rdquo;</strong>
+              The honest answer scores higher than the enthusiastic one: <em>&ldquo;For a real
+              shop of this size, I would not. This was built to exercise the pattern. What the
+              split genuinely buys is failure isolation — email being down cannot fail checkout —
+              and a hard security boundary, because Payment has no credentials for the customer
+              table. What it costs is that nothing is instantaneous and one request leaves
+              footprints in five services.&rdquo;</em>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">Q</div>
+            <div class="step-body">
+              <strong>&ldquo;Why not two-phase commit?&rdquo;</strong>
+              <em>&ldquo;2PC needs a coordinator holding locks across services for the length of
+              the slowest participant, and any participant that dies in the prepared state blocks
+              the others. Payment can take seconds. I traded atomicity for availability and
+              accepted eventual consistency with compensating actions.&rdquo;</em>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">Q</div>
+            <div class="step-body">
+              <strong>&ldquo;Where is the single point of failure?&rdquo;</strong>
+              <em>&ldquo;The gateway, deliberately — it is the only reachable entry point, which
+              is what makes verified identity headers trustworthy downstream. In this shape it is
+              one process with a circuit breaker per upstream; in production it would be
+              horizontally scaled behind a load balancer, which it can be because it holds no
+              state beyond a TTL-cached permissions snapshot.&rdquo;</em> That property — no per-request state — is what makes it <span class="term" data-definition="Horizontally scalable means adding capacity by running more identical instances rather than a bigger machine. It requires the component to hold no per-request state locally, which is why stateless and horizontally scalable are usually said together.">horizontally scalable</span>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">One request, end to end</h2>
+        <p>
+          Interviewers ask you to trace a write. Step through this until you can narrate it with
+          no diagram in front of you.
+        </p>
+
+        <div class="flow-animation" data-steps='[
+          {"highlight":"flow-actor-1","label":"POST /orders arrives at the gateway. JWT verified against JWKS by kid; CSRF header compared to the cookie; rate limiter checked. Inbound identity headers are STRIPPED and re-injected verified."},
+          {"highlight":"flow-actor-2","label":"Order prices the cart from its OWN read model — no synchronous call to Catalog, so Catalog being down does not fail checkout.","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-2","label":"ONE transaction: write the order PENDING, write an order.placed row to the outbox, clear the cart. Atomic by construction."},
+          {"highlight":"flow-actor-3","label":"A polling relay reads the outbox and publishes to Kafka. This is the dual-write problem solved — the DB write and the publish cannot diverge.","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-4","label":"Inventory consumes order.placed, reserves stock under a lock, emits inventory.reserved. Its own consumption is deduped by a processed-event ledger.","packet":true,"from":"actor-3","to":"actor-4"},
+          {"highlight":"flow-actor-2","label":"Order applies the event via a compare-and-set: PENDING to AWAITING_PAYMENT, and enqueues ChargePayment in the SAME transaction as the status change.","packet":true,"from":"actor-4","to":"actor-2"},
+          {"highlight":"flow-actor-5","label":"Payment consumes the command from RabbitMQ — single consumer, so the charge happens once — and emits succeeded or failed back onto Kafka.","packet":true,"from":"actor-2","to":"actor-5"},
+          {"highlight":"flow-actor-2","label":"Order settles CONFIRMED or CANCELLED, pg_notify fires on commit, and the browser SSE stream pushes the new state with no polling.","packet":true,"from":"actor-5","to":"actor-2"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">🚪</div>
+              <span>Gateway</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">📌</div>
+              <span>Kafka</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-5">
+              <div class="flow-actor-icon">💳</div>
+              <span>Payment</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+          <div class="flow-step-label" id="flow-label">Click &ldquo;Next Step&rdquo; — narrate each one out loud</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The one snippet worth memorising</h2>
+        <p>
+          If they ask &ldquo;show me the most important twenty lines,&rdquo; this is the write
+          that makes the whole design hold together.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-keyword">await</span> tx.<span class="code-function">enqueue</span>(ORDER_PLACED, orderId, {</span>
+<span class="code-line">    orderId,</span>
+<span class="code-line">    <span class="code-property">userId</span>: p.userId,</span>
+<span class="code-line">    <span class="code-property">items</span>: p.items.<span class="code-function">map</span>((i) =&gt; ({ <span class="code-property">productId</span>: i.productId, <span class="code-property">quantity</span>: i.quantity })),</span>
+<span class="code-line">  });</span>
+<span class="code-line">  <span class="code-keyword">return</span> { <span class="code-property">outcome</span>: <span class="code-string">"PLACED"</span>, orderId };</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;The event is written as a row, inside the same transaction as the order.&rdquo;</strong> That single decision removes the dual-write problem — Module 3.</p>
+              <p class="tl"><strong>&ldquo;It carries the ids, not the prices.&rdquo;</strong> Order priced the line itself from its own read model; sending a price would let a consumer disagree about money.</p>
+              <p class="tl"><strong>&ldquo;<code>tx</code> is a port, not Prisma.&rdquo;</strong> The domain function takes an interface, so the business rule is unit-testable with no database — the same shape as the state machine.</p>
+              <p class="tl"><em>Expect:</em> &ldquo;what publishes it, then?&rdquo; A polling relay with publisher confirms, marking rows sent only after the broker acknowledges.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/place-order.ts</code>
+            <span class="badge-desc">47 lines. Read it before any interview where you plan to mention this project.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Numbers to have ready</h2>
+        <p>
+          Vague answers read as second-hand. These are measured, not estimated — Module 6 covers
+          how.
+        </p>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">saga p99 &lt; 5s</code>
+            <span class="badge-desc">The end-to-end SLO, enforced as a k6 threshold, not a hope.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">http p95 &lt; 500ms</code>
+            <span class="badge-desc">Edge latency for synchronous calls.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">10 / min</code>
+            <span class="badge-desc">Rate limit on <code>/auth/*</code>. 300/min everywhere else.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">15m / 7d</code>
+            <span class="badge-desc">Access-token and refresh-token lifetimes.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">6 invariants</code>
+            <span class="badge-desc">Checked across 7 databases and both brokers by a script that exits non-zero.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module1">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="This is the answer that separates a candidate who read a blog post from one who shipped it. Naming the coordinator-blocking problem and the availability tradeoff shows you understand WHY the industry moved to sagas, not just that it did."
+               data-explanation-wrong="Both other answers are true statements but they are not the reason. 2PC is avoided because a coordinator holds locks across services and a participant that dies while prepared blocks everyone — an availability problem, not a tooling one.">
+            <h3 class="quiz-question">&ldquo;Why didn&rsquo;t you use a distributed transaction?&rdquo; — which answer is strongest?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Postgres does not support transactions across databases</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>2PC holds locks across services for the duration of the slowest participant, and a participant that dies while prepared blocks the rest — I traded atomicity for availability</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Sagas are the modern best practice for microservices</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Interviewers are testing judgement, not enthusiasm. Saying 'I would not do this for a real shop this size' and then naming what the split actually buys is the answer of someone who has paid the cost."
+               data-explanation-wrong="Careful — arguing that microservices are simply better is the answer that invites a painful follow-up about operational cost, and you will lose it. Lead with the tradeoff.">
+            <h3 class="quiz-question">&ldquo;Would you build it this way again?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Yes — microservices scale better and teams can deploy independently</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Not at this size. The split bought failure isolation and a hard security boundary; it cost latency, operational surface, and debuggability. I would start with a modular monolith and split at a measured seam</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>No — it was a mistake and I would use a monolith</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module1')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module1')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the topic the whole design exists to solve, and the one they will drill hardest —
+          consistency without a transaction.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-2">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 2</span>
+        <h1 class="module-title">Consistency without a transaction</h1>
+        <p class="module-subtitle">
+          The saga question has a shallow answer everyone gives and a deep one almost nobody
+          does. The deep one is about who owns the state machine.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Choreography vs orchestration — pick a side and defend it</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">💃</div>
+            <h4 class="pattern-title">Choreography — what this system does</h4>
+            <p class="pattern-desc">
+              Each service reacts to events. <strong>Buys:</strong> no central bottleneck; adding
+              a consumer needs no change upstream. <strong>Costs:</strong> the process exists in
+              nobody&rsquo;s code — you reconstruct it from traces.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🎼</div>
+            <h4 class="pattern-title">Orchestration</h4>
+            <p class="pattern-desc">
+              One coordinator calls each step. <strong>Buys:</strong> the workflow is readable in
+              one file, timeouts and retries are centralised. <strong>Costs:</strong> the
+              coordinator becomes a dependency of everything and a deployment bottleneck.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">The nuance that scores</strong>
+            <p>
+              &ldquo;I chose choreography, but Order is still effectively the coordinator —
+              because it owns the <em>state machine</em>. Every service emits facts; only Order
+              decides what a fact means for the order. That is the middle ground: distributed
+              execution, centralised interpretation. Pure choreography, where each service also
+              infers its own view of the process, is where these systems become
+              unreasonable.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The state machine, and why it is eleven lines</h2>
+        <p>
+          Interviewers love asking &ldquo;where does the business process live?&rdquo; Point at
+          one pure function with no I/O in it.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"PENDING"</span> &amp;&amp; eventType === INVENTORY_RESERVED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"AWAITING_PAYMENT"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"PENDING"</span> &amp;&amp; eventType === INVENTORY_RESERVATION_FAILED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"CANCELLED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"AWAITING_PAYMENT"</span> &amp;&amp; eventType === PAYMENT_SUCCEEDED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"CONFIRMED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"AWAITING_PAYMENT"</span> &amp;&amp; eventType === PAYMENT_FAILED) <span class="code-keyword">return</span> <span class="code-string">"CANCELLED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">return</span> <span class="code-keyword">null</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;It is a transition table keyed on (current state, event).&rdquo;</strong> Not scattered <code>if</code>s across consumers — one function, zero dependencies, trivially unit-testable.</p>
+              <p class="tl"><strong>&ldquo;Illegal transitions return null.&rdquo;</strong> A late or duplicate event finds no matching row and becomes a no-op instead of corrupting state — idempotency by construction, not by a flag.</p>
+              <p class="tl"><strong>&ldquo;And the table doubles as a proof.&rdquo;</strong> AWAITING_PAYMENT is reachable only via INVENTORY_RESERVED, so the status itself is evidence the reservation succeeded. The storefront tracker renders four saga steps from four statuses because of exactly this.</p>
+              <p class="tl"><em>Follow-up they will ask:</em> &ldquo;what about a compensating event arriving out of order?&rdquo; — the guard on <code>current</code> is what makes that safe.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/transition.ts</code>
+            <span class="badge-desc">Pure domain core over a tx port — no Prisma, no config, no broker.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Compensation is not rollback — say it in those words</h2>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">1</div>
+            <div>
+              <strong>A rollback un-happens a change.</strong> Only a database can do that, and
+              only within its own boundary.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">2</div>
+            <div>
+              <strong>A compensation is a new, opposite action</strong> — release the
+              reservation, refund the charge. It is visible, it takes time, and it can itself
+              fail.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">3</div>
+            <div>
+              <strong>So every forward step needs its inverse designed at the same time.</strong>
+              &ldquo;What is the compensating action?&rdquo; is the question to ask about any new
+              saga step — including in the interview, out loud.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">4</div>
+            <div>
+              <strong>Some steps have no inverse.</strong> An email cannot be unsent. Those belong
+              at the END of a saga, after the last thing that can fail — which is exactly why
+              Notification consumes <code>order.confirmed</code> and nothing waits on it.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The failure path, narrated</h2>
+        <p>Play this through — it is the sequence they will ask you to walk.</p>
+
+        <div class="chat-window" id="chat-module2">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>Order 41 written PENDING. <code>order.placed</code> in the outbox, same transaction. Nothing reserved, nothing charged — no compensation owed yet.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="inventory" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">🏷️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Inventory</span>
+                <p>Reserved 1 unit under a lock. <strong>First anchor set</strong> — from here, any failure owes a release.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>CAS: PENDING → AWAITING_PAYMENT. <code>ChargePayment</code> enqueued in the <em>same</em> transaction as the status change — so the two can never disagree.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="payment" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-3)">💳</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-3)">Payment</span>
+                <p>Declined. I emit <code>payment.failed</code> and stop. I do <strong>not</strong> tell Inventory anything — I have no idea a reservation exists.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>AWAITING_PAYMENT + PAYMENT_FAILED → CANCELLED. Emit <code>order.cancelled</code>. That event <em>is</em> the compensation trigger.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="5" data-sender="inventory" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">🏷️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Inventory</span>
+                <p>Released. And if that event had been lost, a sweeper reclaims reservations whose sagas never finished — compensation with a safety net.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-typing" style="display:none">
+            <div class="chat-avatar" id="typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next Message</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🪤</div>
+          <div class="callout-content">
+            <strong class="callout-title">The trap in that sequence</strong>
+            <p>
+              Notice Payment never learns a reservation exists. If an interviewer suggests
+              &ldquo;have Payment call Inventory on failure,&rdquo; the answer is: that couples
+              two services that share nothing, and it breaks the moment a third step needs
+              compensating. The <span class="term" data-definition="A compensation trigger is the single event that tells every service holding state for a failed process to undo its part. Publishing one event rather than calling each participant keeps the number of couplings linear instead of quadratic.">compensation trigger</span>
+              belongs to whoever owns the state machine.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module2">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Ordering a saga so that irreversible steps come last is a design rule you can state in one sentence, and it is the answer to a whole family of interview questions about email, shipping and third-party calls."
+               data-explanation-wrong="Retrying an unsendable email or wrapping it in a transaction does not address the real issue: the step has no inverse, so its POSITION in the saga is the only lever you have.">
+            <h3 class="quiz-question">A step in your saga has no possible compensating action — say, sending a physical shipment. Where does it go?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Anywhere, as long as you retry it until it succeeds</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Last — after every step that can still fail, so nothing downstream can force an undo you cannot perform</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>First, so you find out early whether it works</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right — and naming the mechanism matters: the transition table returns null for (CONFIRMED, PAYMENT_SUCCEEDED) because no such row exists, so the duplicate is a no-op without needing a dedupe table at all. Say 'idempotent by state machine, plus a processed-event ledger as defence in depth'."
+               data-explanation-wrong="Assuming the broker will not redeliver is the single most common wrong answer in this area. At-least-once is the default in both Kafka and RabbitMQ, and 'exactly-once' end-to-end does not exist without idempotent consumers.">
+            <h3 class="quiz-question">&ldquo;What happens if <code>payment.succeeded</code> is delivered twice?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>It cannot be — the broker guarantees exactly-once delivery</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The order is already CONFIRMED, so the transition table has no matching rule and returns null — the second delivery is a no-op, with a processed-event ledger as a second layer</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>It confirms twice and sends two emails, which is acceptable</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly. This is the strongest form of the answer because it names the tradeoff in both directions and shows you know where the design actually sits — distributed execution, centralised interpretation."
+               data-explanation-wrong="Both extremes are defensible in an interview, but only if you can say what they cost. The answer that scores names WHERE the coordination actually lives in your design.">
+            <h3 class="quiz-question">&ldquo;Is your saga choreographed or orchestrated?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Choreographed — services react to events, which is more decoupled</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Choreographed execution, but the state machine is centralised in Order — services emit facts, one service decides what they mean. That keeps the process readable without making a coordinator a runtime dependency</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Orchestrated — Order drives the whole flow</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the delivery-semantics questions — dual writes, at-least-once, ordering, and the
+          word &ldquo;exactly-once&rdquo; you should never say without qualifying it.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-3">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 3</span>
+        <h1 class="module-title">Delivery semantics, and the dual-write problem</h1>
+        <p class="module-subtitle">
+          &ldquo;How do you guarantee the message gets sent?&rdquo; is a trick question. The
+          honest answer starts by rejecting the premise.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The dual-write problem, stated properly</h2>
+        <p>
+          You must save a row <em>and</em> publish an event. Two systems, no shared transaction.
+          Whichever you do first has a window where the other fails.
+        </p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">💀</div>
+            <h4 class="pattern-title">Save, then publish</h4>
+            <p class="pattern-desc">
+              Crash in between: the order exists and <strong>nobody downstream ever hears about
+              it</strong>. Silent, permanent, and invisible until a customer complains.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">👻</div>
+            <h4 class="pattern-title">Publish, then save</h4>
+            <p class="pattern-desc">
+              Crash in between: consumers act on an order that <strong>does not exist</strong>.
+              Stock reserved for a phantom.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">📮</div>
+            <h4 class="pattern-title">Transactional outbox</h4>
+            <p class="pattern-desc">
+              Write the event <em>as a row</em> in the same transaction as the order. A relay
+              polls the table and publishes. Now there is one write, and delivery becomes a
+              retry problem instead of a correctness problem.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">The sentence to memorise</strong>
+            <p>
+              &ldquo;The outbox converts an <em>atomicity</em> problem, which is unsolvable across
+              two systems, into a <em>delivery</em> problem, which retries solve. The cost is
+              at-least-once semantics and a polling delay — so every consumer has to be
+              idempotent, which they need to be anyway.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">One outbox, two transports — the routing is the design</h2>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">    <span class="code-comment">// Atomic command emission: the ChargePayment outbox row commits with the</span></span>
+<span class="code-line">    <span class="code-comment">// status change; the relay routes it to RabbitMQ payment.charge.</span></span>
+<span class="code-line">    <span class="code-keyword">await</span> tx.<span class="code-function">enqueue</span>(CHARGE_PAYMENT, p.orderId, {</span>
+<span class="code-line">      <span class="code-property">orderId</span>: p.orderId,</span>
+<span class="code-line">      <span class="code-property">userId</span>: order.userId,</span>
+<span class="code-line">      <span class="code-property">amount</span>: order.totalPrice,</span>
+<span class="code-line">    });</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;One outbox table, two destinations, routed purely by row type.&rdquo;</strong> Commands go to RabbitMQ, events to Kafka. No second table, no migration to add a transport.</p>
+              <p class="tl"><strong>&ldquo;The command commits with the state change.&rdquo;</strong> An order cannot be AWAITING_PAYMENT with no charge queued, or vice versa — the classic partial-failure bug, closed by construction.</p>
+              <p class="tl"><strong>&ldquo;The relay uses <span class="term" data-definition="Publisher confirms are a broker acknowledgement that a published message is safely stored. Without them a publish call can return successfully while the message is lost in flight, so the relay would mark a row sent that never arrived.">publisher confirms</span>.&rdquo;</strong> It marks a row sent only after the broker acknowledges, so a lost publish is retried rather than silently dropped.</p>
+              <p class="tl"><strong>&ldquo;And the two lanes are isolated.&rdquo;</strong> A Rabbit outage must not stop Kafka publishing — the tick settles both independently and catches per-lane errors.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Kafka or RabbitMQ — the answer is about the message, not the tool</h2>
+
+        <div class="dnd-container" id="dnd-module3">
+          <div class="dnd-chips">
+            <div class="dnd-chip" draggable="true" data-answer="kafka">Kafka (event log)</div>
+            <div class="dnd-chip" draggable="true" data-answer="rabbit">RabbitMQ (work queue)</div>
+          </div>
+          <div class="dnd-zones">
+            <div class="dnd-zone" data-correct="kafka">
+              <p class="dnd-zone-label">&ldquo;<code>payment.succeeded</code>&rdquo; — a fact, past tense, multiple independent readers, replayable from an offset</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="rabbit">
+              <p class="dnd-zone-label">&ldquo;<code>ChargePayment</code>&rdquo; — an instruction, one worker must do it exactly once, needs a DLQ when it cannot be done</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+          </div>
+          <button class="btn" onclick="checkDnD('dnd-module3')">Check</button>
+          <button class="btn" onclick="resetDnD('dnd-module3')">Reset</button>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">consumer group</code>
+            <span class="badge-desc">Kafka fan-out unit. Order&rsquo;s catalog projection runs in a <em>separate</em> group from its saga consumer, so one lagging does not stall the other.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">partition key</code>
+            <span class="badge-desc">Ordering is guaranteed per partition only. Keying by <code>orderId</code> keeps one order&rsquo;s events in sequence; there is no global order and you should say so.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">prefetch</code>
+            <span class="badge-desc">RabbitMQ <span class="term" data-definition="Back-pressure is limiting how much work you accept so a fast producer cannot overwhelm a slow consumer. In a queue it means capping unacknowledged messages per consumer; without it one slow worker pulls the whole queue into memory.">back-pressure</span> — cap unacked messages per consumer (10 here) or one slow worker buffers the whole queue into memory.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">DLQ</code>
+            <span class="badge-desc">Where poison messages park after bounded retries, instead of blocking the queue or vanishing.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">&ldquo;Do you have exactly-once?&rdquo;</h2>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Never answer yes</strong>
+            <p>
+              &ldquo;No — nobody does, end to end. Kafka&rsquo;s exactly-once applies within
+              Kafka, to a read-process-write inside one cluster. The moment a side effect leaves
+              that boundary — a charge, an email, a row in another database — you are back to
+              at-least-once. So I made consumers idempotent instead: exactly-once
+              <em>effects</em>, not exactly-once delivery.&rdquo;
+            </p>
+          </div>
+        </div>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>Processed-event ledger.</strong> Each consumer records the event ids it has
+              handled and drops repeats. Pruned on a schedule so it does not grow forever — an
+              interviewer will ask about retention, so mention it before they do.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Natural idempotency where possible.</strong> A unique constraint on
+              <code>Payment.orderId</code> makes a double charge impossible at the database level
+              — belt and braces with the ledger.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>State-machine idempotency.</strong> The illegal transition returns null, so
+              a duplicate cannot advance an order twice even if both other layers were removed.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <strong>Ordering of the two.</strong> Mark-processed-first vs act-first is a real
+              choice: Inventory marks first so a crash mid-handler cannot double-consume a
+              reservation, and the sweeper covers the case where marking succeeded but the act
+              did not.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module3">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right, and the phrase to use is 'the dual-write problem'. Interviewers listen for whether you know that this failure is invisible — no error is thrown, the order simply exists in a world where nothing downstream heard about it."
+               data-explanation-wrong="A retry or a try/catch cannot help: the process is gone. The only fix is to make the event part of the same atomic write as the data.">
+            <h3 class="quiz-question">A service writes a row, then publishes an event, and crashes in between. What is this called and what is the fix?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A race condition — fix it with a retry loop around the publish</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The dual-write problem — fix it with a transactional outbox, so the event is a row in the same commit and a relay publishes it</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A deadlock — fix it by publishing first</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly. Per-partition ordering with a key is the precise answer, and volunteering 'there is no global ordering' before they ask shows you have actually operated one of these."
+               data-explanation-wrong="Kafka gives no global ordering across partitions, and a single partition would serialise the entire system. The answer lives in the partition key.">
+            <h3 class="quiz-question">&ldquo;How do you guarantee events for one order are processed in order?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Kafka preserves global ordering across the topic</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Key by orderId so all of one order&rsquo;s events land on the same partition — ordering is per-partition, and there is no global ordering</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Use a single partition so everything is sequential</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Right. A DLQ that nobody watches is a silent data-loss queue. Depth as a metric with an alert is the operational half of the pattern, and it is the half candidates forget."
+               data-explanation-wrong="Retrying forever blocks the queue behind the poison message; dropping it loses data silently. The pattern is bounded retry, then park, then ALERT.">
+            <h3 class="quiz-question">A message fails processing every time. What is the complete answer?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Retry with exponential backoff until it eventually succeeds</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Bounded retries, then park it in a DLQ — and export DLQ depth as a metric with an alert, because an unwatched DLQ is silent data loss</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Log the error and acknowledge the message so the queue keeps moving</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the bug class that appears in every senior interview — two things reading the same
+          value before either writes.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-4">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 4</span>
+        <h1 class="module-title">Read-then-write, and the bugs it hides</h1>
+        <p class="module-subtitle">
+          One shape causes most &ldquo;impossible&rdquo; production bugs. Interviewers probe for
+          it because it is invisible under low load and inevitable under high.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The shape</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">Read a value.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">Decide something based on it.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">Write the result back.</div>
+          </div>
+        </div>
+
+        <p>
+          Two copies running at once both complete step 1 before either reaches step 3. Both
+          decide against the same stale value. Engineers call the window between the check and
+          the act
+          <span class="term" data-definition="TOCTOU — time-of-check to time-of-use. The gap between verifying a condition and acting on it, during which another process can invalidate what you checked. Say the acronym in an interview; it is the precise name for this class of bug.">TOCTOU</span>.
+        </p>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">🎰</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why it survives testing</strong>
+            <p>
+              Under test there is one request at a time, so the window never opens. It appears
+              first in production, at the worst moment — a flash sale, a retry storm — and
+              presents as data that &ldquo;cannot happen&rdquo;: negative stock, two payments,
+              two live tokens in one family.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Three fixes, and when each is right</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔐</div>
+            <h4 class="pattern-title">Compare-and-set</h4>
+            <p class="pattern-desc">
+              <code>UPDATE … WHERE status = &lt;what I read&gt;</code>. Zero rows affected means
+              you lost the race. <strong>Best when</strong> losing is legitimate and should be a
+              silent no-op — exactly the saga case.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔒</div>
+            <h4 class="pattern-title">Pessimistic row lock</h4>
+            <p class="pattern-desc">
+              <code>SELECT … FOR UPDATE</code> serialises the readers. <strong>Best when</strong>
+              contention is high and retrying is expensive — stock, balances, counters.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🧬</div>
+            <h4 class="pattern-title">Atomic upsert with a version guard</h4>
+            <p class="pattern-desc">
+              <code>ON CONFLICT DO UPDATE … WHERE EXCLUDED.version &gt; version</code>. One
+              statement, no read at all. <strong>Best for</strong> projections applying
+              out-of-order events.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🗣️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Say the isolation level out loud</strong>
+            <p>
+              &ldquo;Postgres defaults to <span class="term" data-definition="READ COMMITTED is Postgres default isolation level: a statement sees only data committed before it started, and two transactions can read the same row while each stays unaware of the other until commit. It permits the read-then-write race described here.">READ COMMITTED</span>, so two transactions can both read the
+              same row and neither sees the other until commit. SERIALIZABLE would catch it, but
+              it costs retries under contention — I preferred a targeted CAS to a global
+              isolation change.&rdquo; That sentence tells an interviewer you know the tradeoff
+              exists.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">CAS, in the saga</h2>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// Compare-and-set: `expected` is the status we read above. A lost CAS means another</span></span>
+<span class="code-line">  <span class="code-comment">// event legitimately advanced this order, so this one must emit nothing.</span></span>
+<span class="code-line">  <span class="code-keyword">const</span> moved = <span class="code-keyword">await</span> tx.<span class="code-function">setStatus</span>(p.orderId, next, order.status);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (!moved) <span class="code-keyword">return</span> <span class="code-string">"NO_OP"</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHAT TO SAY ABOUT IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>&ldquo;The third argument is the guard.&rdquo;</strong> The write only lands if the row still holds the status we based our decision on.</p>
+              <p class="tl"><strong>&ldquo;Losing is not an error.&rdquo;</strong> It means another event advanced the order first, legitimately — so we emit nothing rather than retrying, which would double-emit.</p>
+              <p class="tl"><em>The follow-up:</em> &ldquo;is this reachable?&rdquo; Honest answer: not today, because Payment emits one deterministic result per order and one consumer group processes a partition serially. It is defence against a future second producer — and I would rather have it than discover the gap during an incident.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The sharpest example: claim before you mint</h2>
+        <p>
+          Refresh-token rotation. Two concurrent rotations of the same token both read
+          <code>revokedAt === null</code>. Without a claim, both mint — and a thief racing the
+          honest client never trips reuse detection.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// Claim the row FIRST. Under READ COMMITTED two concurrent rotations of the same token</span></span>
+<span class="code-line">  <span class="code-comment">// both read revokedAt === null; whichever revoke commits second matches zero rows. Without</span></span>
+<span class="code-line">  <span class="code-comment">// this check both would mint, leaving two live tokens in one family — and a thief racing</span></span>
+<span class="code-line">  <span class="code-comment">// the honest client would never trip reuse-detection, which is the whole point of the</span></span>
+<span class="code-line">  <span class="code-comment">// mechanism. The loser rolls back (the caller throws) and gets a 401.</span></span>
+<span class="code-line">  <span class="code-keyword">const</span> claimed = <span class="code-keyword">await</span> tx.<span class="code-function">revokeOne</span>(row.id, now, <span class="code-keyword">true</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (claimed === <span class="code-number">0</span>) <span class="code-keyword">return</span> { <span class="code-property">outcome</span>: <span class="code-string">"RACE"</span>, <span class="code-property">userId</span>: row.userId };</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHY THIS IS AN INTERVIEW ANSWER</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>It is a race with a security consequence, not just a data one.</strong> That distinction is what makes it memorable to an interviewer.</p>
+              <p class="tl"><strong>The order of operations carries the whole fix:</strong> revoke first, mint second. Reversed, the mechanism silently stops detecting theft while every test still passes.</p>
+              <p class="tl"><strong>The return value is the race detector.</strong> <code>revokeOne</code> returns rows affected — zero means someone else claimed it, so this caller must fail rather than proceed.</p>
+              <p class="tl"><em>Volunteer the tradeoff:</em> a 10-second grace window treats an honest double-submit from two tabs as legitimate instead of logging the real user out. It deliberately narrows detection by ten seconds.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/identity/src/sessions.ts</code>
+            <span class="badge-desc">Rotation, family-scoped reuse detection, grace window — a pure function over a tx port.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module4">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right — and note the shape of a strong answer: name the class (TOCTOU / read-then-write), name the isolation level that permits it, then give the fix. Three sentences, no hand-waving."
+               data-explanation-wrong="Neither a bigger machine nor a queue addresses the cause. Two transactions read the same value under READ COMMITTED; the fix must make the check and the write one atomic step.">
+            <h3 class="quiz-question">Under load, a shop oversells its last unit. The code reads stock, checks it is positive, then writes the decrement. Diagnose it in interview language.</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The database is overloaded — scale it up and add a read replica</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Read-then-write TOCTOU under READ COMMITTED — fix with SELECT FOR UPDATE on the stock row, or a conditional UPDATE … WHERE quantity &gt;= n and check rows affected</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Events arrived out of order — add a queue to serialise all checkouts</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly. 'Rows affected' is the race detector, and treating a lost race as a legitimate no-op rather than an error is what keeps the saga from double-emitting."
+               data-explanation-wrong="Retrying a lost CAS re-reads the NEW state and would apply an event that no longer belongs — that is how you get a double confirmation. Throwing turns a normal outcome into an alert.">
+            <h3 class="quiz-question">Your compare-and-set updates zero rows. What should the code do?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Retry the whole operation until it succeeds</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Treat it as a no-op — someone else advanced the state legitimately, so emit nothing and return</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Throw an error so the message is retried by the broker</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Right. Version-guarded atomic upsert is the standard answer for projections, and 'ON CONFLICT DO UPDATE WHERE EXCLUDED.version > version' is the concrete SQL that proves you have written one."
+               data-explanation-wrong="Reading first to decide whether to insert or update reintroduces the exact TOCTOU you are trying to avoid — and ignoring order means a stale event can overwrite a newer one.">
+            <h3 class="quiz-question">A read-model projection receives product updates that can arrive out of order. How do you apply them?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Check whether the row exists, then insert or update accordingly</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A single atomic upsert guarded by version — ON CONFLICT DO UPDATE … WHERE EXCLUDED.version &gt; version — so a stale event is a no-op and no read is needed</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Always apply the latest received event, since order rarely matters in practice</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module4')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module4')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the edge — tokens, rotation, CSRF, breakers, and the two real security bugs a
+          review caught before they shipped.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-5">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 5</span>
+        <h1 class="module-title">The edge: tokens, trust, and two bugs that nearly shipped</h1>
+        <p class="module-subtitle">
+          Auth questions reward precision. &ldquo;We use JWTs&rdquo; is a non-answer; the
+          interesting part is what happens when one is stolen.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Two tokens, two jobs</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🎫</div>
+            <h4 class="pattern-title">Access token — 15 minutes</h4>
+            <p class="pattern-desc">
+              RS256 JWT, verified by the gateway with Identity&rsquo;s <em>public</em> key. Fast,
+              stateless, and <strong>impossible to revoke</strong> — which is exactly why it is
+              short-lived.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔑</div>
+            <h4 class="pattern-title">Refresh token — 7 days</h4>
+            <p class="pattern-desc">
+              <strong>Opaque</strong>, not a JWT. Stored as a sha256 hash so a database leak
+              yields nothing usable. Revocable, because it is a row.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">The answer that shows you have thought about it</strong>
+            <p>
+              &ldquo;Asymmetric signing means only Identity can mint a token, but every service
+              can verify one — no shared secret to leak. The gateway fetches the public keys from
+              a
+              <span class="term" data-definition="JWKS — JSON Web Key Set. An endpoint publishing the public keys a service signs with, each tagged with a key id (kid). Verifiers fetch and cache it, so keys can rotate without redeploying anyone.">JWKS</span>
+              endpoint and picks by <code>kid</code>, so keys rotate without redeploying anything.
+              It keeps the last good set if a fetch returns malformed JSON, because a bad deploy
+              upstream should not lock every user out.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">&ldquo;What if a refresh token is stolen?&rdquo;</h2>
+        <p>
+          This is the question. Rotation alone is not an answer — rotation plus
+          <strong>reuse detection</strong> is.
+        </p>
+
+        <div class="flow-animation" data-steps='[
+          {"highlight":"flow-actor-6","label":"Every refresh mints a new token and revokes the old one. Tokens form a chain, and the chain has a family id."},
+          {"highlight":"flow-actor-7","label":"An attacker steals token N and uses it. It is still valid, so they get token N+1 — no alarm yet. Rotation alone has not saved you.","packet":true,"from":"actor-6","to":"actor-7"},
+          {"highlight":"flow-actor-6","label":"Later the real user refreshes with their copy of token N. But N was already rotated — presenting a revoked token is the signal.","packet":true,"from":"actor-7","to":"actor-6"},
+          {"highlight":"flow-actor-6","label":"Reuse detected: revoke the whole FAMILY. Both the attacker and the user are logged out of this chain; other devices, which have their own families, keep working."},
+          {"highlight":"flow-actor-8","label":"The tradeoff, volunteered before they ask: a 10-second grace window treats an honest double-submit from two tabs as legitimate, deliberately narrowing detection by ten seconds.","packet":true,"from":"actor-6","to":"actor-8"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-6">
+              <div class="flow-actor-icon">🪪</div>
+              <span>Identity</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-7">
+              <div class="flow-actor-icon">🕵️</div>
+              <span>Attacker</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-8">
+              <div class="flow-actor-icon">⚖️</div>
+              <span>Tradeoff</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet-5"></div>
+          <div class="flow-step-label" id="flow-label-5">Step through the theft scenario</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🔍</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why family-scoped, not user-scoped</strong>
+            <p>
+              Revoking every session for the user would log them out of their phone because their
+              laptop was compromised — punishing the victim on every device. One chain, one
+              family, one blast radius.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The gateway&rsquo;s five jobs</h2>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">strip, then inject</code>
+            <span class="badge-desc">Inbound <code>x-user-id</code> headers are removed <em>unconditionally</em> before verified ones are added. Otherwise anyone could claim to be anyone — and downstream services trust that header completely.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">httpOnly cookies + double-submit CSRF</code>
+            <span class="badge-desc">The JWT never touches JavaScript, so XSS cannot read it. A readable CSRF cookie must be echoed in a header — an attacker&rsquo;s site can send the cookie but cannot read it to set the header.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">authz from a cached snapshot</code>
+            <span class="badge-desc">Permissions are a TTL-cached table, not a call per request. The cost is staleness bounded by the TTL, which you should state as a number.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">circuit breaker per upstream</code>
+            <span class="badge-desc">One breaker per service, not per mount — so /products failing tells /comments nothing. Open circuit answers 503 immediately instead of queueing.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">SSE exempt from the breaker</code>
+            <span class="badge-desc">A timeout would kill a healthy long-lived stream after seconds. Knowing which traffic must bypass your own resilience machinery is a senior-level detail.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Two bugs a review caught — both worth telling</h2>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🔓</div>
+            <div>
+              <strong>Case-varied paths bypassed authentication.</strong>
+              The rules table matched <code>/products</code> case-sensitively, but Express matches
+              mounts case-insensitively and the upstream services did too. So
+              <code>POST /Products</code> skipped <em>both</em> the permission check and
+              authentication while still reaching Catalog. Fixed with case-insensitive patterns
+              plus <code>case sensitive routing</code> at the app level — two layers, because one
+              of them is a table a human maintains.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🚧</div>
+            <div>
+              <strong>A proxy library upgrade silently broke every route.</strong>
+              http-proxy-middleware v3 dropped the legacy <code>req.url = req.originalUrl</code>
+              patch, so every <code>app.use()</code>-mounted route forwarded the
+              <em>mount-stripped</em> path — the upstream saw <code>/abc</code> instead of
+              <code>/orders/abc</code> and 404&rsquo;d the entire proxied surface. The test suite
+              was green because the stub had been written to match the broken shape. Tests now
+              assert the exact upstream path.
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">💬</div>
+          <div class="callout-content">
+            <strong class="callout-title">How to tell the second one</strong>
+            <p>
+              &ldquo;The lesson was not about that library. It was that my test asserted against
+              a stub I had written to match my own assumption — so it could only ever confirm it.
+              Now the assertion is on the exact path the upstream receives, which is a fact about
+              the contract rather than about my mental model.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module5">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Rotation alone gives the attacker a fresh token and no alarm; the detection comes from the VICTIM later presenting a token that was already rotated. Family-scoped revocation is what keeps the blast radius to one chain."
+               data-explanation-wrong="Rotation on its own does not detect anything — the thief simply rotates too. And shortening lifetimes only narrows the window; it never tells you a theft occurred.">
+            <h3 class="quiz-question">&ldquo;How would you know a refresh token had been stolen?&rdquo;</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Rotate on every refresh — a stolen token stops working after the next rotation</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Rotation plus reuse detection: an already-rotated token being presented proves the chain leaked, so revoke the whole family — the alarm comes from the victim, not the thief</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Shorten the refresh lifetime to an hour</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Downstream services accept the identity header as fact, so the gateway stripping it unconditionally is the entire basis of that trust. Candidates who miss this have usually never run services behind a gateway."
+               data-explanation-wrong="Validating or logging the header is not enough — the only safe rule is to discard whatever arrived and inject a value you derived yourself from a verified token.">
+            <h3 class="quiz-question">Your gateway forwards <code>x-user-id</code> to services that trust it completely. What must it do with an inbound <code>x-user-id</code> from the client?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Validate that it matches the token, and reject the request if not</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Strip it unconditionally, then inject the value derived from the verified token — never trust the client&rsquo;s copy at all</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Log it for auditing and pass it through</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly — and the reason is worth stating: the attacker's page can cause the cookie to be SENT, but same-origin policy stops it being READ, so it cannot construct the matching header."
+               data-explanation-wrong="A CSRF token is not about secrecy from the user or about signing. It works because a cross-site attacker can trigger a request carrying cookies but cannot read those cookies to mirror one into a header.">
+            <h3 class="quiz-question">Why does double-submit CSRF actually work?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The token is signed, so the server can verify it was issued by us</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A cross-site attacker can make the browser send the cookie but cannot read it, so they cannot mirror it into the required header</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The token expires quickly, so a stolen one is useless</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Last: the behavioural round. Six incidents, in the form that answers &ldquo;tell me
+          about a time&hellip;&rdquo;
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-6">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 6</span>
+        <h1 class="module-title">The behavioural round, with receipts</h1>
+        <p class="module-subtitle">
+          &ldquo;Tell me about a hard bug&rdquo; is a test of how you think, not what broke. Each
+          story below has the same shape: symptom, wrong hypothesis, what proved it, what
+          changed permanently.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The shape of a good answer</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">S</div>
+            <div class="step-body"><strong>Symptom</strong> — what a user or a graph actually showed. Not the cause; you did not know it yet.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">H</div>
+            <div class="step-body"><strong>Hypothesis you rejected</strong> — this is the part that signals seniority. Anyone can narrate a fix; naming what you ruled out and how shows method.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">E</div>
+            <div class="step-body"><strong>Evidence</strong> — the specific observation that settled it. A log line, a metric, a byte count.</div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">C</div>
+            <div class="step-body"><strong>Change that outlives the fix</strong> — the test, the alert, the rule. A story that ends at &ldquo;then I fixed it&rdquo; ends one beat early.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Story 1 — &ldquo;every test passed and the feature did nothing&rdquo;</h2>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">THE INCIDENT</span>
+            <pre><code><span class="code-line"><span class="code-comment">// Distributed tracing shipped. Six tests, all green.</span></span>
+<span class="code-line"><span class="code-comment">// Jaeger showed nothing at all.</span></span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// The SDK guard was keyed on process.env — which is</span></span>
+<span class="code-line"><span class="code-comment">// INHERITED at spawn. tsx respawns into a child, so the</span></span>
+<span class="code-line"><span class="code-comment">// parent started the SDK and the child — where the app</span></span>
+<span class="code-line"><span class="code-comment">// actually runs — skipped it.</span></span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">HOW TO TELL IT</span>
+            <div class="translation-lines">
+              <p class="tl"><strong>Symptom:</strong> &ldquo;Tracing was merged, tests green, and Jaeger had no spans.&rdquo;</p>
+              <p class="tl"><strong>Rejected:</strong> &ldquo;I assumed a collector or sampling misconfiguration and spent time there. Wrong — the SDK was never running in the process that mattered.&rdquo;</p>
+              <p class="tl"><strong>Evidence:</strong> &ldquo;The acceptance check we were using — &lsquo;the SDK logs exactly once&rsquo; — was the <em>signature of the bug</em>. It logged once because only the parent ran it.&rdquo;</p>
+              <p class="tl"><strong>Change:</strong> &ldquo;Every test in that area now has to fail when the wiring is removed. Six plan-supplied tests would have passed against a broken implementation; that rule is what surfaced them.&rdquo;</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Five more, compressed</h2>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">🧊</div>
+            <div>
+              <strong>&ldquo;Works locally, frozen in production.&rdquo;</strong>
+              A live stream advanced perfectly in dev and never moved behind nginx. Cause:
+              <code>proxy_buffering</code> is on by default — sensible for a page, fatal for a
+              stream. <em>Lesson to state:</em> the packaged shape has failure modes the dev shape
+              cannot have, so it needs its own acceptance run.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">📦</div>
+            <div>
+              <strong>&ldquo;Correct code, 404 in production.&rdquo;</strong>
+              A new endpoint worked in tests and 404&rsquo;d through the gateway. The running
+              container predated the route. <em>Lesson:</em> first question in any
+              works-here-not-there bug is whether the running artifact contains the change.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🎲</div>
+            <div>
+              <strong>&ldquo;A flaky test that was not flaky.&rdquo;</strong>
+              Two browser walks failed intermittently and always at the same click. Not
+              randomness — they were racing an asynchronous read-model projection, and a
+              correct 422 came back. <em>Lesson:</em> intermittent plus always-the-same-place
+              means a race, and a race has a signal you can wait on instead of a sleep.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🗑️</div>
+            <div>
+              <strong>&ldquo;A recovery tool that destroyed data.&rdquo;</strong>
+              The dead-letter replay used a no-ack read: a crash between reading and republishing
+              destroyed the only copy of a message that could not be regenerated. Fixed to ack
+              only after the publish confirms. <em>Lesson:</em> recovery paths need the same
+              durability review as the write path — they run precisely when things are already
+              broken.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">🤫</div>
+            <div>
+              <strong>&ldquo;CI was green and doing nothing.&rdquo;</strong>
+              A shell loop used <code>if ! case … esac; then</code>, and POSIX suspends
+              <code>errexit</code> inside a condition context — so a failed migration no longer
+              aborted the job. <em>Lesson:</em> `set -e` is not a guarantee; verify by making a
+              step fail on purpose and watching the pipeline go red.
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🧵</div>
+          <div class="callout-content">
+            <strong class="callout-title">The thread through all six</strong>
+            <p>
+              Every one was found by <em>running the system</em> — in a browser, in the packaged
+              build, against real infrastructure — and every one had a green test suite over it.
+              If you take a single sentence into an interview from this course, take that one.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">&ldquo;How do you know it works?&rdquo;</h2>
+        <p>
+          The question that separates people who shipped from people who coded. Four layers, each
+          answering a different question.
+        </p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📊</div>
+            <h4 class="pattern-title">SLOs with real numbers</h4>
+            <p class="pattern-desc">
+              Saga p99 &lt; 5s, HTTP p95 &lt; 500ms — expressed as k6 thresholds, so a load run
+              exits non-zero when the objective is missed.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔥</div>
+            <h4 class="pattern-title">Burn-rate alerts</h4>
+            <p class="pattern-desc">
+              Alert on the <span class="term" data-definition="Burn rate is how fast you are consuming the error budget an SLO allows. Alerting on burn rate rather than raw error count separates a brief blip from a sustained outage, which is what keeps pagers quiet at 3am.">burn rate</span> of error budget consumption, not on raw error count — which is
+              what stops a 3am page for a one-minute blip.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">💣</div>
+            <h4 class="pattern-title">Chaos scenarios</h4>
+            <p class="pattern-desc">
+              Kill a broker, kill a service, publish a poison message — then assert the system
+              converges and the right alert fires.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">✅</div>
+            <h4 class="pattern-title">Invariant checker</h4>
+            <p class="pattern-desc">
+              Six properties across seven databases and both brokers — no order stuck
+              non-terminal, no unsent outbox row, no reservation both consumed and released. Exit
+              code, not a dashboard.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">The finding worth quoting</strong>
+            <p>
+              &ldquo;Latency alerts do not catch hard outages. An open circuit answers in
+              single-digit milliseconds, so during a chaos run availability collapsed while the
+              latency alert never fired. Availability and latency need separate alerts — I found
+              that by breaking the system on purpose, not by reasoning about it.&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Rehearse it</h2>
+
+        <div class="quiz-container" id="quiz-module6">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right. Naming the hypothesis you rejected and the evidence that settled it is what makes a debugging story credible — it demonstrates method rather than luck."
+               data-explanation-wrong="A blow-by-blow of everything you tried reads as thrashing, and jumping straight to the cause makes it sound like you already knew. The structure interviewers reward is: symptom, rejected hypothesis, decisive evidence, permanent change.">
+            <h3 class="quiz-question">&ldquo;Tell me about the hardest bug you have debugged.&rdquo; What must the answer contain?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A detailed chronology of everything you tried</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The symptom, a hypothesis you ruled out and how, the evidence that settled it, and the change that stops the class of bug recurring</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The root cause stated up front, then the one-line fix</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly — and this generalises: any test written against a stub you authored can only confirm your own assumption. Assert on the observable contract, or verify by removing the implementation and watching it fail."
+               data-explanation-wrong="More coverage of the same kind multiplies the same blind spot, and code review rarely catches a stub that matches the author's mental model — because the reviewer usually shares it.">
+            <h3 class="quiz-question">Your tests pass against a broken implementation because the stub was written to match your assumption. What is the systemic fix?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Increase test coverage until the gap closes</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Assert against the real observable contract, and prove each test fails when the wiring it covers is removed</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Require a second reviewer on all test changes</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Right. An open circuit or a rate limiter returns fast, so latency looks healthy while availability is gone. Saying this shows you have actually watched a system fail rather than only instrumented one."
+               data-explanation-wrong="Both other answers describe real practices, but neither explains why a latency-only alerting strategy misses a total outage — which is the insight the question is fishing for.">
+            <h3 class="quiz-question">Why is a latency alert insufficient on its own?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because percentiles are hard to compute accurately across instances</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because a hard outage is fast — an open circuit or a rate limiter answers in milliseconds, so availability collapses while latency looks excellent</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because latency should be measured client-side rather than server-side</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module6')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module6')">Try Again</button>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The vocabulary sheet</h2>
+        <p>Use these words precisely. Precision is most of what &ldquo;senior&rdquo; sounds like.</p>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">saga · compensating action</code>
+            <span class="badge-desc">Local steps with inverses, standing in for a transaction that cannot exist. Not &ldquo;rollback&rdquo;.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">choreography vs orchestration</code>
+            <span class="badge-desc">React to events vs be told what to do. This system: choreographed execution, centralised state machine.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">dual-write problem · transactional outbox</code>
+            <span class="badge-desc">Two systems, one commit needed. Turns atomicity into delivery.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">at-least-once · idempotent consumer</code>
+            <span class="badge-desc">The realistic delivery guarantee, and the property that makes it safe. Exactly-once effects, not delivery.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">TOCTOU · compare-and-set · SELECT FOR UPDATE</code>
+            <span class="badge-desc">The race, the optimistic fix, the pessimistic fix.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">READ COMMITTED</code>
+            <span class="badge-desc">Postgres&rsquo;s default, and the reason two readers can both see a stale row.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">refresh rotation · reuse detection · family</code>
+            <span class="badge-desc">Rotate, detect replay of a rotated token, revoke one chain rather than one user.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">JWKS · kid</code>
+            <span class="badge-desc">Publish public keys, select by key id, rotate without redeploying verifiers.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">circuit breaker · back-pressure · DLQ</code>
+            <span class="badge-desc">Stop calling the dead, limit what you accept, park what you cannot process.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">SLO · error budget · burn rate</code>
+            <span class="badge-desc">The target, the allowance, and the speed you are spending it — alert on the third.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">read model · projection · eventual consistency</code>
+            <span class="badge-desc">A local copy fed by events, and the gap you must design around rather than wish away.</span>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎓</div>
+          <div class="callout-content">
+            <strong class="callout-title">Final rehearsal</strong>
+            <p>
+              Pick any three terms above and explain each in two sentences: what it is, and what
+              it costs. If the second sentence is hard, that is the topic to revisit — an
+              interviewer will find it before you do.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+  </main>
+
+</body>
+</html>
