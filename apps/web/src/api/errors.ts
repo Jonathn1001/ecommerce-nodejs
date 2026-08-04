@@ -24,3 +24,13 @@ export class SchemaMismatchError extends Error {
     this.name = "SchemaMismatchError";
   }
 }
+
+// Distinct from HttpError(401): this means "no usable session, and refreshing did not help",
+// which is a routing decision (go to /login). A 401 from /auth/login itself is a rejected
+// credential and stays an HttpError so the form can say so without redirecting.
+export class UnauthenticatedError extends Error {
+  constructor() {
+    super("not signed in");
+    this.name = "UnauthenticatedError";
+  }
+}

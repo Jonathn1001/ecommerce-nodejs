@@ -1,9 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { makeQueryClient } from "../../api/queryClient";
 import { HttpError } from "../../api/errors";
 import * as api from "../../api/products";
+import * as cartApi from "../../api/cart";
+import * as session from "../../api/session";
 import { Product } from "../Product";
 
 function renderAt(id: string) {
@@ -61,4 +63,38 @@ it("renders primitive attributes and skips non-primitive ones", async () => {
   expect(screen.getByText("true")).toBeInTheDocument();
   expect(screen.queryByText("sizes")).not.toBeInTheDocument();
   expect(screen.queryByText(/object Object/)).not.toBeInTheDocument();
+});
+
+it("sends a logged-out visitor to sign in, remembering the product", async () => {
+  vi.spyOn(api, "getProduct").mockResolvedValue(detail());
+  vi.spyOn(session, "probeSession").mockResolvedValue({
+    authenticated: false,
+    cart: null,
+  });
+  const router = createMemoryRouter(
+    [
+      { path: "/products/:id", element: <Product /> },
+      { path: "/login", element: <p>sign in please</p> },
+    ],
+    { initialEntries: ["/products/p1"] }
+  );
+  render(
+    <QueryClientProvider client={makeQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /add to cart/i }));
+  expect(await screen.findByText("sign in please")).toBeInTheDocument();
+});
+
+it("adds to the cart when signed in", async () => {
+  vi.spyOn(api, "getProduct").mockResolvedValue(detail());
+  vi.spyOn(session, "probeSession").mockResolvedValue({
+    authenticated: true,
+    cart: { userId: "u1", items: [] },
+  });
+  const add = vi.spyOn(cartApi, "addItem").mockResolvedValue({ productId: "p1" });
+  renderAt("p1");
+  fireEvent.click(await screen.findByRole("button", { name: /add to cart/i }));
+  expect(add).toHaveBeenCalledWith("p1", 1);
 });
