@@ -103,3 +103,11 @@ body {
     animation: none;
   }
 }
+
+/* --color-focus existed from 8a and nothing referenced it, so the app was relying on whatever
+   ring the browser happened to draw. Keyboard focus is the one affordance a mouse user never
+   sees and a keyboard user cannot work without. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
