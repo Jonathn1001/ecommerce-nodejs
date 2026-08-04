@@ -35,7 +35,12 @@ export function Layout() {
             Cart ({count})
           </Link>
           {data?.authenticated ? (
-            <Button onClick={signOut}>Sign out</Button>
+            <>
+              <Link to="/orders" className="datum text-sm">
+                Orders
+              </Link>
+              <Button onClick={signOut}>Sign out</Button>
+            </>
           ) : (
             <Link to="/login" className="datum text-sm underline">
               Sign in

@@ -5,6 +5,7 @@ import { Cart } from "./routes/Cart";
 import { Home } from "./routes/Home";
 import { Login } from "./routes/Login";
 import { Order } from "./routes/Order";
+import { Orders } from "./routes/Orders";
 import { Product } from "./routes/Product";
 import { Register } from "./routes/Register";
 
@@ -21,6 +22,14 @@ const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <Cart />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: "/orders",
+        element: (
+          <RequireAuth>
+            <Orders />
           </RequireAuth>
         ),
       },
