@@ -78,3 +78,36 @@ on infra your local file might be missing, re-diff against
 `infra/postgres/init/01-databases.sql` runs once on first volume creation and
 creates a database per service. To re-run it, remove the volume:
 `docker compose down -v` (destroys all local data).
+
+## Storefront e2e (local only)
+
+Playwright drives three walks against a real stack. CI never runs them: the `quality` job has
+no compose stack, and standing up eight services plus two brokers for three browser walks is
+its own slice (8c spec §F4).
+
+```bash
+docker compose up -d                 # datastores AND the app profile must be healthy
+pnpm --filter @ecom/web dev          # or point WEB_URL at the nginx image
+pnpm --filter @ecom/web e2e
+```
+
+First run only: `pnpm --filter @ecom/web exec playwright install chromium`.
+
+Overridable: `WEB_URL` (default `http://localhost:5173`), `CATALOG_URL` (`:3004`),
+`INVENTORY_URL` (`:3001`).
+
+Two things about this suite are deliberate and worth knowing before changing it:
+
+- **It authenticates once**, in a setup project, and every walk reuses that storage state. The
+  gateway allows ten `/auth/*` requests a minute per apparent client, and a browser cannot
+  rotate `x-forwarded-for` the way `infra/scripts/drive-checkouts.ts` does — a suite that signed
+  in per walk spends its budget on authentication and then fails with 429s that read as
+  application bugs.
+- **Fixtures address Catalog and Inventory directly**, not through the gateway: creating a
+  product is an ADMIN mutation and Inventory is not mounted on the gateway at all. The
+  compensation walk needs a product priced so the total lands on `…01`, which is what makes the
+  simulated gateway decline (`services/payment/src/charge.ts`).
+
+A service image does **not** pick up source changes — the containers carry no volume mounts. After
+touching a service, `docker compose build <service> && docker compose up -d --no-deps <service>`
+before running the walks, or they will exercise the previous build.

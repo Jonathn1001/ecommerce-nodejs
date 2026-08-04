@@ -10,3 +10,5 @@ pnpm-lock.yaml
 CLAUDE.md
 .github
 docker-compose*.yml
+apps/web/test-results
+apps/web/playwright-report
