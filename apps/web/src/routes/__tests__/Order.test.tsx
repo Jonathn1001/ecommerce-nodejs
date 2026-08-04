@@ -7,6 +7,14 @@ import * as ordersApi from "../../api/orders";
 import * as productsApi from "../../api/products";
 import { Order } from "../Order";
 
+// The route opens a real EventSource, which does not exist in jsdom (nor as a Node 22 global).
+// The ladder itself is proved in useOrderStream's own suite; here it is stubbed so these tests
+// stay about the page.
+vi.mock("../../hooks/useOrderStream", () => ({
+  useOrderStream: () => ({ polling: false, failedAt: null }),
+  POLL_INTERVAL_MS: 3000,
+}));
+
 function renderAt(id: string) {
   const router = createMemoryRouter([{ path: "/orders/:id", element: <Order /> }], {
     initialEntries: [`/orders/${id}`],
@@ -53,4 +61,14 @@ it("renders a not-found view for someone else's order", async () => {
   vi.spyOn(productsApi, "listProducts").mockResolvedValue([]);
   renderAt("nope");
   expect(await screen.findByText(/not found/i)).toBeInTheDocument();
+});
+
+it("renders the pipeline for the order's status", async () => {
+  vi.spyOn(ordersApi, "getOrder").mockResolvedValue(
+    detail({ status: "AWAITING_PAYMENT" })
+  );
+  vi.spyOn(productsApi, "listProducts").mockResolvedValue([]);
+  renderAt("o1");
+  expect(await screen.findByText("Inventory reserved")).toBeInTheDocument();
+  expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent("Payment");
 });
