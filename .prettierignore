@@ -12,4 +12,5 @@ CLAUDE.md
 docker-compose*.yml
 apps/web/test-results
 apps/web/playwright-report
-course
+course-interview
+apps/web/e2e/.auth

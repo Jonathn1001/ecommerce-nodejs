@@ -3,16 +3,16 @@ const tseslint = require("typescript-eslint");
 const prettier = require("eslint-config-prettier");
 
 module.exports = tseslint.config(
-  // course/ is a rendered artifact, not source: its styles.css and main.js are copied verbatim
-  // from the codebase-to-course skill and run in a browser, so linting them with this repo's
-  // Node config reports hundreds of "window is not defined". Regenerate, do not repair.
+  // course-interview/ is a rendered artifact, not source: its styles.css and main.js are copied
+  // verbatim from the codebase-to-course skill and run in a browser, so linting them with this
+  // repo's Node config reports hundreds of "window is not defined". Regenerate, do not repair.
   {
     ignores: [
       "**/dist/**",
       "**/generated/**",
       "legacy/**",
       "**/*.config.js",
-      "course/**",
+      "course-interview/**",
     ],
   },
   js.configs.recommended,
