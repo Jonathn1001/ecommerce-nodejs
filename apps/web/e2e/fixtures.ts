@@ -41,7 +41,40 @@ export async function seedProduct(price: number, tag: string): Promise<string> {
   });
   if (!stock.ok) throw new Error(`stock seed failed: ${stock.status}`);
 
+  await waitForOrderProjection(productId);
   return productId;
+}
+
+// Order prices an order from its OWN read model, which Catalog feeds asynchronously over
+// Kafka. Placing an order before that projection lands answers 422 "unpriced" — correct
+// behaviour, and a real property of the system, but it makes a walk that checks out
+// immediately after seeding fail perhaps half the time. Waiting on the projection is the
+// difference between a suite that tests the storefront and one that tests a race.
+async function waitForOrderProjection(
+  productId: string,
+  timeoutMs = 20_000
+): Promise<void> {
+  const { Client } = await import("pg");
+  const client = new Client({
+    connectionString:
+      process.env.ORDER_DB_URL ?? "postgres://ecom:ecom@localhost:5432/order",
+  });
+  await client.connect();
+  try {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const r = await client.query(
+        'SELECT 1 FROM "CatalogReadModel" WHERE "productId" = $1',
+        [productId]
+      );
+      if (r.rowCount && r.rowCount > 0) return;
+      if (Date.now() > deadline)
+        throw new Error(`catalog projection never reached Order for ${productId}`);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  } finally {
+    await client.end();
+  }
 }
 
 export async function addSeededProductToCart(
