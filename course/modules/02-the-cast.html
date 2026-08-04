@@ -1,0 +1,244 @@
+  <section class="module" id="module-2">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 2</span>
+        <h1 class="module-title">The cast, and why there are seven of them</h1>
+        <p class="module-subtitle">
+          Cutting one program into seven is not free. Here is what each one owns — and what the
+          split actually buys you.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Think of a hospital, not a factory</h2>
+        <p>
+          A hospital does not have one person who does everything slightly. It has a radiology
+          department, a pharmacy, a records office. Each holds its own equipment and its own
+          files, and no department rummages through another&rsquo;s cabinets.
+        </p>
+        <p>
+          That is this system. The rule that makes it real:
+          <strong>each service owns its own database, and nobody else may read it.</strong> Engineers call the door in front of them a <span class="term" data-definition="A gateway (or API gateway) is a single entry point that sits in front of many services. It checks identity and permissions, then forwards the request to whichever service owns it. The services themselves are unreachable from outside.">gateway</span>.
+        </p>
+
+        <div class="arch-diagram">
+          <div class="arch-zone arch-zone-browser">
+            <h4 class="arch-zone-label">The only reachable door</h4>
+            <div class="arch-component" data-desc="Gateway (port 8000): checks who you are, decides whether you are allowed, then forwards the request inward. It has NO database of its own — it holds no truth, it only guards.">
+              <div class="arch-icon">🚪</div>
+              <span>Gateway</span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">The seven behind it</h4>
+            <div class="arch-component" data-desc="Identity: accounts, passwords, and the tokens that prove who you are. It alone holds the private key that signs those tokens — nobody else can forge one.">
+              <div class="arch-icon">🪪</div>
+              <span>Identity</span>
+            </div>
+            <div class="arch-component" data-desc="Catalog: products, prices, comments, discounts. When a price changes here, it announces it — Order keeps its own copy rather than asking every time.">
+              <div class="arch-icon">🗂️</div>
+              <span>Catalog</span>
+            </div>
+            <div class="arch-component" data-desc="Order: carts and orders. The centre of the checkout story — it is the only service that knows an order exists and what state it is in.">
+              <div class="arch-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="arch-component" data-desc="Inventory: how much stock exists and what is set aside for whom. A reservation is a promise, not a sale — it can be released again.">
+              <div class="arch-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="arch-component" data-desc="Payment: charges money through a simulated card gateway. It answers succeeded or failed and never decides what happens next — that is Order's job.">
+              <div class="arch-icon">💳</div>
+              <span>Payment</span>
+            </div>
+            <div class="arch-component" data-desc="Notification: sends the confirmation email. It is the last to know and nobody waits for it — if email is slow, checkout is not.">
+              <div class="arch-icon">✉️</div>
+              <span>Notification</span>
+            </div>
+            <div class="arch-component" data-desc="Storefront: the React app you actually click. It is the only piece a human sees, and it talks to nothing but the gateway.">
+              <div class="arch-icon">🖥️</div>
+              <span>Storefront</span>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc">Click any piece to learn what it owns</div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">What the split buys, and what it costs</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">✅</div>
+            <h4 class="pattern-title">Buys: blast radius</h4>
+            <p class="pattern-desc">
+              Email is down? Orders still complete. In one big program, a crash in the email code
+              takes checkout with it.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">🔒</div>
+            <h4 class="pattern-title">Buys: a real boundary</h4>
+            <p class="pattern-desc">
+              Payment cannot read customer emails because it has no access to that table. Not
+              &ldquo;should not&rdquo; — <em>cannot</em>.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">🐌</div>
+            <h4 class="pattern-title">Costs: nothing is instant</h4>
+            <p class="pattern-desc">
+              A fact announced by one service arrives at another a moment later. Code that
+              assumes &ldquo;it is there now&rdquo; will be wrong sometimes.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">🔍</div>
+            <h4 class="pattern-title">Costs: harder to follow</h4>
+            <p class="pattern-desc">
+              One checkout leaves footprints in five programs. That is why this project spends
+              real effort on tracing — Module 5.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Do not copy this shape by default</strong>
+            <p>
+              Seven services for a shop is deliberate overkill — this repo exists to teach the
+              pattern. For most projects, one program is the right answer until it demonstrably
+              is not. Being able to say that out loud is worth more than being able to draw the
+              diagram.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The door, in code</h2>
+        <p>
+          Six lines from the gateway. Read the middle word of each line — that is the entire
+          security model.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  app.<span class="code-function">use</span>(<span class="code-string">"/cart"</span>, authRequired, authz, <span class="code-function">guard</span>(<span class="code-string">"order"</span>, deps.upstreams.order));</span>
+<span class="code-line">  app.<span class="code-function">use</span>(<span class="code-string">"/orders"</span>, authRequired, authz, <span class="code-function">guard</span>(<span class="code-string">"order"</span>, deps.upstreams.order));</span>
+<span class="code-line">  app.<span class="code-function">use</span>(<span class="code-string">"/products"</span>, authOptional, authz, <span class="code-function">guard</span>(<span class="code-string">"catalog"</span>, deps.upstreams.catalog));</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Anything starting with <code>/cart</code>: you must be signed in (<code>authRequired</code>), your permissions are checked, then it is forwarded to Order.</p>
+              <p class="tl">Same for <code>/orders</code>. The gateway does not know what an order <em>is</em> — it only knows who may ask.</p>
+              <p class="tl">Browsing products is <code>authOptional</code>: a stranger may look. That single word is why the shop has a public front page at all.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/gateway/src/app.ts</code>
+            <span class="badge-desc">The real file — open it and you will find exactly these lines.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Match the job to the service</h2>
+        <p>Drag each responsibility onto the service that owns it.</p>
+
+        <div class="dnd-container" id="dnd-module2">
+          <div class="dnd-chips">
+            <div class="dnd-chip" draggable="true" data-answer="identity">Identity</div>
+            <div class="dnd-chip" draggable="true" data-answer="inventory">Inventory</div>
+            <div class="dnd-chip" draggable="true" data-answer="order">Order</div>
+            <div class="dnd-chip" draggable="true" data-answer="catalog">Catalog</div>
+          </div>
+          <div class="dnd-zones">
+            <div class="dnd-zone" data-correct="order">
+              <p class="dnd-zone-label">&ldquo;This order is now awaiting payment.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="inventory">
+              <p class="dnd-zone-label">&ldquo;Two of those are set aside for order 41 — not sold yet.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="catalog">
+              <p class="dnd-zone-label">&ldquo;That product now costs $13.01.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="identity">
+              <p class="dnd-zone-label">&ldquo;This person is who they claim to be, and here is the proof.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+          </div>
+          <button class="btn" onclick="checkDnD('dnd-module2')">Check Matches</button>
+          <button class="btn" onclick="resetDnD('dnd-module2')">Reset</button>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module2">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Prices live in Catalog, but Order keeps its own copy and prices the order from that copy — so the question is whether the copy arrived, not whether the price exists."
+               data-explanation-wrong="Careful — the price does exist, in Catalog. The interesting question is why the service doing the pricing cannot see it yet.">
+            <h3 class="quiz-question">You add a brand-new product, then immediately order it. Checkout fails saying the product has no price — but the price is right there on the product page. What is the most likely explanation?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The price was saved wrong and the page is lying</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Order keeps its own copy of prices, and Catalog&rsquo;s announcement has not reached it yet</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The gateway stripped the price out of the request</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-f"
+               data-explanation-right="Right. Ownership follows the data. Wishlists are a shopper's own list, closest to carts and orders — and putting them in Catalog would mean Catalog storing per-person data it has no business holding."
+               data-explanation-wrong="Think about whose data it is. A wishlist belongs to a person, not to the shop's product records — so it should sit where per-person data already lives.">
+            <h3 class="quiz-question">You want to add a &ldquo;save for later&rdquo; wishlist. Which service should own it, and why?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Catalog — it is about products</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The gateway — it already knows who the user is</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Order — it already owns per-shopper lists of products, which is exactly what a cart is</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the seven cannot read each other&rsquo;s databases — so how does anything get
+          across? Three different pipes, and the choice between them is the interesting part.
+        </p>
+      </div>
+
+    </div>
+  </section>

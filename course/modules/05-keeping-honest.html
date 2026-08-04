@@ -1,0 +1,273 @@
+  <section class="module" id="module-5">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 5</span>
+        <h1 class="module-title">The small machinery that stops it rotting</h1>
+        <p class="module-subtitle">
+          None of these are features. Nobody asks for them. Without them the system slowly tells
+          lies — and every one has a name worth knowing.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Five safeguards</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📮</div>
+            <h4 class="pattern-title">Outbox</h4>
+            <p class="pattern-desc">
+              Announcements are written into the service&rsquo;s own <span class="term" data-definition="A table is one grid of rows and columns inside a database — like a single spreadsheet tab. An outbox is just a table whose rows are messages waiting to be sent.">table</span> in its own database with the change
+              they describe, then mailed out by a loop. Without it, a crash between
+              &ldquo;saved&rdquo; and &ldquo;announced&rdquo; loses the announcement forever.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🧾</div>
+            <h4 class="pattern-title">Processed ledger</h4>
+            <p class="pattern-desc">
+              Each service writes down every message id it has handled. A redelivery is
+              recognised and dropped — the receipt drawer that makes retries safe.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔐</div>
+            <h4 class="pattern-title">Compare-and-set</h4>
+            <p class="pattern-desc">
+              &ldquo;Change the status to CONFIRMED <em>only if</em> it is still
+              AWAITING_PAYMENT.&rdquo; Two events racing cannot both win.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🔌</div>
+            <h4 class="pattern-title">Circuit breaker</h4>
+            <p class="pattern-desc">
+              After enough failures the <span class="term" data-definition="Failing fast means answering &quot;this is broken&quot; immediately instead of making the caller wait for a timeout. A fast honest error is far more useful than a slow one.">fail-fast</span> rule kicks in and the gateway stops calling a sick service and fails fast
+              instead — like a fuse. Hammering something that is down makes outages longer.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">📡</div>
+            <h4 class="pattern-title">Server-sent events</h4>
+            <p class="pattern-desc">
+              One long-lived connection the server writes into as the order changes. That is why
+              the tracker moves with no refresh and no polling.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Compare-and-set, in three lines</h2>
+        <p>
+          The most quietly important lines in the checkout. Read the comment first — the author
+          is explaining a race to you.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// Compare-and-set: `expected` is the status we read above. A lost CAS means another</span></span>
+<span class="code-line">  <span class="code-comment">// event legitimately advanced this order, so this one must emit nothing.</span></span>
+<span class="code-line">  <span class="code-keyword">const</span> moved = <span class="code-keyword">await</span> tx.<span class="code-function">setStatus</span>(p.orderId, next, order.status);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (!moved) <span class="code-keyword">return</span> <span class="code-string">"NO_OP"</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">A note to the next reader: this is a compare-and-set, and here is why it exists.</p>
+              <p class="tl">Losing the race is <em>not</em> an error — it means someone else moved the order first, legitimately.</p>
+              <p class="tl">Try to move the order to the new status, <strong>but only if it is still on the status we read a moment ago</strong>. The database checks and writes in one indivisible step.</p>
+              <p class="tl">If the status had already moved, do nothing at all — no announcement, no email, no second charge. Say &ldquo;no operation&rdquo; and stop.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">Read-then-write is where bugs live</strong>
+            <p>
+              Any time code reads a value, decides something, then writes it back, two copies
+              running at once can both read the old value. This is the single most common source
+              of &ldquo;impossible&rdquo; bugs in busy systems. The phrase to use with an AI
+              assistant is <em>&ldquo;make this a compare-and-set&rdquo;</em> or
+              <em>&ldquo;take a row lock.&rdquo;</em>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Why the tracker moves on its own</h2>
+        <p>
+          The order page does not poll. The browser opens one connection and the server writes
+          into it every time the order changes.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  es.<span class="code-function">addEventListener</span>(<span class="code-string">"status"</span>, (e) =&gt; {</span>
+<span class="code-line">    <span class="code-keyword">let</span> raw: unknown;</span>
+<span class="code-line">    <span class="code-keyword">try</span> {</span>
+<span class="code-line">      raw = JSON.<span class="code-function">parse</span>(e.data ?? <span class="code-string">""</span>);</span>
+<span class="code-line">    } <span class="code-keyword">catch</span> {</span>
+<span class="code-line">      <span class="code-keyword">return</span>;</span>
+<span class="code-line">    }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Listen for messages the server labels <code>status</code>. The label matters — Module 6 is partly about what happens when you get it wrong.</p>
+              <p class="tl">Prepare a slot for whatever arrives, admitting we do not yet know its shape.</p>
+              <p class="tl">Try to read it as structured data…</p>
+              <p class="tl">…because it arrives as plain text and has to be converted.</p>
+              <p class="tl">If that fails — a truncated or malformed message —</p>
+              <p class="tl">ignore this one message and keep the connection alive. A bad frame must not take the page down.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">apps/web/src/api/stream.ts</code>
+            <span class="badge-desc">The browser side of the live tracker.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/app.ts</code>
+            <span class="badge-desc">The server side — it writes one frame per status change, then closes.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">And when the live connection dies?</h2>
+        <p>
+          It will. Tokens expire, networks drop, proxies interfere. The storefront climbs down a
+          ladder rather than retrying forever.
+        </p>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>First failure — refresh and reconnect.</strong>
+              The likeliest cause is an expired sign-in, and that is the one thing the browser
+              can fix by itself.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Third failure — give up on live, start asking.</strong>
+              Close the connection and ask for the order every three seconds instead. Slower,
+              but it works through proxies that block streaming.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>Order settled — stop everything.</strong>
+              A confirmed or cancelled order never changes again, so continuing to ask would be
+              pure waste.
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Never run both at once</strong>
+            <p>
+              If the page asked every three seconds <em>and</em> kept the live connection, the
+              tracker would still look perfect while streaming was completely broken — and
+              nobody would find out for months. Redundancy that hides a failure is not
+              redundancy.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module5">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Saving and announcing must be one write, or a crash in between leaves a change nobody hears about — an order that exists for Order and never existed for anyone else."
+               data-explanation-wrong="Think about a crash in the gap between the two steps. Which piece of the story survives, and which is lost forever?">
+            <h3 class="quiz-question">An AI assistant writes code that saves an order, then publishes the announcement right after. What do you tell it?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Looks fine — that is the normal order of operations</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Write the announcement into the same database transaction as the order and let a separate loop send it — otherwise a crash between the two silently loses it</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Publish first, then save, so the announcement is never missed</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Two copies read the same old count before either wrote, so both believed they had stock. The fix is to make the check and the write one indivisible step — a compare-and-set or a row lock."
+               data-explanation-wrong="The counter is not broken and neither is the queue. Look at the gap between reading the count and writing the new one — and ask what a second copy is doing during that gap.">
+            <h3 class="quiz-question">A shop oversells: two orders both reserved the last unit. The code reads the stock count, checks it is above zero, then writes the new count. What is the diagnosis?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The stock counter is wrong and needs recalculating</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Read-then-write with no lock: both copies read the same value before either wrote</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The messages arrived out of order</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly. A breaker fails fast so the caller gets an honest error immediately instead of a queue of stuck requests — and it gives the sick service room to recover instead of being hammered."
+               data-explanation-wrong="A breaker is not about retrying harder or hiding the failure. Think about what happens to everyone else while requests pile up waiting on something that is already down.">
+            <h3 class="quiz-question">Why would you deliberately make the gateway stop calling a service that is failing?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>To hide the error from users</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>So callers fail fast instead of piling up waiting, and the sick service gets room to recover</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>To save money on server costs</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Last module: five real bugs from this project&rsquo;s own history — every one of them
+          invisible to a passing test suite.
+        </p>
+      </div>
+
+    </div>
+  </section>

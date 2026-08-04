@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inside a Distributed Checkout</title>
+
+  <!-- Google Fonts: Bricolage Grotesque · DM Sans · JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+
+  <style>
+    :root {
+      --color-accent:       #D94F30;
+      --color-accent-hover: #C4432A;
+      --color-accent-light: #FDEEE9;
+      --color-accent-muted: #E8836C;
+    }
+  </style>
+
+  <script src="main.js" defer></script>
+</head>
+<body>
+
+  <nav class="nav" id="nav">
+    <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    <div class="nav-inner">
+      <span class="nav-title">Inside a Distributed Checkout</span>
+      <div class="nav-dots" id="nav-dots" role="tablist">
+        <button class="nav-dot" data-target="module-1" data-tooltip="One click, seven services" role="tab" aria-label="Module 1: One click, seven services"></button>
+        <button class="nav-dot" data-target="module-2" data-tooltip="The cast" role="tab" aria-label="Module 2: The cast"></button>
+        <button class="nav-dot" data-target="module-3" data-tooltip="How they talk" role="tab" aria-label="Module 3: How they talk"></button>
+        <button class="nav-dot" data-target="module-4" data-tooltip="The saga" role="tab" aria-label="Module 4: The saga"></button>
+        <button class="nav-dot" data-target="module-5" data-tooltip="Keeping it honest" role="tab" aria-label="Module 5: Keeping it honest"></button>
+        <button class="nav-dot" data-target="module-6" data-tooltip="When it breaks" role="tab" aria-label="Module 6: When it breaks"></button>
+      </div>
+    </div>
+  </nav>
+
+  <main id="main">
+  <section class="module" id="module-1">
+    <div class="module-content">
+      <div class="module-header">
+
+      <span class="module-number">Module 1</span>
+      <h1 class="module-title">One click. Seven programs.</h1>
+      </div>
+      <div class="screen">
+      <p class="module-subtitle">
+        This project is an online store. You browse products, add one to a cart, and click
+        <strong>Place order</strong>. That is the whole product.
+      </p>
+      <p>
+        What makes it worth studying is what happens <em>after</em> the click. The store is not
+        one program — it is <strong>seven</strong> <span class="term" data-definition="A service is one program that owns one job and runs on its own. Restarting it, or crashing it, does not touch the others. When you tell an AI assistant to &quot;put this in its own service&quot;, this is what you are asking for.">services</span>, running side by side, each owning one job and
+        none of them able to see the others&rsquo; data.
+      </p>
+
+      <div class="callout callout-accent">
+        <div class="callout-icon">🎯</div>
+        <div class="callout-content">
+          <strong class="callout-title">What you will be able to do</strong>
+          <p>
+            By the end you will be able to look at a system like this and say where a bug must
+            live — and tell an AI assistant exactly which piece to change, using the words the
+            piece is actually called.
+          </p>
+        </div>
+      </div>
+
+      </div>
+      <div class="screen">
+      <h2 class="screen-heading">The click, traced</h2>
+      <p>
+        Press <strong>Next Step</strong> and follow one order through the machine. Nobody is in
+        charge here. Each part reacts to the part before it.
+      </p>
+
+      <div class="flow-animation" data-steps='[
+        {"highlight":"flow-actor-1","label":"You click Place order. The browser sends one request — it never talks to the seven services directly."},
+        {"highlight":"flow-actor-2","label":"The gateway checks who you are, then forwards the request inward.","packet":true,"from":"actor-1","to":"actor-2"},
+        {"highlight":"flow-actor-3","label":"Order writes the order down as PENDING and announces: order placed.","packet":true,"from":"actor-2","to":"actor-3"},
+        {"highlight":"flow-actor-4","label":"Inventory hears the announcement and sets your items aside. Nobody asked it to — it was listening.","packet":true,"from":"actor-3","to":"actor-4"},
+        {"highlight":"flow-actor-3","label":"Order hears that the stock is reserved and moves to AWAITING_PAYMENT.","packet":true,"from":"actor-4","to":"actor-3"},
+        {"highlight":"flow-actor-5","label":"Payment is handed a job: charge this amount. It answers succeeded or failed.","packet":true,"from":"actor-3","to":"actor-5"},
+        {"highlight":"flow-actor-3","label":"Order hears the payment result and settles: CONFIRMED. Your screen updates without a refresh.","packet":true,"from":"actor-5","to":"actor-3"}
+      ]'>
+        <div class="flow-actors">
+          <div class="flow-actor" id="flow-actor-1">
+            <div class="flow-actor-icon">🖥️</div>
+            <span>Storefront</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-2">
+            <div class="flow-actor-icon">🚪</div>
+            <span>Gateway</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-3">
+            <div class="flow-actor-icon">📦</div>
+            <span>Order</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-4">
+            <div class="flow-actor-icon">🏷️</div>
+            <span>Inventory</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-5">
+            <div class="flow-actor-icon">💳</div>
+            <span>Payment</span>
+          </div>
+        </div>
+
+        <div class="flow-packet" id="flow-packet"></div>
+
+        <div class="flow-step-label" id="flow-label">Click &ldquo;Next Step&rdquo; to begin</div>
+
+        <div class="flow-controls">
+          <button class="btn flow-next-btn">Next Step</button>
+          <button class="btn flow-reset-btn">Restart</button>
+          <span class="flow-progress"></span>
+        </div>
+      </div>
+
+      </div>
+      <div class="screen">
+      <h2 class="screen-heading">Nobody is the boss</h2>
+      <p>
+        Notice what did <em>not</em> happen: no single program ran that sequence. Order never
+        told Inventory to reserve anything. It announced a fact, and Inventory reacted.
+      </p>
+
+      <div class="pattern-cards">
+        <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+          <div class="pattern-icon" style="background: var(--color-actor-1)">📣</div>
+          <h4 class="pattern-title">Announce, don&rsquo;t command</h4>
+          <p class="pattern-desc">
+            &ldquo;An order was placed&rdquo; is a statement of fact. Whoever cares, reacts.
+            Engineers call this
+            <span class="term" data-definition="Choreography means each part reacts to announcements on its own, with no central conductor. The opposite is orchestration, where one program tells every other program what to do and in what order.">choreography</span>.
+          </p>
+        </div>
+        <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+          <div class="pattern-icon" style="background: var(--color-actor-2)">🧱</div>
+          <h4 class="pattern-title">Separate storage</h4>
+          <p class="pattern-desc">
+            Each service has its own
+            <span class="term" data-definition="A database is a program whose whole job is storing information and finding it again quickly — like a filing cabinet that never forgets where anything is.">database</span>.
+            Payment literally cannot read Order&rsquo;s tables, so it has to ask.
+          </p>
+        </div>
+        <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+          <div class="pattern-icon" style="background: var(--color-actor-3)">🚪</div>
+          <h4 class="pattern-title">One front door</h4>
+          <p class="pattern-desc">
+            The browser only ever reaches the gateway. The other six are unreachable from
+            outside — that is what makes checking identity at the door meaningful.
+          </p>
+        </div>
+      </div>
+
+      </div>
+      <div class="screen">
+      <h2 class="screen-heading">Where the click actually lands</h2>
+      <p>
+        Here is the real code that ends the first step. It is short on purpose — writing the
+        order and announcing it happen together.
+      </p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">CODE</span>
+          <pre><code><span class="code-line">  <span class="code-keyword">await</span> tx.<span class="code-function">enqueue</span>(ORDER_PLACED, orderId, {</span>
+<span class="code-line">    orderId,</span>
+<span class="code-line">    <span class="code-property">userId</span>: p.userId,</span>
+<span class="code-line">    <span class="code-property">items</span>: p.items.<span class="code-function">map</span>((i) =&gt; ({ <span class="code-property">productId</span>: i.productId, <span class="code-property">quantity</span>: i.quantity })),</span>
+<span class="code-line">  });</span>
+<span class="code-line">  <span class="code-keyword">return</span> { <span class="code-property">outcome</span>: <span class="code-string">"PLACED"</span>, orderId };</span></code></pre>
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">PLAIN ENGLISH</span>
+          <div class="translation-lines">
+            <p class="tl">Put an announcement in the outbox: &ldquo;an order was placed.&rdquo; The <code>tx</code> means this is part of the same all-or-nothing write as the order itself.</p>
+            <p class="tl">Which order it was about.</p>
+            <p class="tl">Who placed it — Inventory and Payment will both need this later.</p>
+            <p class="tl">What was in it: product ids and how many. Not prices — Order decides those itself.</p>
+            <p class="tl">End of the announcement.</p>
+            <p class="tl">Tell the caller it worked, and hand back the id so the browser can watch this order.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="badge-list"><div class="badge-item"><code class="badge-code">services/order/src/place-order.ts</code><span class="badge-desc">The real file in the repo — open it and you will see exactly this.</span></div></div>
+
+      <div class="callout callout-info">
+        <div class="callout-icon">💡</div>
+        <div class="callout-content">
+          <strong class="callout-title">The word to steal: <em>outbox</em></strong>
+          <p>
+            The announcement is written into the same database as the order, in the same
+            all-or-nothing write. A separate loop mails it out afterwards. That is why an order
+            can never exist without its announcement — and why saying &ldquo;use the outbox
+            pattern&rdquo; to an AI gets you something durable instead of something hopeful.
+          </p>
+        </div>
+      </div>
+
+      </div>
+      <div class="screen">
+      <h2 class="screen-heading">Check yourself</h2>
+
+      <div class="quiz-container" id="quiz-module1">
+        <div class="quiz-question-block"
+             data-correct="opt-b"
+             data-explanation-right="Right. Order announces a fact and moves on; Inventory reacts because it chose to listen. That is the whole idea of choreography — and it is why adding a seventh listener later changes nothing about Order."
+             data-explanation-wrong="Have another look at the flow. Order never sends anything addressed to Inventory — it publishes one announcement that anyone may listen to.">
+          <h3 class="quiz-question">A colleague says &ldquo;the Order service calls the Inventory service to reserve stock.&rdquo; What is wrong with that sentence?</h3>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>Nothing — that is exactly what happens</span>
+            </button>
+            <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>Order does not call anyone — it announces that an order was placed, and Inventory reacts to the announcement</span>
+            </button>
+            <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>Inventory calls Order, not the other way round</span>
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block"
+             data-correct="opt-f"
+             data-explanation-right="Exactly. The browser talks to one address; everything behind it is unreachable from outside. If a request is rejected before it reaches any service, the gateway is the first place to look."
+             data-explanation-wrong="Think about what the browser can actually reach. Only one of these seven has a door to the outside world.">
+          <h3 class="quiz-question">Sign-in works, but every page that needs a logged-in user comes back rejected. Which piece do you inspect first?</h3>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>Payment — it is the one handling sensitive things</span>
+            </button>
+            <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>Inventory — it is closest to the products</span>
+            </button>
+            <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>The gateway — it is the only piece the browser can reach, and it decides who you are</span>
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <button class="quiz-check-btn" onclick="checkQuiz('quiz-module1')">Check Answers</button>
+        <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module1')">Try Again</button>
+      </div>
+
+      <p class="module-subtitle">
+        Next: meet the seven, and learn why anyone would take one program and cut it into seven
+        pieces on purpose.
+      </p>
+
+    </div></div>
+  </section>
+  <section class="module" id="module-2">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 2</span>
+        <h1 class="module-title">The cast, and why there are seven of them</h1>
+        <p class="module-subtitle">
+          Cutting one program into seven is not free. Here is what each one owns — and what the
+          split actually buys you.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Think of a hospital, not a factory</h2>
+        <p>
+          A hospital does not have one person who does everything slightly. It has a radiology
+          department, a pharmacy, a records office. Each holds its own equipment and its own
+          files, and no department rummages through another&rsquo;s cabinets.
+        </p>
+        <p>
+          That is this system. The rule that makes it real:
+          <strong>each service owns its own database, and nobody else may read it.</strong> Engineers call the door in front of them a <span class="term" data-definition="A gateway (or API gateway) is a single entry point that sits in front of many services. It checks identity and permissions, then forwards the request to whichever service owns it. The services themselves are unreachable from outside.">gateway</span>.
+        </p>
+
+        <div class="arch-diagram">
+          <div class="arch-zone arch-zone-browser">
+            <h4 class="arch-zone-label">The only reachable door</h4>
+            <div class="arch-component" data-desc="Gateway (port 8000): checks who you are, decides whether you are allowed, then forwards the request inward. It has NO database of its own — it holds no truth, it only guards.">
+              <div class="arch-icon">🚪</div>
+              <span>Gateway</span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">The seven behind it</h4>
+            <div class="arch-component" data-desc="Identity: accounts, passwords, and the tokens that prove who you are. It alone holds the private key that signs those tokens — nobody else can forge one.">
+              <div class="arch-icon">🪪</div>
+              <span>Identity</span>
+            </div>
+            <div class="arch-component" data-desc="Catalog: products, prices, comments, discounts. When a price changes here, it announces it — Order keeps its own copy rather than asking every time.">
+              <div class="arch-icon">🗂️</div>
+              <span>Catalog</span>
+            </div>
+            <div class="arch-component" data-desc="Order: carts and orders. The centre of the checkout story — it is the only service that knows an order exists and what state it is in.">
+              <div class="arch-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="arch-component" data-desc="Inventory: how much stock exists and what is set aside for whom. A reservation is a promise, not a sale — it can be released again.">
+              <div class="arch-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="arch-component" data-desc="Payment: charges money through a simulated card gateway. It answers succeeded or failed and never decides what happens next — that is Order's job.">
+              <div class="arch-icon">💳</div>
+              <span>Payment</span>
+            </div>
+            <div class="arch-component" data-desc="Notification: sends the confirmation email. It is the last to know and nobody waits for it — if email is slow, checkout is not.">
+              <div class="arch-icon">✉️</div>
+              <span>Notification</span>
+            </div>
+            <div class="arch-component" data-desc="Storefront: the React app you actually click. It is the only piece a human sees, and it talks to nothing but the gateway.">
+              <div class="arch-icon">🖥️</div>
+              <span>Storefront</span>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc">Click any piece to learn what it owns</div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">What the split buys, and what it costs</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">✅</div>
+            <h4 class="pattern-title">Buys: blast radius</h4>
+            <p class="pattern-desc">
+              Email is down? Orders still complete. In one big program, a crash in the email code
+              takes checkout with it.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">🔒</div>
+            <h4 class="pattern-title">Buys: a real boundary</h4>
+            <p class="pattern-desc">
+              Payment cannot read customer emails because it has no access to that table. Not
+              &ldquo;should not&rdquo; — <em>cannot</em>.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">🐌</div>
+            <h4 class="pattern-title">Costs: nothing is instant</h4>
+            <p class="pattern-desc">
+              A fact announced by one service arrives at another a moment later. Code that
+              assumes &ldquo;it is there now&rdquo; will be wrong sometimes.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">🔍</div>
+            <h4 class="pattern-title">Costs: harder to follow</h4>
+            <p class="pattern-desc">
+              One checkout leaves footprints in five programs. That is why this project spends
+              real effort on tracing — Module 5.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Do not copy this shape by default</strong>
+            <p>
+              Seven services for a shop is deliberate overkill — this repo exists to teach the
+              pattern. For most projects, one program is the right answer until it demonstrably
+              is not. Being able to say that out loud is worth more than being able to draw the
+              diagram.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The door, in code</h2>
+        <p>
+          Six lines from the gateway. Read the middle word of each line — that is the entire
+          security model.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  app.<span class="code-function">use</span>(<span class="code-string">"/cart"</span>, authRequired, authz, <span class="code-function">guard</span>(<span class="code-string">"order"</span>, deps.upstreams.order));</span>
+<span class="code-line">  app.<span class="code-function">use</span>(<span class="code-string">"/orders"</span>, authRequired, authz, <span class="code-function">guard</span>(<span class="code-string">"order"</span>, deps.upstreams.order));</span>
+<span class="code-line">  app.<span class="code-function">use</span>(<span class="code-string">"/products"</span>, authOptional, authz, <span class="code-function">guard</span>(<span class="code-string">"catalog"</span>, deps.upstreams.catalog));</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Anything starting with <code>/cart</code>: you must be signed in (<code>authRequired</code>), your permissions are checked, then it is forwarded to Order.</p>
+              <p class="tl">Same for <code>/orders</code>. The gateway does not know what an order <em>is</em> — it only knows who may ask.</p>
+              <p class="tl">Browsing products is <code>authOptional</code>: a stranger may look. That single word is why the shop has a public front page at all.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/gateway/src/app.ts</code>
+            <span class="badge-desc">The real file — open it and you will find exactly these lines.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Match the job to the service</h2>
+        <p>Drag each responsibility onto the service that owns it.</p>
+
+        <div class="dnd-container" id="dnd-module2">
+          <div class="dnd-chips">
+            <div class="dnd-chip" draggable="true" data-answer="identity">Identity</div>
+            <div class="dnd-chip" draggable="true" data-answer="inventory">Inventory</div>
+            <div class="dnd-chip" draggable="true" data-answer="order">Order</div>
+            <div class="dnd-chip" draggable="true" data-answer="catalog">Catalog</div>
+          </div>
+          <div class="dnd-zones">
+            <div class="dnd-zone" data-correct="order">
+              <p class="dnd-zone-label">&ldquo;This order is now awaiting payment.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="inventory">
+              <p class="dnd-zone-label">&ldquo;Two of those are set aside for order 41 — not sold yet.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="catalog">
+              <p class="dnd-zone-label">&ldquo;That product now costs $13.01.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="identity">
+              <p class="dnd-zone-label">&ldquo;This person is who they claim to be, and here is the proof.&rdquo;</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+          </div>
+          <button class="btn" onclick="checkDnD('dnd-module2')">Check Matches</button>
+          <button class="btn" onclick="resetDnD('dnd-module2')">Reset</button>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module2">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Prices live in Catalog, but Order keeps its own copy and prices the order from that copy — so the question is whether the copy arrived, not whether the price exists."
+               data-explanation-wrong="Careful — the price does exist, in Catalog. The interesting question is why the service doing the pricing cannot see it yet.">
+            <h3 class="quiz-question">You add a brand-new product, then immediately order it. Checkout fails saying the product has no price — but the price is right there on the product page. What is the most likely explanation?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The price was saved wrong and the page is lying</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Order keeps its own copy of prices, and Catalog&rsquo;s announcement has not reached it yet</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The gateway stripped the price out of the request</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-f"
+               data-explanation-right="Right. Ownership follows the data. Wishlists are a shopper's own list, closest to carts and orders — and putting them in Catalog would mean Catalog storing per-person data it has no business holding."
+               data-explanation-wrong="Think about whose data it is. A wishlist belongs to a person, not to the shop's product records — so it should sit where per-person data already lives.">
+            <h3 class="quiz-question">You want to add a &ldquo;save for later&rdquo; wishlist. Which service should own it, and why?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Catalog — it is about products</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The gateway — it already knows who the user is</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Order — it already owns per-shopper lists of products, which is exactly what a cart is</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the seven cannot read each other&rsquo;s databases — so how does anything get
+          across? Three different pipes, and the choice between them is the interesting part.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-3">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 3</span>
+        <h1 class="module-title">Three pipes, and knowing which one to use</h1>
+        <p class="module-subtitle">
+          Seven services, no shared database. Everything they know about each other arrives
+          through one of three channels — and picking the wrong one is a design mistake you can
+          learn to spot.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">A noticeboard, a work tray, and a phone call</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📌</div>
+            <h4 class="pattern-title">Kafka — the noticeboard</h4>
+            <p class="pattern-desc">
+              You pin up a fact: <em>&ldquo;order 41 was placed.&rdquo;</em> Anyone may read it,
+              now or in an hour, and reading it does not take it down. You never learn who read
+              it.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">📥</div>
+            <h4 class="pattern-title">RabbitMQ — the work tray</h4>
+            <p class="pattern-desc">
+              You drop in a job: <em>&ldquo;charge $13.00.&rdquo;</em> Exactly one worker picks
+              it up, and it disappears from the tray. A job nobody can do goes in the
+              <span class="term" data-definition="A dead-letter queue is a holding tray for jobs that failed repeatedly. Rather than losing them or retrying forever, the system parks them somewhere a human can look — 'DLQ' is the abbreviation you will see in code.">dead-letter queue</span>.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">📞</div>
+            <h4 class="pattern-title">HTTP — the phone call</h4>
+            <p class="pattern-desc">
+              You ask and wait for the answer. Used only at the edge, between your browser and
+              the gateway — this is the plain <span class="term" data-definition="HTTP is the language browsers and servers use to ask for things and answer. Every web address you have ever typed travels over it. A request goes out, one response comes back, and the caller waits in between.">HTTP</span> everything on the web runs on, because waiting is exactly what you want when a human is watching.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">The tell</strong>
+            <p>
+              A <strong>fact in the past tense</strong> — &ldquo;payment succeeded&rdquo; — goes
+              on the noticeboard. An <strong>instruction</strong> — &ldquo;charge this
+              card&rdquo; — goes in the work tray. Notice the past tense in the announcement and
+              the imperative in the job. That grammar is the design rule.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Listen in on a checkout</h2>
+        <p>
+          Same story as Module 1, but now you can see which pipe each message travels on. Press
+          <strong>Play All</strong>.
+        </p>
+
+        <div class="chat-window" id="chat-module3">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>📌 <strong>Noticeboard:</strong> order 41 was placed — 1 × Widget, for shopper u9.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="inventory" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">🏷️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Inventory</span>
+                <p>Saw that. One Widget set aside for order 41. 📌 Pinning up: inventory reserved.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>Stock is held, so I move to AWAITING_PAYMENT. 📥 <strong>Work tray:</strong> charge 1300 for order 41.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="payment" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-3)">💳</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-3)">Payment</span>
+                <p>Took the job — nobody else will get it. Charging… approved. 📌 Pinning up: payment succeeded.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="order" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">📦</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Order</span>
+                <p>Then order 41 is CONFIRMED. 📌 Pinning that up too.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="5" data-sender="notification" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-4)">✉️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-4)">Notification</span>
+                <p>I read that. Emailing the shopper. Nobody was waiting on me — checkout finished without me.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="6" data-sender="inventory" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">🏷️</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Inventory</span>
+                <p>Also read it. That reservation is now a sale — the stock is really gone.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-typing" style="display:none">
+            <div class="chat-avatar" id="typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next Message</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">👀</div>
+          <div class="callout-content">
+            <strong class="callout-title">Two readers, one announcement</strong>
+            <p>
+              &ldquo;Order confirmed&rdquo; was read by both Notification and Inventory, and
+              neither knew about the other. Adding a third reader later — analytics, say —
+              requires no change to Order at all. That is the payoff for the noticeboard.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">One outbox, two destinations</h2>
+        <p>
+          Announcements and jobs are written to the <em>same</em> table. A single loop reads it
+          and decides where each row belongs, purely from its type.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">    <span class="code-comment">// Atomic command emission: the ChargePayment outbox row commits with the</span></span>
+<span class="code-line">    <span class="code-comment">// status change; the relay routes it to RabbitMQ payment.charge.</span></span>
+<span class="code-line">    <span class="code-keyword">await</span> tx.<span class="code-function">enqueue</span>(CHARGE_PAYMENT, p.orderId, {</span>
+<span class="code-line">      <span class="code-property">orderId</span>: p.orderId,</span>
+<span class="code-line">      <span class="code-property">userId</span>: order.userId,</span>
+<span class="code-line">      <span class="code-property">amount</span>: order.totalPrice,</span>
+<span class="code-line">    });</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The comment is the design: this job is written in the same all-or-nothing write as the status change.</p>
+              <p class="tl">So an order can never be &ldquo;awaiting payment&rdquo; with no charge job queued, or vice versa.</p>
+              <p class="tl">Write a job row of type <code>CHARGE_PAYMENT</code>. The type is the only thing that decides it goes to the work tray rather than the noticeboard.</p>
+              <p class="tl">Which order to charge for.</p>
+              <p class="tl">Who is paying — Payment needs this to check the charge belongs to the right person.</p>
+              <p class="tl">How much, in whole cents. Never a decimal — money in decimals is how rounding bugs are born.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/transition.ts</code>
+            <span class="badge-desc">Where every status change in the checkout is decided and announced.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module3">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Right. A refund is an instruction aimed at exactly one worker, and doing it twice costs real money — that is a work-tray job, not a noticeboard announcement."
+               data-explanation-wrong="Ask yourself how bad it is if two readers both act on it. Anything where 'two listeners both did it' means real damage belongs in the tray, where exactly one worker takes the job.">
+            <h3 class="quiz-question">You are adding refunds. The instruction &ldquo;refund order 41&rdquo; should travel on which pipe?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The noticeboard — anything the system does should be announced</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The work tray — it is an instruction, and exactly one worker must carry it out once</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A direct phone call from Order to Payment</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Exactly. Emails are read off the noticeboard, so a stalled email reader never blocks the sale. The symptom points at Notification, not at checkout."
+               data-explanation-wrong="Trace the pipes. If checkout finished, every step Order waited on succeeded — so the missing email has to be downstream of a fact that was already pinned up.">
+            <h3 class="quiz-question">Customers say orders complete fine but confirmation emails never arrive. Which is the sound first move?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Check Payment — the charge probably half-failed</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Check whether Notification is reading the noticeboard, and whether its email jobs are piling up in the dead-letter queue</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Check the gateway — it must be dropping the email request</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: what happens when the money fails after the stock is already reserved — the part
+          of checkout that has no undo button.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-4">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 4</span>
+        <h1 class="module-title">There is no undo button</h1>
+        <p class="module-subtitle">
+          Stock is reserved in one database. Money is charged in another. When the money fails,
+          nothing can roll both back together — so the system does something else instead.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Climbing with ropes, not with a safety net</h2>
+        <p>
+          Inside one database you get a
+          <span class="term" data-definition="A transaction is a group of database changes that either all happen or none do. If the power cuts halfway through, the database rewinds — you never end up with half a change.">transaction</span>:
+          all-or-nothing, and the database rewinds for you if anything fails.
+        </p>
+        <p>
+          Across five databases, no such rewind exists. So the checkout is climbed like a
+          multi-pitch route: <strong>each step is anchored before the next begins, and if a
+          later pitch fails you climb back down through the anchors you set</strong> — deliberately,
+          one at a time. That descent has a name: <span class="term" data-definition="Compensation means undoing an earlier step by performing a new, opposite action — releasing a reservation, refunding a charge — because you cannot rewind another service's database. Engineers say 'a compensating action'.">compensation</span>.
+        </p>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🧗</div>
+          <div class="callout-content">
+            <strong class="callout-title">The word to steal: <em>saga</em></strong>
+            <p>
+              A sequence of local steps, each with a matching undo-step, that together behave
+              almost like one transaction. Saying &ldquo;model this as a saga with compensating
+              actions&rdquo; tells an AI assistant far more than &ldquo;make sure it rolls
+              back&rdquo; — because across services, rolling back is not a thing that exists.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The failure path, step by step</h2>
+        <p>
+          The card is declined <em>after</em> the stock was already set aside. Watch what the
+          system does about it.
+        </p>
+
+        <div class="flow-animation" data-steps='[
+          {"highlight":"flow-actor-6","label":"Order 41 is placed. Status: PENDING. Nothing is reserved yet, nothing is charged."},
+          {"highlight":"flow-actor-7","label":"Inventory sets one Widget aside. This is the first anchor — real state changed in a real database.","packet":true,"from":"actor-6","to":"actor-7"},
+          {"highlight":"flow-actor-6","label":"Order moves to AWAITING_PAYMENT. Reaching this status is proof the reservation succeeded.","packet":true,"from":"actor-7","to":"actor-6"},
+          {"highlight":"flow-actor-8","label":"Payment tries the card. DECLINED. It announces payment failed — it does not decide what happens next.","packet":true,"from":"actor-6","to":"actor-8"},
+          {"highlight":"flow-actor-6","label":"Order hears the failure and settles the order as CANCELLED. It announces that too.","packet":true,"from":"actor-8","to":"actor-6"},
+          {"highlight":"flow-actor-7","label":"Inventory hears the cancellation and RELEASES the Widget. The anchor is removed — this is the compensation.","packet":true,"from":"actor-6","to":"actor-7"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-6">
+              <div class="flow-actor-icon">📦</div>
+              <span>Order</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-7">
+              <div class="flow-actor-icon">🏷️</div>
+              <span>Inventory</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-8">
+              <div class="flow-actor-icon">💳</div>
+              <span>Payment</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet-2"></div>
+
+          <div class="flow-step-label" id="flow-label-2">Click &ldquo;Next Step&rdquo; to watch a decline</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <p>
+          Nobody &ldquo;rolled back.&rdquo; A new fact was announced, and the service that had
+          made a promise chose to withdraw it.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The whole checkout, in eleven lines</h2>
+        <p>
+          This is the rulebook. Every state the order can be in, and the only events that may
+          move it — the entire business process, small enough to read in one breath.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"PENDING"</span> &amp;&amp; eventType === INVENTORY_RESERVED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"AWAITING_PAYMENT"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"PENDING"</span> &amp;&amp; eventType === INVENTORY_RESERVATION_FAILED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"CANCELLED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"AWAITING_PAYMENT"</span> &amp;&amp; eventType === PAYMENT_SUCCEEDED)</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-string">"CONFIRMED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (current === <span class="code-string">"AWAITING_PAYMENT"</span> &amp;&amp; eventType === PAYMENT_FAILED) <span class="code-keyword">return</span> <span class="code-string">"CANCELLED"</span>;</span>
+<span class="code-line">  <span class="code-keyword">return</span> <span class="code-keyword">null</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">If we are waiting to reserve stock and the stock got reserved…</p>
+              <p class="tl">…then move to awaiting payment. <strong>This line is why a status can prove a fact:</strong> there is no other way in.</p>
+              <p class="tl">If we are waiting to reserve stock and the reservation failed…</p>
+              <p class="tl">…cancel. Nothing was charged, so there is nothing to undo.</p>
+              <p class="tl">If we are awaiting payment and the money went through…</p>
+              <p class="tl">…confirmed. Done.</p>
+              <p class="tl">If we are awaiting payment and the card was declined, cancel — and that cancellation is what tells Inventory to release the stock.</p>
+              <p class="tl">Anything else: <code>null</code>, meaning &ldquo;this event does not apply here.&rdquo; A late duplicate changes nothing instead of corrupting the order.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/transition.ts</code>
+            <span class="badge-desc">Eleven lines that define the entire checkout. Worth reading in full.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Why that last line matters more than it looks</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔁</div>
+            <h4 class="pattern-title">Messages arrive twice</h4>
+            <p class="pattern-desc">
+              Networks retry. A &ldquo;payment succeeded&rdquo; can genuinely be delivered two
+              times — that is normal, not a bug to be fixed upstream.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🛑</div>
+            <h4 class="pattern-title">The second one changes nothing</h4>
+            <p class="pattern-desc">
+              The order is already CONFIRMED, so the rulebook has no matching line and returns
+              <code>null</code>. No double confirmation, no second email.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🧮</div>
+            <h4 class="pattern-title">The word for it</h4>
+            <p class="pattern-desc">
+              <span class="term" data-definition="Idempotent means doing something twice has the same effect as doing it once. Pressing a lift button twice does not summon two lifts. It is the single most useful property in any system where messages can be redelivered.">Idempotent</span>.
+              Ask for it by name and you will get systems that survive retries.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module4">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. The rulebook only allows AWAITING_PAYMENT to be reached from PENDING via a successful reservation, so the status itself is the evidence. The storefront's tracker relies on precisely this."
+               data-explanation-wrong="Look at the rulebook again. Ask what the ONLY route into AWAITING_PAYMENT is — and what that tells you for free.">
+            <h3 class="quiz-question">An order is sitting at AWAITING_PAYMENT. Without looking at Inventory at all, what do you already know?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Nothing — you would have to ask Inventory</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The stock was successfully reserved — it is the only way into that status</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The customer has already been charged</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right — and notice the shape of the answer: you add a compensating action for the step that already succeeded. That is how every saga step is designed, in pairs."
+               data-explanation-wrong="Remember there is no rollback across services. Whatever already happened has to be undone by a new, opposite action that someone announces and someone else performs.">
+            <h3 class="quiz-question">You add a loyalty-points step that runs after payment and sometimes fails. What must you build alongside it?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A retry that keeps trying until it works</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>An undo-step for what already happened — refund the charge and release the stock — triggered by announcing the failure</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>A transaction spanning Payment, Inventory and the points database</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly. Two orders can each be told 'reserve one' when only one exists, so the check and the write must happen together, under a lock — otherwise both succeed and you have sold stock you do not have."
+               data-explanation-wrong="Think about two shoppers hitting the last item at the same instant. If each one reads 'stock: 1' before either writes, what do both conclude?">
+            <h3 class="quiz-question">Two shoppers order the last item at the same moment. Where is the danger?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>In Payment — it might charge both cards</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>In Inventory — if both read the stock before either writes, both reservations succeed and the shop oversells</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>In the gateway — it should queue the two requests</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module4')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module4')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Next: the small, unglamorous mechanisms that stop all of this from quietly corrupting
+          itself — and how the browser watches an order change without ever refreshing.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-5">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 5</span>
+        <h1 class="module-title">The small machinery that stops it rotting</h1>
+        <p class="module-subtitle">
+          None of these are features. Nobody asks for them. Without them the system slowly tells
+          lies — and every one has a name worth knowing.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Five safeguards</h2>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📮</div>
+            <h4 class="pattern-title">Outbox</h4>
+            <p class="pattern-desc">
+              Announcements are written into the service&rsquo;s own <span class="term" data-definition="A table is one grid of rows and columns inside a database — like a single spreadsheet tab. An outbox is just a table whose rows are messages waiting to be sent.">table</span> in its own database with the change
+              they describe, then mailed out by a loop. Without it, a crash between
+              &ldquo;saved&rdquo; and &ldquo;announced&rdquo; loses the announcement forever.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🧾</div>
+            <h4 class="pattern-title">Processed ledger</h4>
+            <p class="pattern-desc">
+              Each service writes down every message id it has handled. A redelivery is
+              recognised and dropped — the receipt drawer that makes retries safe.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔐</div>
+            <h4 class="pattern-title">Compare-and-set</h4>
+            <p class="pattern-desc">
+              &ldquo;Change the status to CONFIRMED <em>only if</em> it is still
+              AWAITING_PAYMENT.&rdquo; Two events racing cannot both win.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🔌</div>
+            <h4 class="pattern-title">Circuit breaker</h4>
+            <p class="pattern-desc">
+              After enough failures the <span class="term" data-definition="Failing fast means answering &quot;this is broken&quot; immediately instead of making the caller wait for a timeout. A fast honest error is far more useful than a slow one.">fail-fast</span> rule kicks in and the gateway stops calling a sick service and fails fast
+              instead — like a fuse. Hammering something that is down makes outages longer.
+            </p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">📡</div>
+            <h4 class="pattern-title">Server-sent events</h4>
+            <p class="pattern-desc">
+              One long-lived connection the server writes into as the order changes. That is why
+              the tracker moves with no refresh and no polling.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Compare-and-set, in three lines</h2>
+        <p>
+          The most quietly important lines in the checkout. Read the comment first — the author
+          is explaining a race to you.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// Compare-and-set: `expected` is the status we read above. A lost CAS means another</span></span>
+<span class="code-line">  <span class="code-comment">// event legitimately advanced this order, so this one must emit nothing.</span></span>
+<span class="code-line">  <span class="code-keyword">const</span> moved = <span class="code-keyword">await</span> tx.<span class="code-function">setStatus</span>(p.orderId, next, order.status);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (!moved) <span class="code-keyword">return</span> <span class="code-string">"NO_OP"</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">A note to the next reader: this is a compare-and-set, and here is why it exists.</p>
+              <p class="tl">Losing the race is <em>not</em> an error — it means someone else moved the order first, legitimately.</p>
+              <p class="tl">Try to move the order to the new status, <strong>but only if it is still on the status we read a moment ago</strong>. The database checks and writes in one indivisible step.</p>
+              <p class="tl">If the status had already moved, do nothing at all — no announcement, no email, no second charge. Say &ldquo;no operation&rdquo; and stop.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">Read-then-write is where bugs live</strong>
+            <p>
+              Any time code reads a value, decides something, then writes it back, two copies
+              running at once can both read the old value. This is the single most common source
+              of &ldquo;impossible&rdquo; bugs in busy systems. The phrase to use with an AI
+              assistant is <em>&ldquo;make this a compare-and-set&rdquo;</em> or
+              <em>&ldquo;take a row lock.&rdquo;</em>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Why the tracker moves on its own</h2>
+        <p>
+          The order page does not poll. The browser opens one connection and the server writes
+          into it every time the order changes.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code><span class="code-line">  es.<span class="code-function">addEventListener</span>(<span class="code-string">"status"</span>, (e) =&gt; {</span>
+<span class="code-line">    <span class="code-keyword">let</span> raw: unknown;</span>
+<span class="code-line">    <span class="code-keyword">try</span> {</span>
+<span class="code-line">      raw = JSON.<span class="code-function">parse</span>(e.data ?? <span class="code-string">""</span>);</span>
+<span class="code-line">    } <span class="code-keyword">catch</span> {</span>
+<span class="code-line">      <span class="code-keyword">return</span>;</span>
+<span class="code-line">    }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Listen for messages the server labels <code>status</code>. The label matters — Module 6 is partly about what happens when you get it wrong.</p>
+              <p class="tl">Prepare a slot for whatever arrives, admitting we do not yet know its shape.</p>
+              <p class="tl">Try to read it as structured data…</p>
+              <p class="tl">…because it arrives as plain text and has to be converted.</p>
+              <p class="tl">If that fails — a truncated or malformed message —</p>
+              <p class="tl">ignore this one message and keep the connection alive. A bad frame must not take the page down.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">apps/web/src/api/stream.ts</code>
+            <span class="badge-desc">The browser side of the live tracker.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">services/order/src/app.ts</code>
+            <span class="badge-desc">The server side — it writes one frame per status change, then closes.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">And when the live connection dies?</h2>
+        <p>
+          It will. Tokens expire, networks drop, proxies interfere. The storefront climbs down a
+          ladder rather than retrying forever.
+        </p>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>First failure — refresh and reconnect.</strong>
+              The likeliest cause is an expired sign-in, and that is the one thing the browser
+              can fix by itself.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Third failure — give up on live, start asking.</strong>
+              Close the connection and ask for the order every three seconds instead. Slower,
+              but it works through proxies that block streaming.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>Order settled — stop everything.</strong>
+              A confirmed or cancelled order never changes again, so continuing to ask would be
+              pure waste.
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Never run both at once</strong>
+            <p>
+              If the page asked every three seconds <em>and</em> kept the live connection, the
+              tracker would still look perfect while streaming was completely broken — and
+              nobody would find out for months. Redundancy that hides a failure is not
+              redundancy.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module5">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly. Saving and announcing must be one write, or a crash in between leaves a change nobody hears about — an order that exists for Order and never existed for anyone else."
+               data-explanation-wrong="Think about a crash in the gap between the two steps. Which piece of the story survives, and which is lost forever?">
+            <h3 class="quiz-question">An AI assistant writes code that saves an order, then publishes the announcement right after. What do you tell it?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Looks fine — that is the normal order of operations</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Write the announcement into the same database transaction as the order and let a separate loop send it — otherwise a crash between the two silently loses it</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Publish first, then save, so the announcement is never missed</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Two copies read the same old count before either wrote, so both believed they had stock. The fix is to make the check and the write one indivisible step — a compare-and-set or a row lock."
+               data-explanation-wrong="The counter is not broken and neither is the queue. Look at the gap between reading the count and writing the new one — and ask what a second copy is doing during that gap.">
+            <h3 class="quiz-question">A shop oversells: two orders both reserved the last unit. The code reads the stock count, checks it is above zero, then writes the new count. What is the diagnosis?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The stock counter is wrong and needs recalculating</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Read-then-write with no lock: both copies read the same value before either wrote</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The messages arrived out of order</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly. A breaker fails fast so the caller gets an honest error immediately instead of a queue of stuck requests — and it gives the sick service room to recover instead of being hammered."
+               data-explanation-wrong="A breaker is not about retrying harder or hiding the failure. Think about what happens to everyone else while requests pile up waiting on something that is already down.">
+            <h3 class="quiz-question">Why would you deliberately make the gateway stop calling a service that is failing?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>To hide the error from users</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>So callers fail fast instead of piling up waiting, and the sick service gets room to recover</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>To save money on server costs</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">Try Again</button>
+        </div>
+
+        <p class="module-subtitle">
+          Last module: five real bugs from this project&rsquo;s own history — every one of them
+          invisible to a passing test suite.
+        </p>
+      </div>
+
+    </div>
+  </section>
+  <section class="module" id="module-6">
+    <div class="module-content">
+      <div class="module-header">
+        <span class="module-number">Module 6</span>
+        <h1 class="module-title">Five real bugs, and what they all had in common</h1>
+        <p class="module-subtitle">
+          These are not invented examples. Each one happened in this repository, and every single
+          one passed the tests.
+        </p>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">A green test suite is not evidence</h2>
+        <p>
+          Tests check what someone thought to check. These five bugs each lived in the gap
+          between &ldquo;the code is correct&rdquo; and &ldquo;the thing actually works when a
+          person uses it.&rdquo;
+        </p>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">🌑</div>
+            <div>
+              <strong>The app shipped permanently dark.</strong>
+              A styling rule nested inside a &ldquo;if the user prefers dark mode&rdquo; block was
+              silently moved to the top by the build tool, so the dark colours overwrote the light
+              ones for everybody. Every test passed — no test looks at colour.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">📄</div>
+            <div>
+              <strong>Refreshing a product page returned raw data instead of the page.</strong>
+              The web address for the product page and the address for the product data were the
+              same, and the data won. Clicking around worked; pressing F5 did not. The test suite
+              only ever clicked.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🕵️</div>
+            <div>
+              <strong>Tracing was completely dead.</strong>
+              The check for &ldquo;is tracing switched on?&rdquo; was fooled by how the program
+              restarts itself, so the part doing the real work always skipped it. Six tests were
+              written for it. All six passed against a system that recorded nothing.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">📦</div>
+            <div>
+              <strong>A new feature 404&rsquo;d with correct code.</strong>
+              The running <span class="term" data-definition="A container is a packaged copy of a program plus everything it needs to run, frozen at build time. It does not pick up code changes on your machine — you rebuild it. This trips people up constantly.">container</span> had been built before the feature existed. The code was right,
+              the test passed, the running program was six hours old.
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-error)">🧊</div>
+            <div>
+              <strong>The live tracker froze in production only.</strong>
+              The web server in front of the app — a <span class="term" data-definition="A proxy is a server that sits in front of another and passes requests through, often adding caching, compression or security. Nginx is the most common one. It can also change behaviour in ways the app never sees.">proxy</span> — was collecting the live updates and holding them
+              until the end, which for a live stream is forever. Locally, with no such server in
+              front, everything looked perfect.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Spot the one that freezes the tracker</h2>
+        <p>
+          Real configuration for the web server that sits in front of the app in production. One
+          line is missing, and its absence is what froze the tracker. Click the line that needs a
+          companion.
+        </p>
+
+        <div class="bug-challenge">
+          <h3>Which line is incomplete?</h3>
+          <div class="bug-code">
+            <div class="bug-line" data-line="1" onclick="checkBugLine(this, false)">
+              <span class="line-num">1</span>
+              <code>location /api/ {</code>
+            </div>
+            <div class="bug-line bug-target" data-line="2" onclick="checkBugLine(this, true)">
+              <span class="line-num">2</span>
+              <code>  proxy_pass http://gateway:8000/;</code>
+            </div>
+            <div class="bug-line" data-line="3" onclick="checkBugLine(this, false)">
+              <span class="line-num">3</span>
+              <code>  proxy_http_version 1.1;</code>
+            </div>
+            <div class="bug-line" data-line="4" onclick="checkBugLine(this, false)">
+              <span class="line-num">4</span>
+              <code>  proxy_set_header Host $host;</code>
+            </div>
+            <div class="bug-line" data-line="5" onclick="checkBugLine(this, false)">
+              <span class="line-num">5</span>
+              <code>}</code>
+            </div>
+          </div>
+          <div class="bug-feedback" id="bug-feedback"></div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🔧</div>
+          <div class="callout-content">
+            <strong class="callout-title">The missing line</strong>
+            <p>
+              <code>proxy_buffering off;</code> — by default this server gathers a response and
+              forwards it in chunks, which is sensible for a web page and fatal for a live
+              stream. The fix is one line; finding it took a browser and a production-shaped
+              build.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">The bug that could have passed forever</h2>
+        <p>
+          The server labels each live update <code>status</code>. Browsers deliver a labelled
+          message <em>only</em> to a listener asking for that label — the generic
+          &ldquo;any message&rdquo; handler never fires.
+        </p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE — CORRECT</span>
+            <pre><code><span class="code-line">  <span class="code-comment">// NAMED event. The service writes `event: status`, and EventSource routes a named event ONLY</span></span>
+<span class="code-line">  <span class="code-comment">// to a matching addEventListener — `onmessage` would never fire.</span></span>
+<span class="code-line">  es.<span class="code-function">addEventListener</span>(<span class="code-string">"status"</span>, (e) =&gt; {</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">WHY IT IS WRITTEN DOWN</span>
+            <div class="translation-lines">
+              <p class="tl">The comment exists because the wrong version is the obvious one to write.</p>
+              <p class="tl">Had the test been built around the generic handler, every test would have passed against a page that received nothing at all.</p>
+              <p class="tl">So the fix came with a check: swap the label for the generic handler on purpose, and confirm a test turns red. A test that cannot fail is not a test.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🧪</div>
+          <div class="callout-content">
+            <strong class="callout-title">The habit worth stealing: break it on purpose</strong>
+            <p>
+              After an AI writes a test for you, delete the line it is supposed to be testing and
+              run it again. If it still passes, the test is decoration. This one habit catches
+              more fake safety than any amount of reading.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">A debugging order of operations</h2>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>Is the running thing the thing you wrote?</strong>
+              Rebuild and restart before debugging anything. Hours die here.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Which side of the door?</strong>
+              Rejected before it reaches a service means gateway — identity, permissions, rate
+              limits. Wrong data coming back means the service behind it.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>Is anything stuck in a queue?</strong>
+              A dead-letter queue filling up names the failing step precisely, and orders frozen
+              part-way through tell you which service stopped listening.
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <strong>Does it break only in the packaged build?</strong>
+              Then suspect what is different about that shape: the server in front, the built
+              stylesheet, the environment settings — not the logic.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">Check yourself</h2>
+
+        <div class="quiz-container" id="quiz-module6">
+          <div class="quiz-question-block"
+               data-correct="opt-b"
+               data-explanation-right="Exactly — and this is the highest-value question in debugging. The whole class of 'correct code, wrong behaviour' bugs collapses once you confirm the running process actually contains your change."
+               data-explanation-wrong="Before doubting the code that a test just proved correct, ask whether the thing answering requests is even running that code.">
+            <h3 class="quiz-question">Your new endpoint works in tests but returns &ldquo;not found&rdquo; when the app calls it. First question?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Is the code wrong in some way the test missed?</span>
+              </button>
+              <button class="quiz-option" data-value="opt-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Is the running service actually built from this code, or is it an older build?</span>
+              </button>
+              <button class="quiz-option" data-value="opt-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Should I rewrite it a different way?</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-e"
+               data-explanation-right="Right. Works-locally-fails-packaged points at what the packaging adds — the server in front, the built assets, the environment — not at the logic, which is identical in both."
+               data-explanation-wrong="The logic is byte-for-byte the same in both places. Focus on what is present in one environment and absent in the other.">
+            <h3 class="quiz-question">A feature works on your machine and fails in the packaged build. Where do you look?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The application logic — packaging must have changed behaviour</span>
+              </button>
+              <button class="quiz-option" data-value="opt-e" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>What the packaged shape adds: the server in front, the built stylesheet, the environment settings</span>
+              </button>
+              <button class="quiz-option" data-value="opt-f" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The database — production data must be different</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="opt-h"
+               data-explanation-right="Exactly. Remove the wiring the test claims to cover and watch it fail. If it passes without the feature, it was testing nothing — which is how six tracing tests passed against tracing that never ran."
+               data-explanation-wrong="Reading a test tells you what someone intended to check. Only breaking the code on purpose tells you what the test actually notices.">
+            <h3 class="quiz-question">An AI writes five tests for a feature and all pass immediately. How do you check they are real?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="opt-g" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Read them carefully and confirm they look sensible</span>
+              </button>
+              <button class="quiz-option" data-value="opt-h" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Deliberately break the feature and confirm a test turns red</span>
+              </button>
+              <button class="quiz-option" data-value="opt-i" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Ask for more tests until there is good coverage</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module6')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module6')">Try Again</button>
+        </div>
+      </div>
+
+      <div class="screen">
+        <h2 class="screen-heading">What you can now say out loud</h2>
+
+        <div class="badge-list">
+          <div class="badge-item">
+            <code class="badge-code">choreography</code>
+            <span class="badge-desc">Parts react to announcements; no conductor. The opposite is orchestration.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">saga</code>
+            <span class="badge-desc">A sequence of local steps, each with an undo-step, standing in for a transaction that cannot exist.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">compensating action</code>
+            <span class="badge-desc">The undo-step: release the stock, refund the charge.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">outbox pattern</code>
+            <span class="badge-desc">Write the announcement with the change, mail it out afterwards.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">idempotent</code>
+            <span class="badge-desc">Doing it twice is the same as doing it once.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">compare-and-set</code>
+            <span class="badge-desc">Change it only if it still holds the value I read.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">circuit breaker</code>
+            <span class="badge-desc">Stop calling something that is down; fail fast instead.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">dead-letter queue</code>
+            <span class="badge-desc">Where unprocessable jobs are parked for a human.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">server-sent events</code>
+            <span class="badge-desc">One connection the server writes into as things change.</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">eventual consistency</code>
+            <span class="badge-desc">Everyone agrees in a moment — not this instant. Design for the gap.</span>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎓</div>
+          <div class="callout-content">
+            <strong class="callout-title">The one habit</strong>
+            <p>
+              Every serious bug in this project was found by <em>running the thing</em> — in a
+              browser, in the packaged build, against a real database. Not by reading, and not by
+              a green test suite. Build it, then go and use it.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+  </main>
+
+</body>
+</html>
