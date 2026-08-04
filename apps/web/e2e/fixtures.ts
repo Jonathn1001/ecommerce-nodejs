@@ -3,6 +3,11 @@ import { expect, type Page } from "@playwright/test";
 // Written by the setup project, read by every walk. Gitignored: it holds a live session.
 export const STORAGE_STATE = "e2e/.auth/user.json";
 
+// Stamped into every product name and every throwaway account email, so the teardown can find
+// what this suite created with a query instead of an in-memory list — a run that crashes half
+// way still gets cleaned up on the next one (7d's convention).
+export const E2E_TAG = "e2e-";
+
 // Catalog and Inventory are addressed DIRECTLY, not through the gateway. Creating a product is
 // an ADMIN-granted mutation and Inventory is not mounted on the gateway at all, so a fixture
 // that went through the front door would need an admin session the storefront never has. These

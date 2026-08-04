@@ -1,5 +1,5 @@
 import { test as setup, expect } from "@playwright/test";
-import { STORAGE_STATE } from "./fixtures";
+import { E2E_TAG, STORAGE_STATE } from "./fixtures";
 
 // One account for the whole run, saved as storage state.
 //
@@ -9,7 +9,8 @@ import { STORAGE_STATE } from "./fixtures";
 // walk would spend its whole budget on authentication and then fail with 429s that read as
 // application bugs. Registering once costs two.
 setup("register and sign in once", async ({ page }) => {
-  const email = `e2e-${Date.now()}@example.test`;
+  // The tag is what the teardown deletes by, so it has to come from the shared constant.
+  const email = `${E2E_TAG}${Date.now()}@example.test`;
 
   await page.goto("/register");
   await page.getByLabel(/name/i).fill("E2E");

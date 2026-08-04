@@ -24,12 +24,14 @@ export default defineConfig({
   projects: [
     // Authenticates once and saves the state. Every walk starts signed in, so a full run costs
     // two auth requests out of the ten a minute the gateway allows.
-    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    // `teardown` runs the cleanup project once every walk has finished, pass or fail.
+    { name: "setup", testMatch: /auth\.setup\.ts/, teardown: "cleanup" },
+    { name: "cleanup", testMatch: /cleanup\.teardown\.ts/ },
     {
       name: "chromium",
       dependencies: ["setup"],
       use: { browserName: "chromium", storageState: "e2e/.auth/user.json" },
-      testIgnore: /auth\.setup\.ts/,
+      testIgnore: /(auth\.setup|cleanup\.teardown)\.ts/,
     },
   ],
 });
