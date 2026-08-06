@@ -189,7 +189,7 @@ Serial per policy. The only theoretically parallelizable pair is **3 ∥ 4** (ne
 | e2e durable-topic reset · CI matrix refactor | **7** (7a — landed via Task 11) |
 | hello-service fate | decided: kept as canary (7a) |
 | Discount projection into Order's read model | named backlog (post-4, unscheduled) |
-| Stale repo `CLAUDE.md` (still describes the legacy MVC/MongoDB app — misleads every agent session) | one-off chore, next session touching repo docs |
+| Stale repo `CLAUDE.md` (still describes the legacy MVC/MongoDB app — misleads every agent session) | **landed** (2026-08-06) — rewritten against the tree at `e4001dc`: monorepo identity, the `prisma generate` prerequisite, vitest's substring-not-glob filter, the locked broker roles, the saga/outbox/gateway-allowlist patterns, and the traps that cost real time (one `DATABASE_URL` per Vitest process, no volume mounts on service containers, local compose drift). Every line of the old file described `legacy/` |
 
 ## Relative sizes
 
